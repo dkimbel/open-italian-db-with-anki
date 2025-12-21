@@ -60,25 +60,30 @@ NUMBER_TAGS = frozenset({"singular", "plural"})
 # Gender tags
 GENDER_TAGS = frozenset({"masculine", "feminine"})
 
-# Usage label tags (can have multiple per form)
-LABEL_TAGS = frozenset(
-    {
-        "archaic",
-        "literary",
-        "regional",
-        "dialectal",
-        "poetic",
-        "rare",
-        "obsolete",
-        "colloquial",
-        "slang",
-        "dated",
-        "uncommon",
-        "apocopic",  # truncated poetic form
-        "Tuscany",  # regional variant
-        "Latinism",
-    }
-)
+# Usage label tags: maps raw wiktextract tags to canonical labels.
+# Rare/regional labels are merged into broader categories for consistency.
+# The mapping also serves as a whitelist - only keys are recognized as labels.
+LABEL_CANONICAL: dict[str, str] = {
+    # Core labels (map to themselves)
+    "archaic": "archaic",
+    "literary": "literary",
+    "regional": "regional",
+    "dialectal": "dialectal",
+    "poetic": "poetic",
+    "rare": "rare",
+    "obsolete": "obsolete",
+    "colloquial": "colloquial",
+    "dated": "dated",
+    "uncommon": "uncommon",
+    # Merged labels (rare → canonical)
+    "Tuscany": "regional",  # 7 uses → regional
+    "Latinism": "literary",  # 2 uses → literary
+    "slang": "colloquial",  # 5 uses → colloquial
+    # Note: "apocopic" was defined but never appeared in data, so dropped
+}
+
+# For backwards compatibility / set operations
+LABEL_TAGS = frozenset(LABEL_CANONICAL.keys())
 
 # Adjective degree tags
 DEGREE_TAGS = frozenset({"superlative", "comparative"})
@@ -137,9 +142,15 @@ def should_filter_form(tags: list[str]) -> bool:
 
 
 def _extract_labels(tags: set[str]) -> str | None:
-    """Extract labels from tags, returning comma-separated if multiple."""
-    labels = sorted(tags & LABEL_TAGS)
-    return ",".join(labels) if labels else None
+    """Extract labels from tags, mapping to canonical forms.
+
+    Uses LABEL_CANONICAL to map raw wiktextract tags (e.g., "Tuscany", "slang")
+    to canonical labels (e.g., "regional", "colloquial"). Returns comma-separated
+    canonical labels, sorted alphabetically. Duplicates are removed (e.g., if both
+    "Tuscany" and "regional" appear, only "regional" is returned once).
+    """
+    canonical = {LABEL_CANONICAL[tag] for tag in tags if tag in LABEL_CANONICAL}
+    return ",".join(sorted(canonical)) if canonical else None
 
 
 def _extract_tense(tags: set[str], mood: str | None) -> str | None:

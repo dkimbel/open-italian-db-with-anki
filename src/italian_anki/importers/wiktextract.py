@@ -20,7 +20,7 @@ from italian_anki.db.schema import (
 )
 from italian_anki.normalize import normalize
 from italian_anki.tags import (
-    LABEL_TAGS,
+    LABEL_CANONICAL,
     SKIP_TAGS,
     parse_adjective_tags,
     parse_noun_tags,
@@ -41,6 +41,25 @@ POS_FORM_TABLES = {
     "noun": noun_forms,
     "adjective": adjective_forms,
 }
+
+# Tags to filter out from definitions.tags (already extracted to proper columns
+# or not useful for learners).
+DEFINITION_TAG_BLOCKLIST = frozenset(
+    {
+        # Gender - extracted to noun_metadata.gender
+        "masculine",
+        "feminine",
+        "by-personal-gender",  # derivable from context
+        # Transitivity - extracted to verb_metadata.transitivity
+        "transitive",
+        "intransitive",
+        "ditransitive",
+        "ambitransitive",
+        # Form relationship noise
+        "alt-of",
+        "alternative",
+    }
+)
 
 
 def _parse_entry(line: str) -> dict[str, Any] | None:
@@ -84,7 +103,12 @@ def _extract_auxiliary(entry: dict[str, Any]) -> str | None:
 
 
 def _extract_transitivity(entry: dict[str, Any]) -> str | None:
-    """Extract transitivity from senses tags."""
+    """Extract transitivity from senses tags.
+
+    Returns 'transitive', 'intransitive', 'both', or None.
+    Result is stored in verb_metadata.transitivity. The raw transitive/intransitive
+    tags are therefore filtered from definitions.tags (see DEFINITION_TAG_BLOCKLIST).
+    """
     transitive = False
     intransitive = False
 
@@ -218,7 +242,12 @@ def _iter_forms(entry: dict[str, Any], pos: str) -> Iterator[tuple[str, list[str
 
 
 def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | None]]:
-    """Yield (gloss, tags) for each definition."""
+    """Yield (gloss, filtered_tags) for each definition.
+
+    Tags in DEFINITION_TAG_BLOCKLIST are filtered out since they're either:
+    - Already extracted to proper columns (gender → noun_metadata, transitivity → verb_metadata)
+    - Noise that doesn't help learners (alt-of, alternative)
+    """
     for sense in entry.get("senses", []):
         # Skip form-of entries
         if "form_of" in sense:
@@ -230,7 +259,14 @@ def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | 
 
         # Join multiple glosses
         gloss = "; ".join(glosses)
-        tags = sense.get("tags") if sense.get("tags") else None
+
+        # Filter out blocklisted tags
+        raw_tags = sense.get("tags")
+        if raw_tags:
+            filtered = [t for t in raw_tags if t not in DEFINITION_TAG_BLOCKLIST]
+            tags = filtered if filtered else None
+        else:
+            tags = None
 
         yield gloss, tags
 
@@ -560,10 +596,10 @@ def _extract_form_of_info(
         if not form_of_list:
             continue
 
-        # Extract all labels from sense tags
+        # Extract and canonicalize labels from sense tags
         tags = set(sense.get("tags", []))
-        matching_labels = sorted(tags & LABEL_TAGS)
-        labels = ",".join(matching_labels) if matching_labels else None
+        canonical = {LABEL_CANONICAL[t] for t in tags if t in LABEL_CANONICAL}
+        labels = ",".join(sorted(canonical)) if canonical else None
 
         # Only proceed if there are labels to apply
         if labels is None:
