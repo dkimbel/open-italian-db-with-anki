@@ -90,40 +90,44 @@ tasks:
       - uv run italian-anki import-tatoeba {{.CLI_ARGS}}
 
   import-all:
-    desc: Run full import pipeline for a POS (pass --pos=verb|noun|adjective)
+    desc: Run full import pipeline (use POS=verb|noun|adjective for single POS, or omit for all)
     cmds:
-      - task: import-wiktextract
-        vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
-      - task: enrich-formof
-        vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
-      - task: import-morphit
-        vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
-      - task: import-itwac
-        vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
-      - task: import-tatoeba
-        vars: { CLI_ARGS: "" }  # tatoeba links to all lemmas, no POS filter
+      - |
+        if [ -n "{{.POS}}" ]; then
+          positions="{{.POS}}"
+        else
+          positions="verb noun adjective"
+        fi
+        for pos in $positions; do
+          echo "=== Importing $pos ==="
+          uv run italian-anki import-wiktextract --pos=$pos
+          uv run italian-anki enrich-formof --pos=$pos
+          uv run italian-anki import-morphit --pos=$pos
+          uv run italian-anki import-itwac --pos=$pos
+        done
+      - uv run italian-anki import-tatoeba
 
   download-wiktextract:
     desc: Download Wiktextract Italian dictionary
     cmds:
-      - uv run italian-anki download-wiktextract {{.CLI_ARGS}}
+      - uv run italian-anki download-wiktextract {{if .FORCE}}--force{{end}}
 
   download-morphit:
     desc: Download Morph-it! morphological lexicon
     cmds:
-      - uv run italian-anki download-morphit {{.CLI_ARGS}}
+      - uv run italian-anki download-morphit {{if .FORCE}}--force{{end}}
 
   download-itwac:
     desc: Download ItWaC frequency lists
     cmds:
-      - uv run italian-anki download-itwac {{.CLI_ARGS}}
+      - uv run italian-anki download-itwac {{if .FORCE}}--force{{end}}
 
   download-tatoeba:
     desc: Download Tatoeba sentences and links
     cmds:
-      - uv run italian-anki download-tatoeba {{.CLI_ARGS}}
+      - uv run italian-anki download-tatoeba {{if .FORCE}}--force{{end}}
 
   download-all:
     desc: Download all data sources
     cmds:
-      - uv run italian-anki download-all {{.CLI_ARGS}}
+      - uv run italian-anki download-all {{if .FORCE}}--force{{end}}
