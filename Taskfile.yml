@@ -101,3 +101,4 @@ tasks:
       - task: import-itwac
         vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
       - task: import-tatoeba
+        vars: { CLI_ARGS: "" }  # tatoeba links to all lemmas, no POS filter

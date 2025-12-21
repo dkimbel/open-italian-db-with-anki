@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 
 from italian_anki.db import (
-    form_lookup_new,
+    form_lookup,
     get_connection,
     get_engine,
     init_db,
@@ -198,14 +198,14 @@ class TestMorphitImporter:
             with get_connection(db_path) as conn:
                 import_wiktextract(conn, jsonl_path)
                 # Count lookup entries before
-                before_count = conn.execute(select(form_lookup_new)).fetchall()
+                before_count = conn.execute(select(form_lookup)).fetchall()
 
             with get_connection(db_path) as conn:
                 import_morphit(conn, morphit_path)
 
             with get_connection(db_path) as conn:
                 # Count lookup entries after
-                after_count = conn.execute(select(form_lookup_new)).fetchall()
+                after_count = conn.execute(select(form_lookup)).fetchall()
 
                 # Should have at least as many entries as before
                 assert len(after_count) >= len(before_count)

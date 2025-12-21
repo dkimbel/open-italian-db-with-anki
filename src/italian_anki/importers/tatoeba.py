@@ -7,7 +7,7 @@ from sqlalchemy import Connection, select
 
 from italian_anki.db.schema import (
     adjective_forms,
-    form_lookup_new,
+    form_lookup,
     noun_forms,
     sentence_lemmas,
     sentences,
@@ -100,9 +100,9 @@ def _build_form_lookup_dict(conn: Connection) -> dict[str, list[int]]:
         pos_result = conn.execute(select(table.c.id, table.c.lemma_id))
         form_to_lemma[pos] = {row.id: row.lemma_id for row in pos_result}
 
-    # Get form_lookup_new entries
+    # Get form_lookup entries
     lookup_result = conn.execute(
-        select(form_lookup_new.c.form_normalized, form_lookup_new.c.pos, form_lookup_new.c.form_id)
+        select(form_lookup.c.form_normalized, form_lookup.c.pos, form_lookup.c.form_id)
     )
 
     # Build normalized -> lemma_ids dict

@@ -90,8 +90,8 @@ adjective_forms = Table(
 )
 
 # Lookup table for matching forms in sentences (with POS awareness)
-form_lookup_new = Table(
-    "form_lookup_new",
+form_lookup = Table(
+    "form_lookup",
     metadata,
     Column("form_normalized", Text, nullable=False, primary_key=True),  # accent-stripped
     Column("pos", Text, nullable=False, primary_key=True),  # verb, noun, adjective
@@ -172,7 +172,7 @@ Index("idx_noun_forms_form", noun_forms.c.form)
 Index("idx_adjective_forms_lemma", adjective_forms.c.lemma_id)
 Index("idx_adjective_forms_form", adjective_forms.c.form)
 # New form_lookup indexes
-Index("idx_form_lookup_new_form_id", form_lookup_new.c.form_id)
+Index("idx_form_lookup_form_id", form_lookup.c.form_id)
 # Other indexes
 Index("idx_definitions_lemma", definitions.c.lemma_id)
 Index("idx_frequencies_lemma", frequencies.c.lemma_id)

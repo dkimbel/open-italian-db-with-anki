@@ -8,7 +8,7 @@ from sqlalchemy import Connection, Table, select, update
 
 from italian_anki.db.schema import (
     adjective_forms,
-    form_lookup_new,
+    form_lookup,
     lemmas,
     noun_forms,
     verb_forms,
@@ -101,7 +101,7 @@ def import_morphit(
     This enrichment phase:
     1. Parses Morph-it! to build normalized_form -> real_form lookup
     2. Updates form (currently NULL) with real spelling in verb_forms/noun_forms/adjective_forms
-    3. Adds new entries to form_lookup_new for Morph-it! normalized forms
+    3. Adds new entries to form_lookup for Morph-it! normalized forms
 
     Args:
         conn: SQLAlchemy connection
@@ -151,7 +151,7 @@ def import_morphit(
 
         if lookup_batch:
             conn.execute(
-                form_lookup_new.insert().prefix_with("OR IGNORE"),
+                form_lookup.insert().prefix_with("OR IGNORE"),
                 lookup_batch,
             )
             stats["lookup_added"] += len(lookup_batch)

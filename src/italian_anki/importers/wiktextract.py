@@ -10,7 +10,7 @@ from sqlalchemy import Connection, select
 from italian_anki.db.schema import (
     adjective_forms,
     definitions,
-    form_lookup_new,
+    form_lookup,
     frequencies,
     lemmas,
     noun_forms,
@@ -238,7 +238,7 @@ def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | 
 def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     """Clear all existing data for the given POS.
 
-    Deletes in FK-safe order: form_lookup_new → POS form tables
+    Deletes in FK-safe order: form_lookup → POS form tables
     → definitions → frequencies → noun_metadata/verb_metadata → lemmas.
     Returns the number of lemmas cleared.
     """
@@ -253,14 +253,14 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     pos_form_table = POS_FORM_TABLES.get(pos_filter)
 
     # Delete in FK-safe order
-    # 1. form_lookup_new (references *_forms tables)
+    # 1. form_lookup (references *_forms tables)
     if pos_form_table is not None:
         conn.execute(
-            form_lookup_new.delete().where(
-                form_lookup_new.c.form_id.in_(
+            form_lookup.delete().where(
+                form_lookup.c.form_id.in_(
                     select(pos_form_table.c.id).where(pos_form_table.c.lemma_id.in_(existing_ids))
                 ),
-                form_lookup_new.c.pos == pos_filter,
+                form_lookup.c.pos == pos_filter,
             )
         )
         # 2. POS-specific form table
@@ -433,7 +433,7 @@ def import_wiktextract(
         if lookup_batch:
             # Use INSERT OR IGNORE for lookup (same normalized form can map to multiple form_ids)
             conn.execute(
-                form_lookup_new.insert().prefix_with("OR IGNORE"),
+                form_lookup.insert().prefix_with("OR IGNORE"),
                 lookup_batch,
             )
             lookup_batch = []

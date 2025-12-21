@@ -4,7 +4,7 @@ from italian_anki.db.connection import get_connection, get_engine
 from italian_anki.db.schema import (
     adjective_forms,
     definitions,
-    form_lookup_new,
+    form_lookup,
     frequencies,
     init_db,
     lemmas,
@@ -21,7 +21,7 @@ from italian_anki.db.schema import (
 __all__ = [
     "adjective_forms",
     "definitions",
-    "form_lookup_new",
+    "form_lookup",
     "frequencies",
     "get_connection",
     "get_engine",
