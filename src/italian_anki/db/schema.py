@@ -103,11 +103,14 @@ sentence_verbs = Table(
 # Indexes (defined separately for clarity)
 Index("idx_forms_lemma", forms.c.lemma_id)
 Index("idx_forms_form", forms.c.form)
+Index("idx_forms_form_stressed", forms.c.form_stressed)
 Index("idx_form_lookup_form_id", form_lookup.c.form_id)
 Index("idx_definitions_lemma", definitions.c.lemma_id)
 Index("idx_frequencies_lemma", frequencies.c.lemma_id)
 Index("idx_sentences_lang", sentences.c.lang)
 Index("idx_sentence_verbs_lemma", sentence_verbs.c.lemma_id)
+Index("idx_sentence_verbs_sentence", sentence_verbs.c.sentence_id)
+Index("idx_translations_ita", translations.c.ita_sentence_id)
 
 
 def init_db(engine: Engine) -> None:
