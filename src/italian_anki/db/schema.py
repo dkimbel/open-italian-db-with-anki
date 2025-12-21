@@ -23,9 +23,7 @@ lemmas = Table(
     Column("lemma", Text, nullable=False, unique=True),  # normalized (lowercase, no accents)
     Column("lemma_stressed", Text, nullable=False),  # with stress mark (e.g., "parlàre")
     Column("pos", String(20), default="verb"),
-    Column("auxiliary", String(20)),  # 'avere', 'essere', 'both', NULL
-    Column("transitivity", String(20)),  # 'transitive', 'intransitive', 'both', NULL
-    Column("ipa", Text),  # infinitive IPA from Wiktextract
+    Column("ipa", Text),  # IPA pronunciation from Wiktextract
 )
 
 # Frequency data from corpora (separate table for versioning)
@@ -86,8 +84,8 @@ translations = Table(
 )
 
 # Sentence-to-lemma linking (for frequency + examples)
-sentence_verbs = Table(
-    "sentence_verbs",
+sentence_lemmas = Table(
+    "sentence_lemmas",
     metadata,
     Column(
         "sentence_id",
@@ -97,10 +95,29 @@ sentence_verbs = Table(
         primary_key=True,
     ),
     Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False, primary_key=True),
-    Column("form_found", Text),  # the conjugated form matched
+    Column("form_found", Text),  # the inflected form matched
+)
+
+# Noun-specific metadata (gender is derivational for nouns)
+noun_metadata = Table(
+    "noun_metadata",
+    metadata,
+    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), primary_key=True),
+    Column("gender", String(1), nullable=False),  # 'm' or 'f'
+)
+
+# Verb-specific metadata (auxiliary and transitivity)
+verb_metadata = Table(
+    "verb_metadata",
+    metadata,
+    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), primary_key=True),
+    Column("auxiliary", String(20)),  # 'avere', 'essere', 'both', NULL
+    Column("transitivity", String(20)),  # 'transitive', 'intransitive', 'both', NULL
 )
 
 # Indexes (defined separately for clarity)
+Index("idx_noun_metadata_gender", noun_metadata.c.gender)
+Index("idx_verb_metadata_auxiliary", verb_metadata.c.auxiliary)
 Index("idx_forms_lemma", forms.c.lemma_id)
 Index("idx_forms_form", forms.c.form)
 Index("idx_forms_form_stressed", forms.c.form_stressed)
@@ -108,8 +125,8 @@ Index("idx_form_lookup_form_id", form_lookup.c.form_id)
 Index("idx_definitions_lemma", definitions.c.lemma_id)
 Index("idx_frequencies_lemma", frequencies.c.lemma_id)
 Index("idx_sentences_lang", sentences.c.lang)
-Index("idx_sentence_verbs_lemma", sentence_verbs.c.lemma_id)
-Index("idx_sentence_verbs_sentence", sentence_verbs.c.sentence_id)
+Index("idx_sentence_lemmas_lemma", sentence_lemmas.c.lemma_id)
+Index("idx_sentence_lemmas_sentence", sentence_lemmas.c.sentence_id)
 Index("idx_translations_ita", translations.c.ita_sentence_id)
 
 

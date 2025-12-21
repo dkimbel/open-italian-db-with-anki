@@ -1,4 +1,4 @@
-"""Import verb frequency data from ItWaC corpus."""
+"""Import frequency data from ItWaC corpus."""
 
 import csv
 import math
@@ -10,8 +10,20 @@ from sqlalchemy import Connection, select
 from italian_anki.db.schema import frequencies, lemmas
 from italian_anki.normalize import normalize
 
-# ItWaC version extracted from filename (itwac_verbs_lemmas_notail_2_1_0.csv)
-ITWAC_VERSION = "2.1.0"
+# Default CSV filenames by POS (relative to data/itwac/)
+ITWAC_CSV_FILES = {
+    "verb": "itwac_verbs_lemmas_notail_2_1_0.csv",
+    "noun": "itwac_nouns_lemmas_notail_2_0_0.csv",
+    "adjective": "itwac_adj_lemmas_notail_2_1_0.csv",
+}
+
+# ItWaC versions by POS (extracted from filenames)
+ITWAC_VERSIONS = {
+    "verb": "2.1.0",
+    "noun": "2.0.0",
+    "adjective": "2.1.0",
+}
+
 CORPUS_NAME = "itwac"
 
 
@@ -28,10 +40,11 @@ def _compute_zipf(freq: int, corpus_size: float = 1.9e9) -> float:
     return math.log10(fpmw) + 3  # Zipf = log10(fpmw) + 3
 
 
-def _parse_itwac_verbs(csv_path: Path) -> dict[str, tuple[int, float]]:
-    """Parse ItWaC verbs CSV and aggregate frequencies by lemma.
+def _parse_itwac_csv(csv_path: Path) -> dict[str, tuple[int, float]]:
+    """Parse ItWaC CSV and aggregate frequencies by lemma.
 
-    Returns dict mapping normalized_lemma -> (total_freq, max_zipf)
+    Works for verbs, nouns, and adjectives (same CSV format).
+    Returns dict mapping normalized_lemma -> (total_freq, zipf_score)
     """
     lemma_freqs: dict[str, int] = defaultdict(int)
 
@@ -65,12 +78,15 @@ def _parse_itwac_verbs(csv_path: Path) -> dict[str, tuple[int, float]]:
 def import_itwac(
     conn: Connection,
     csv_path: Path,
+    *,
+    pos_filter: str = "verb",
 ) -> dict[str, int]:
     """Import ItWaC frequency data into the database.
 
     Args:
         conn: SQLAlchemy connection
-        csv_path: Path to ItWaC verbs CSV file
+        csv_path: Path to ItWaC CSV file (verb, noun, or adjective)
+        pos_filter: Part of speech to import (default: "verb")
 
     Returns:
         Statistics dict with counts
@@ -78,10 +94,15 @@ def import_itwac(
     stats = {"matched": 0, "not_found": 0}
 
     # Parse and aggregate ItWaC data
-    freq_data = _parse_itwac_verbs(csv_path)
+    freq_data = _parse_itwac_csv(csv_path)
 
-    # Get all verb lemmas from database
-    result = conn.execute(select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == "verb"))
+    # Get version for this POS
+    corpus_version = ITWAC_VERSIONS.get(pos_filter, "unknown")
+
+    # Get lemmas from database for the specified POS
+    result = conn.execute(
+        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == pos_filter)
+    )
 
     insert_batch: list[dict[str, str | int | float]] = []
 
@@ -97,7 +118,7 @@ def import_itwac(
                     "corpus": CORPUS_NAME,
                     "freq_raw": total_freq,
                     "freq_zipf": zipf,
-                    "corpus_version": ITWAC_VERSION,
+                    "corpus_version": corpus_version,
                 }
             )
             stats["matched"] += 1

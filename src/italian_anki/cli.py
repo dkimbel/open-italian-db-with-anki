@@ -11,10 +11,11 @@ from italian_anki.importers import (
     import_tatoeba,
     import_wiktextract,
 )
+from italian_anki.importers.itwac import ITWAC_CSV_FILES
 
 DEFAULT_WIKTEXTRACT_PATH = Path("data/wiktextract/kaikki.org-dictionary-Italian.jsonl")
 DEFAULT_MORPHIT_PATH = Path("data/morphit/morph-it.txt")
-DEFAULT_ITWAC_PATH = Path("data/itwac/itwac_verbs_lemmas_notail_2_1_0.csv")
+DEFAULT_ITWAC_DIR = Path("data/itwac")
 DEFAULT_ITA_SENTENCES_PATH = Path("data/tatoeba/ita_sentences.tsv")
 DEFAULT_ENG_SENTENCES_PATH = Path("data/tatoeba/eng_sentences.tsv")
 DEFAULT_LINKS_PATH = Path("data/tatoeba/links.csv")
@@ -49,6 +50,9 @@ def cmd_import_wiktextract(args: argparse.Namespace) -> int:
     print(f"  Forms:       {stats['forms']:,}")
     print(f"  Definitions: {stats['definitions']:,}")
     print(f"  Skipped:     {stats['skipped']:,}")
+    if args.pos == "noun":
+        print(f"  With gender: {stats.get('nouns_with_gender', 0):,}")
+        print(f"  No gender:   {stats.get('nouns_no_gender', 0):,}")
 
     return 0
 
@@ -69,10 +73,11 @@ def cmd_import_morphit(args: argparse.Namespace) -> int:
 
     print(f"Enriching database: {db_path}")
     print(f"Using Morph-it! data from: {morphit_path}")
+    print(f"Filtering to: {args.pos}")
     print()
 
     with get_connection(db_path) as conn:
-        stats = import_morphit(conn, morphit_path)
+        stats = import_morphit(conn, morphit_path, pos_filter=args.pos)
 
     print()
     print("Enrichment complete!")
@@ -85,8 +90,17 @@ def cmd_import_morphit(args: argparse.Namespace) -> int:
 
 def cmd_import_itwac(args: argparse.Namespace) -> int:
     """Run the ItWaC frequency import command."""
-    csv_path = Path(args.input)
     db_path = Path(args.database)
+
+    # Determine CSV path: use explicit --input, or derive from --pos
+    if args.input:
+        csv_path = Path(args.input)
+    else:
+        csv_filename = ITWAC_CSV_FILES.get(args.pos)
+        if csv_filename is None:
+            print(f"Error: No ItWaC file configured for POS '{args.pos}'", file=sys.stderr)
+            return 1
+        csv_path = DEFAULT_ITWAC_DIR / csv_filename
 
     if not csv_path.exists():
         print(f"Error: Input file not found: {csv_path}", file=sys.stderr)
@@ -99,10 +113,11 @@ def cmd_import_itwac(args: argparse.Namespace) -> int:
 
     print(f"Importing frequencies to: {db_path}")
     print(f"Using ItWaC data from: {csv_path}")
+    print(f"Filtering to: {args.pos}")
     print()
 
     with get_connection(db_path) as conn:
-        stats = import_itwac(conn, csv_path)
+        stats = import_itwac(conn, csv_path, pos_filter=args.pos)
 
     print()
     print("Import complete!")
@@ -149,7 +164,7 @@ def cmd_import_tatoeba(args: argparse.Namespace) -> int:
     print(f"  Italian sentences: {stats['ita_sentences']:,}")
     print(f"  English sentences: {stats['eng_sentences']:,}")
     print(f"  Translations:      {stats['translations']:,}")
-    print(f"  Sentence-verb links: {stats['sentence_verbs']:,}")
+    print(f"  Sentence-lemma links: {stats['sentence_lemmas']:,}")
 
     return 0
 
@@ -209,6 +224,13 @@ def main() -> int:
         default=str(DEFAULT_DB_PATH),
         help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
     )
+    morphit_parser.add_argument(
+        "--pos",
+        type=str,
+        default="verb",
+        choices=["verb", "noun", "adjective"],
+        help="Part of speech to enrich (default: verb)",
+    )
     morphit_parser.set_defaults(func=cmd_import_morphit)
 
     # import-itwac subcommand
@@ -220,8 +242,8 @@ def main() -> int:
         "-i",
         "--input",
         type=str,
-        default=str(DEFAULT_ITWAC_PATH),
-        help=f"Path to ItWaC verbs CSV file (default: {DEFAULT_ITWAC_PATH})",
+        default=None,
+        help="Path to ItWaC CSV file (auto-detected from --pos if not specified)",
     )
     itwac_parser.add_argument(
         "-d",
@@ -229,6 +251,13 @@ def main() -> int:
         type=str,
         default=str(DEFAULT_DB_PATH),
         help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    itwac_parser.add_argument(
+        "--pos",
+        type=str,
+        default="verb",
+        choices=["verb", "noun", "adjective"],
+        help="Part of speech to import (default: verb)",
     )
     itwac_parser.set_defaults(func=cmd_import_itwac)
 

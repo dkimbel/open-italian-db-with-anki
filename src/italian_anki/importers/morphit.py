@@ -5,8 +5,15 @@ from pathlib import Path
 
 from sqlalchemy import Connection, select, update
 
-from italian_anki.db.schema import form_lookup, forms
+from italian_anki.db.schema import form_lookup, forms, lemmas
 from italian_anki.normalize import normalize
+
+# Mapping of our POS names to Morph-it! tag prefixes
+POS_TAG_PREFIXES = {
+    "verb": "VER:",
+    "noun": "NOUN-",
+    "adjective": "ADJ:",
+}
 
 
 def _parse_morphit(
@@ -33,8 +40,22 @@ def _parse_morphit(
             yield form, lemma, tags
 
 
-def _build_verb_lookup(morphit_path: Path) -> dict[str, str]:
-    """Build a lookup dict: normalized_form -> real_form for verbs.
+def _matches_pos(tags: str, pos_filter: str) -> bool:
+    """Check if a Morph-it! tag matches the given POS filter.
+
+    Tag formats:
+    - Verb: VER:{mood}+{tense}+... (e.g., VER:ind+pres+1+s)
+    - Noun: NOUN-{G}:{N} (e.g., NOUN-M:s, NOUN-F:p)
+    - Adjective: ADJ:{deg}+{g}+{n} (e.g., ADJ:pos+m+s)
+    """
+    prefix = POS_TAG_PREFIXES.get(pos_filter)
+    if prefix is None:
+        return False
+    return tags.startswith(prefix)
+
+
+def _build_form_lookup(morphit_path: Path, pos_filter: str = "verb") -> dict[str, str]:
+    """Build a lookup dict: normalized_form -> real_form for the given POS.
 
     When multiple entries exist for the same normalized form,
     the first occurrence is kept.
@@ -42,8 +63,7 @@ def _build_verb_lookup(morphit_path: Path) -> dict[str, str]:
     lookup: dict[str, str] = {}
 
     for form, _lemma, tags in _parse_morphit(morphit_path):
-        # Only include verbs
-        if not tags.startswith("VER:"):
+        if not _matches_pos(tags, pos_filter):
             continue
 
         normalized = normalize(form)
@@ -59,6 +79,7 @@ def import_morphit(
     conn: Connection,
     morphit_path: Path,
     *,
+    pos_filter: str = "verb",
     batch_size: int = 1000,
 ) -> dict[str, int]:
     """Update forms.form with real Italian spelling from Morph-it!.
@@ -71,6 +92,7 @@ def import_morphit(
     Args:
         conn: SQLAlchemy connection
         morphit_path: Path to morph-it.txt file
+        pos_filter: Part of speech to enrich (default: "verb")
         batch_size: Number of updates per batch
 
     Returns:
@@ -78,11 +100,16 @@ def import_morphit(
     """
     stats = {"updated": 0, "not_found": 0, "lookup_added": 0}
 
-    # Build the lookup dictionary
-    verb_lookup = _build_verb_lookup(morphit_path)
+    # Build the lookup dictionary for the specified POS
+    form_lookup_dict = _build_form_lookup(morphit_path, pos_filter)
 
-    # Get all forms that don't have real spelling yet
-    result = conn.execute(select(forms.c.id, forms.c.form_stressed).where(forms.c.form.is_(None)))
+    # Get all forms that don't have real spelling yet, filtered by POS
+    result = conn.execute(
+        select(forms.c.id, forms.c.form_stressed)
+        .select_from(forms.join(lemmas, forms.c.lemma_id == lemmas.c.lemma_id))
+        .where(forms.c.form.is_(None))
+        .where(lemmas.c.pos == pos_filter)
+    )
     all_forms = result.fetchall()
 
     # Batch updates
@@ -115,7 +142,7 @@ def import_morphit(
 
         # Normalize the stressed form to look up in Morph-it!
         normalized = normalize(form_stressed)
-        real_form = verb_lookup.get(normalized)
+        real_form = form_lookup_dict.get(normalized)
 
         if real_form:
             update_batch.append({"id": form_id, "form": real_form})

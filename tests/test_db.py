@@ -76,7 +76,9 @@ class TestSchema:
                 "definitions",
                 "sentences",
                 "translations",
-                "sentence_verbs",
+                "sentence_lemmas",
+                "noun_metadata",
+                "verb_metadata",
             }
             assert expected_tables.issubset(table_names)
         finally:
@@ -114,8 +116,6 @@ class TestSchema:
                         lemma="parlare",
                         lemma_stressed="parlare",
                         pos="verb",
-                        auxiliary="avere",
-                        transitivity="transitive",
                         ipa=ipa,
                     )
                 )
@@ -125,8 +125,6 @@ class TestSchema:
                 assert row.lemma == "parlare"
                 assert row.lemma_stressed == "parlare"
                 assert row.pos == "verb"
-                assert row.auxiliary == "avere"
-                assert row.transitivity == "transitive"
                 assert row.ipa == ipa
         finally:
             db_path.unlink()

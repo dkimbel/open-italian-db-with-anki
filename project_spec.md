@@ -101,8 +101,6 @@ CREATE TABLE lemmas (
     lemma TEXT NOT NULL UNIQUE,       -- normalized (lowercase, no accents)
     lemma_stressed TEXT NOT NULL,     -- with stress mark (e.g., "parlàre")
     pos TEXT DEFAULT 'verb',
-    auxiliary TEXT,                   -- 'avere', 'essere', 'both', NULL
-    transitivity TEXT,                -- 'transitive', 'intransitive', 'both', NULL
     ipa TEXT                          -- infinitive IPA from Wiktextract
 );
 
@@ -159,12 +157,27 @@ CREATE TABLE translations (
 );
 
 -- Sentence-to-lemma linking (for frequency + examples)
-CREATE TABLE sentence_verbs (
+CREATE TABLE sentence_lemmas (
     sentence_id INTEGER,
     lemma_id INTEGER,
-    form_found TEXT,                  -- the conjugated form matched
+    form_found TEXT,                  -- the inflected form matched
     PRIMARY KEY (sentence_id, lemma_id),
     FOREIGN KEY (sentence_id) REFERENCES sentences(sentence_id),
+    FOREIGN KEY (lemma_id) REFERENCES lemmas(lemma_id)
+);
+
+-- Noun-specific metadata (gender is derivational for nouns)
+CREATE TABLE noun_metadata (
+    lemma_id INTEGER PRIMARY KEY,
+    gender TEXT NOT NULL,             -- 'm' or 'f'
+    FOREIGN KEY (lemma_id) REFERENCES lemmas(lemma_id)
+);
+
+-- Verb-specific metadata (auxiliary and transitivity)
+CREATE TABLE verb_metadata (
+    lemma_id INTEGER PRIMARY KEY,
+    auxiliary TEXT,                   -- 'avere', 'essere', 'both', NULL
+    transitivity TEXT,                -- 'transitive', 'intransitive', 'both', NULL
     FOREIGN KEY (lemma_id) REFERENCES lemmas(lemma_id)
 );
 ```
@@ -178,7 +191,10 @@ CREATE INDEX idx_form_lookup_form_id ON form_lookup(form_id);
 CREATE INDEX idx_definitions_lemma ON definitions(lemma_id);
 CREATE INDEX idx_frequencies_lemma ON frequencies(lemma_id);
 CREATE INDEX idx_sentences_lang ON sentences(lang);
-CREATE INDEX idx_sentence_verbs_lemma ON sentence_verbs(lemma_id);
+CREATE INDEX idx_sentence_lemmas_lemma ON sentence_lemmas(lemma_id);
+CREATE INDEX idx_sentence_lemmas_sentence ON sentence_lemmas(sentence_id);
+CREATE INDEX idx_noun_metadata_gender ON noun_metadata(gender);
+CREATE INDEX idx_verb_metadata_auxiliary ON verb_metadata(auxiliary);
 ```
 
 ---
@@ -226,6 +242,12 @@ Example: `Mangiare` → `mangiare`, `reiterare` from both LeFFI and Wiktextract 
 2. Import `links.csv` into `translations`
 3. Tokenize Italian sentences, match against `form_lookup`
 4. Insert matches into `sentence_verbs`
+
+### Phase 6: Import Nouns & Adjectives
+1. Run Wiktextract import with `--pos noun` and `--pos adjective`
+2. Extract gender for nouns → `noun_metadata` table
+3. Run Morph-it! enrichment for nouns and adjectives
+4. Import ItWaC frequencies for nouns and adjectives
 
 ---
 
@@ -303,15 +325,19 @@ data/
 
 ---
 
-## Future: Nouns & Adjectives
+## Nouns & Adjectives (Implemented)
 
-Schema already supports via:
+Nouns and adjectives are now supported:
 - `lemmas.pos` = 'noun' or 'adjective'
-- `lemmas.gender` for nouns
-- `wiktextract_forms` handles plurals, feminine forms via same tag structure
-- `definitions` and `pronunciations` work unchanged
+- `noun_metadata.gender` stores 'm' or 'f' for nouns (gender is derivational)
+- Adjective gender is stored in form tags (gender is inflectional)
+- Same import pipeline: Wiktextract → Morph-it! enrichment → ItWaC frequencies
 
-Wiktextract JSONL contains all POS — just filter differently during import.
+Current stats (Phase 6):
+- 56,923 nouns (56,892 with gender data)
+- 19,883 adjectives
+- Morph-it! enrichment: 14k noun forms, 12k adjective forms
+- ItWaC frequencies: 33k nouns, 13k adjectives
 
 ---
 

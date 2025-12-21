@@ -1,18 +1,18 @@
-"""Import Tatoeba sentences and link to verb lemmas."""
+"""Import Tatoeba sentences and link to lemmas."""
 
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Connection, select
 
-from italian_anki.db.schema import form_lookup, forms, sentence_verbs, sentences, translations
+from italian_anki.db.schema import form_lookup, forms, sentence_lemmas, sentences, translations
 from italian_anki.normalize import normalize, tokenize
 
 
 def _clear_existing_data(conn: Connection) -> int:
     """Clear all existing Tatoeba data.
 
-    Deletes in FK-safe order: sentence_verbs → translations → sentences.
+    Deletes in FK-safe order: sentence_lemmas → translations → sentences.
     Returns the number of sentences cleared.
     """
     # Count existing sentences
@@ -23,7 +23,7 @@ def _clear_existing_data(conn: Connection) -> int:
         return 0
 
     # Delete in FK-safe order
-    conn.execute(sentence_verbs.delete())
+    conn.execute(sentence_lemmas.delete())
     conn.execute(translations.delete())
     conn.execute(sentences.delete())
 
@@ -132,7 +132,7 @@ def import_tatoeba(
         "ita_sentences": 0,
         "eng_sentences": 0,
         "translations": 0,
-        "sentence_verbs": 0,
+        "sentence_lemmas": 0,
     }
 
     # Step 1: Parse Italian sentences
@@ -210,12 +210,12 @@ def import_tatoeba(
                     )
 
         if len(verb_batch) >= batch_size:
-            conn.execute(sentence_verbs.insert(), verb_batch)
-            stats["sentence_verbs"] += len(verb_batch)
+            conn.execute(sentence_lemmas.insert(), verb_batch)
+            stats["sentence_lemmas"] += len(verb_batch)
             verb_batch = []
 
     if verb_batch:
-        conn.execute(sentence_verbs.insert(), verb_batch)
-        stats["sentence_verbs"] += len(verb_batch)
+        conn.execute(sentence_lemmas.insert(), verb_batch)
+        stats["sentence_lemmas"] += len(verb_batch)
 
     return stats

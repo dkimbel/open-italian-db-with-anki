@@ -9,9 +9,11 @@ from italian_anki.db.schema import (
     init_db,
     lemmas,
     metadata,
-    sentence_verbs,
+    noun_metadata,
+    sentence_lemmas,
     sentences,
     translations,
+    verb_metadata,
 )
 
 __all__ = [
@@ -24,7 +26,9 @@ __all__ = [
     "init_db",
     "lemmas",
     "metadata",
-    "sentence_verbs",
+    "noun_metadata",
+    "sentence_lemmas",
     "sentences",
     "translations",
+    "verb_metadata",
 ]

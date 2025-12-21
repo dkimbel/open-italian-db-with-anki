@@ -11,7 +11,7 @@ from italian_anki.db import (
     get_connection,
     get_engine,
     init_db,
-    sentence_verbs,
+    sentence_lemmas,
     sentences,
     translations,
 )
@@ -188,10 +188,10 @@ class TestTatoebaImporter:
                 stats = import_tatoeba(conn, ita_path, eng_path, links_path)
 
             # Should have matched "parlo" and "parla"
-            assert stats["sentence_verbs"] >= 2
+            assert stats["sentence_lemmas"] >= 2
 
             with get_connection(db_path) as conn:
-                matches = conn.execute(select(sentence_verbs)).fetchall()
+                matches = conn.execute(select(sentence_lemmas)).fetchall()
                 assert len(matches) >= 2
 
                 # Check the forms found
@@ -287,7 +287,7 @@ class TestTatoebaImporter:
             assert stats["ita_sentences"] == 0
             assert stats["eng_sentences"] == 0
             assert stats["translations"] == 0
-            assert stats["sentence_verbs"] == 0
+            assert stats["sentence_lemmas"] == 0
 
         finally:
             db_path.unlink()
