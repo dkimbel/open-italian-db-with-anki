@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import Connection, Engine, create_engine, event
 from sqlalchemy.pool import ConnectionPoolEntry
 
-DEFAULT_DB_PATH = Path("italian_anki.db")
+DEFAULT_DB_PATH = Path("italian.db")
 
 _engine_cache: dict[Path, Engine] = {}
 

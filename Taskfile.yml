@@ -102,3 +102,28 @@ tasks:
         vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
       - task: import-tatoeba
         vars: { CLI_ARGS: "" }  # tatoeba links to all lemmas, no POS filter
+
+  download-wiktextract:
+    desc: Download Wiktextract Italian dictionary
+    cmds:
+      - uv run italian-anki download-wiktextract {{.CLI_ARGS}}
+
+  download-morphit:
+    desc: Download Morph-it! morphological lexicon
+    cmds:
+      - uv run italian-anki download-morphit {{.CLI_ARGS}}
+
+  download-itwac:
+    desc: Download ItWaC frequency lists
+    cmds:
+      - uv run italian-anki download-itwac {{.CLI_ARGS}}
+
+  download-tatoeba:
+    desc: Download Tatoeba sentences and links
+    cmds:
+      - uv run italian-anki download-tatoeba {{.CLI_ARGS}}
+
+  download-all:
+    desc: Download all data sources
+    cmds:
+      - uv run italian-anki download-all {{.CLI_ARGS}}

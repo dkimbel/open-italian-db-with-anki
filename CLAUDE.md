@@ -7,6 +7,7 @@ Generate Anki flashcard decks for learning Italian using linguistic databases.
 - **Full spec**: See `project_spec.md` for complete details
 - **Run checks**: `task check`
 - **Run tests**: `task test`
+- **Download data**: `task download-all` (skips existing files, ~1.3GB)
 - **Import data**: `task import-wiktextract` (idempotent)
 - **Enrichment**: `task import-morphit && task import-itwac`
 
@@ -29,7 +30,7 @@ Current database stats:
 
 ## Key Files
 
-- `italian_anki.db` - SQLite database (generated, not committed)
+- `italian.db` - SQLite database (generated, not committed)
 - `src/italian_anki/importers/` - Data importers
 - `src/italian_anki/db/` - Database schema and connection
 - `src/italian_anki/normalize.py` - Text normalization utilities

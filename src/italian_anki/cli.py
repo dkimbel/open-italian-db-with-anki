@@ -5,6 +5,13 @@ import sys
 from pathlib import Path
 
 from italian_anki.db import get_connection, get_engine, init_db
+from italian_anki.download import (
+    download_all,
+    download_itwac,
+    download_morphit,
+    download_tatoeba,
+    download_wiktextract,
+)
 from italian_anki.importers import (
     import_itwac,
     import_morphit,
@@ -20,7 +27,7 @@ DEFAULT_ITWAC_DIR = Path("data/itwac")
 DEFAULT_ITA_SENTENCES_PATH = Path("data/tatoeba/ita_sentences.tsv")
 DEFAULT_ENG_SENTENCES_PATH = Path("data/tatoeba/eng_sentences.tsv")
 DEFAULT_LINKS_PATH = Path("data/tatoeba/links.csv")
-DEFAULT_DB_PATH = Path("italian_anki.db")
+DEFAULT_DB_PATH = Path("italian.db")
 
 
 def cmd_import_wiktextract(args: argparse.Namespace) -> int:
@@ -202,6 +209,42 @@ def cmd_import_tatoeba(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_download_wiktextract(args: argparse.Namespace) -> int:
+    """Download Wiktextract Italian dictionary."""
+    stats = download_wiktextract(force=args.force)
+    if stats["downloaded"] > 0:
+        print("Download complete!")
+    return 0
+
+
+def cmd_download_morphit(args: argparse.Namespace) -> int:
+    """Download Morph-it! morphological lexicon."""
+    stats = download_morphit(force=args.force)
+    if stats["downloaded"] > 0:
+        print("Download complete!")
+    return 0
+
+
+def cmd_download_itwac(args: argparse.Namespace) -> int:
+    """Download ItWaC frequency lists."""
+    stats = download_itwac(force=args.force)
+    print(f"Downloaded: {stats['downloaded']} files, Skipped: {stats['skipped']} files")
+    return 0
+
+
+def cmd_download_tatoeba(args: argparse.Namespace) -> int:
+    """Download Tatoeba sentences and links."""
+    stats = download_tatoeba(force=args.force)
+    print(f"Downloaded: {stats['downloaded']} files, Skipped: {stats['skipped']} files")
+    return 0
+
+
+def cmd_download_all(args: argparse.Namespace) -> int:
+    """Download all data sources."""
+    download_all(force=args.force)
+    return 0
+
+
 def main() -> int:
     """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(
@@ -353,6 +396,66 @@ def main() -> int:
         help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
     )
     tatoeba_parser.set_defaults(func=cmd_import_tatoeba)
+
+    # download-wiktextract subcommand
+    dl_wikt_parser = subparsers.add_parser(
+        "download-wiktextract",
+        help="Download Wiktextract Italian dictionary",
+    )
+    dl_wikt_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if file already exists",
+    )
+    dl_wikt_parser.set_defaults(func=cmd_download_wiktextract)
+
+    # download-morphit subcommand
+    dl_morphit_parser = subparsers.add_parser(
+        "download-morphit",
+        help="Download Morph-it! morphological lexicon",
+    )
+    dl_morphit_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if file already exists",
+    )
+    dl_morphit_parser.set_defaults(func=cmd_download_morphit)
+
+    # download-itwac subcommand
+    dl_itwac_parser = subparsers.add_parser(
+        "download-itwac",
+        help="Download ItWaC frequency lists",
+    )
+    dl_itwac_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if files already exist",
+    )
+    dl_itwac_parser.set_defaults(func=cmd_download_itwac)
+
+    # download-tatoeba subcommand
+    dl_tatoeba_parser = subparsers.add_parser(
+        "download-tatoeba",
+        help="Download Tatoeba sentences and links",
+    )
+    dl_tatoeba_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if files already exist",
+    )
+    dl_tatoeba_parser.set_defaults(func=cmd_download_tatoeba)
+
+    # download-all subcommand
+    dl_all_parser = subparsers.add_parser(
+        "download-all",
+        help="Download all data sources",
+    )
+    dl_all_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if files already exist",
+    )
+    dl_all_parser.set_defaults(func=cmd_download_all)
 
     args = parser.parse_args()
     return args.func(args)
