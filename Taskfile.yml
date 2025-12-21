@@ -68,3 +68,13 @@ tasks:
     desc: Import Wiktextract data into database
     cmds:
       - uv run italian-anki import-wiktextract {{.CLI_ARGS}}
+
+  import-morphit:
+    desc: Enrich forms with real Italian spelling from Morph-it!
+    cmds:
+      - uv run italian-anki import-morphit {{.CLI_ARGS}}
+
+  import-itwac:
+    desc: Import frequency data from ItWaC corpus
+    cmds:
+      - uv run italian-anki import-itwac {{.CLI_ARGS}}

@@ -5,9 +5,9 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Connection
+from sqlalchemy import Connection, select
 
-from italian_anki.db.schema import definitions, form_lookup, forms, lemmas
+from italian_anki.db.schema import definitions, form_lookup, forms, frequencies, lemmas
 from italian_anki.normalize import normalize
 
 # Tags to skip when inserting forms
@@ -134,6 +134,38 @@ def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | 
         yield gloss, tags
 
 
+def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
+    """Clear all existing data for the given POS.
+
+    Deletes in FK-safe order: form_lookup → forms → definitions → frequencies → lemmas.
+    Returns the number of lemmas cleared.
+    """
+    # Get existing lemma IDs for this POS
+    result = conn.execute(select(lemmas.c.lemma_id).where(lemmas.c.pos == pos_filter))
+    existing_ids = [row.lemma_id for row in result]
+
+    if not existing_ids:
+        return 0
+
+    # Delete in FK-safe order
+    # 1. form_lookup (references forms)
+    conn.execute(
+        form_lookup.delete().where(
+            form_lookup.c.form_id.in_(select(forms.c.id).where(forms.c.lemma_id.in_(existing_ids)))
+        )
+    )
+    # 2. forms (references lemmas)
+    conn.execute(forms.delete().where(forms.c.lemma_id.in_(existing_ids)))
+    # 3. definitions (references lemmas)
+    conn.execute(definitions.delete().where(definitions.c.lemma_id.in_(existing_ids)))
+    # 4. frequencies (references lemmas)
+    conn.execute(frequencies.delete().where(frequencies.c.lemma_id.in_(existing_ids)))
+    # 5. lemmas
+    conn.execute(lemmas.delete().where(lemmas.c.lemma_id.in_(existing_ids)))
+
+    return len(existing_ids)
+
+
 def import_wiktextract(
     conn: Connection,
     jsonl_path: Path,
@@ -142,6 +174,10 @@ def import_wiktextract(
     batch_size: int = 1000,
 ) -> dict[str, int]:
     """Import Wiktextract data into the database.
+
+    This function is idempotent: it clears existing data for the POS before importing.
+    All operations happen within the caller's transaction, so on failure the database
+    rolls back to its original state.
 
     Args:
         conn: SQLAlchemy connection
@@ -152,7 +188,10 @@ def import_wiktextract(
     Returns:
         Statistics dict with counts of imported items
     """
-    stats = {"lemmas": 0, "forms": 0, "definitions": 0, "skipped": 0}
+    # Clear existing data first (idempotency)
+    cleared = _clear_existing_data(conn, pos_filter)
+
+    stats = {"lemmas": 0, "forms": 0, "definitions": 0, "skipped": 0, "cleared": cleared}
 
     form_batch: list[dict[str, Any]] = []
     lookup_batch: list[dict[str, Any]] = []

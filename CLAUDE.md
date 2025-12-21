@@ -7,15 +7,18 @@ Generate Anki flashcard decks for learning Italian using linguistic databases.
 - **Full spec**: See `project_spec.md` for complete details
 - **Run checks**: `task check`
 - **Run tests**: `task test`
-- **Import data**: `task import-wiktextract`
+- **Import data**: `task import-wiktextract` (idempotent)
+- **Enrichment**: `task import-morphit && task import-itwac`
 
 ## Project Status
 
 ETL Pipeline:
 - [x] Phase 2: Wiktextract import (12,888 verbs, 721k forms)
-- [ ] Phase 3: Morph-it! enrichment
-- [ ] Phase 4: ItWaC frequency import
+- [x] Phase 3: Morph-it! enrichment (353k forms updated with real spelling)
+- [x] Phase 4: ItWaC frequency import (8,284 verbs with frequency data)
 - [ ] Phase 5: Tatoeba sentences
+
+**Important**: Stop and ask for review after completing each phase.
 
 ## Key Files
 

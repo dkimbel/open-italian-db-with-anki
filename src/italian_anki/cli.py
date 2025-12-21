@@ -5,9 +5,11 @@ import sys
 from pathlib import Path
 
 from italian_anki.db import get_connection, get_engine, init_db
-from italian_anki.importers import import_wiktextract
+from italian_anki.importers import import_itwac, import_morphit, import_wiktextract
 
 DEFAULT_WIKTEXTRACT_PATH = Path("data/wiktextract/kaikki.org-dictionary-Italian.jsonl")
+DEFAULT_MORPHIT_PATH = Path("data/morphit/morph-it.txt")
+DEFAULT_ITWAC_PATH = Path("data/itwac/itwac_verbs_lemmas_notail_2_1_0.csv")
 DEFAULT_DB_PATH = Path("italian_anki.db")
 
 
@@ -33,10 +35,71 @@ def cmd_import_wiktextract(args: argparse.Namespace) -> int:
 
     print()
     print("Import complete!")
+    if stats["cleared"] > 0:
+        print(f"  Cleared:     {stats['cleared']:,} existing lemmas")
     print(f"  Lemmas:      {stats['lemmas']:,}")
     print(f"  Forms:       {stats['forms']:,}")
     print(f"  Definitions: {stats['definitions']:,}")
     print(f"  Skipped:     {stats['skipped']:,}")
+
+    return 0
+
+
+def cmd_import_morphit(args: argparse.Namespace) -> int:
+    """Run the Morph-it! enrichment command."""
+    morphit_path = Path(args.input)
+    db_path = Path(args.database)
+
+    if not morphit_path.exists():
+        print(f"Error: Input file not found: {morphit_path}", file=sys.stderr)
+        return 1
+
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        print("Run 'import-wiktextract' first to create the database.", file=sys.stderr)
+        return 1
+
+    print(f"Enriching database: {db_path}")
+    print(f"Using Morph-it! data from: {morphit_path}")
+    print()
+
+    with get_connection(db_path) as conn:
+        stats = import_morphit(conn, morphit_path)
+
+    print()
+    print("Enrichment complete!")
+    print(f"  Forms updated:    {stats['updated']:,}")
+    print(f"  Forms not found:  {stats['not_found']:,}")
+    print(f"  Lookup entries:   {stats['lookup_added']:,}")
+
+    return 0
+
+
+def cmd_import_itwac(args: argparse.Namespace) -> int:
+    """Run the ItWaC frequency import command."""
+    csv_path = Path(args.input)
+    db_path = Path(args.database)
+
+    if not csv_path.exists():
+        print(f"Error: Input file not found: {csv_path}", file=sys.stderr)
+        return 1
+
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        print("Run 'import-wiktextract' first to create the database.", file=sys.stderr)
+        return 1
+
+    print(f"Importing frequencies to: {db_path}")
+    print(f"Using ItWaC data from: {csv_path}")
+    print()
+
+    with get_connection(db_path) as conn:
+        stats = import_itwac(conn, csv_path)
+
+    print()
+    print("Import complete!")
+    print(f"  Lemmas matched:     {stats['matched']:,}")
+    print(f"  Lemmas not found:   {stats['not_found']:,}")
 
     return 0
 
@@ -76,6 +139,48 @@ def main() -> int:
         help="Part of speech to import (default: verb)",
     )
     import_parser.set_defaults(func=cmd_import_wiktextract)
+
+    # import-morphit subcommand
+    morphit_parser = subparsers.add_parser(
+        "import-morphit",
+        help="Enrich forms with real Italian spelling from Morph-it!",
+    )
+    morphit_parser.add_argument(
+        "-i",
+        "--input",
+        type=str,
+        default=str(DEFAULT_MORPHIT_PATH),
+        help=f"Path to Morph-it! file (default: {DEFAULT_MORPHIT_PATH})",
+    )
+    morphit_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    morphit_parser.set_defaults(func=cmd_import_morphit)
+
+    # import-itwac subcommand
+    itwac_parser = subparsers.add_parser(
+        "import-itwac",
+        help="Import frequency data from ItWaC corpus",
+    )
+    itwac_parser.add_argument(
+        "-i",
+        "--input",
+        type=str,
+        default=str(DEFAULT_ITWAC_PATH),
+        help=f"Path to ItWaC verbs CSV file (default: {DEFAULT_ITWAC_PATH})",
+    )
+    itwac_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    itwac_parser.set_defaults(func=cmd_import_itwac)
 
     args = parser.parse_args()
     return args.func(args)

@@ -159,3 +159,77 @@ class TestWiktextractImporter:
         finally:
             db_path.unlink()
             jsonl_path.unlink()
+
+    def test_idempotent_when_run_twice(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_VERB])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            # First import
+            with get_connection(db_path) as conn:
+                stats1 = import_wiktextract(conn, jsonl_path)
+
+            assert stats1["lemmas"] == 1
+            assert stats1["cleared"] == 0  # Nothing to clear on first run
+
+            # Second import (should clear and reimport)
+            with get_connection(db_path) as conn:
+                stats2 = import_wiktextract(conn, jsonl_path)
+
+            assert stats2["lemmas"] == 1
+            assert stats2["cleared"] == 1  # Cleared the previous import
+
+            # Verify we still have exactly one lemma (not duplicates)
+            with get_connection(db_path) as conn:
+                lemma_count = len(conn.execute(select(lemmas)).fetchall())
+                form_count = len(conn.execute(select(forms)).fetchall())
+                def_count = len(conn.execute(select(definitions)).fetchall())
+
+            assert lemma_count == 1
+            assert form_count == stats2["forms"]
+            assert def_count == stats2["definitions"]
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_clears_related_data(self) -> None:
+        """Verify that forms, definitions, and lookup are cleared on reimport."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_VERB])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            # First import
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+
+            # Get counts after first import
+            with get_connection(db_path) as conn:
+                forms_before = len(conn.execute(select(forms)).fetchall())
+                lookup_before = len(conn.execute(select(form_lookup)).fetchall())
+
+            # Second import
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+
+            # Counts should be the same (not doubled)
+            with get_connection(db_path) as conn:
+                forms_after = len(conn.execute(select(forms)).fetchall())
+                lookup_after = len(conn.execute(select(form_lookup)).fetchall())
+
+            assert forms_after == forms_before
+            assert lookup_after == lookup_before
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
