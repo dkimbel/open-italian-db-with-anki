@@ -1,0 +1,70 @@
+version: "3"
+
+tasks:
+  install:
+    desc: Install production dependencies
+    cmds:
+      - uv sync
+
+  dev:
+    desc: Install all dependencies including dev
+    cmds:
+      - uv sync --all-extras
+
+  lint:
+    desc: Run linter
+    cmds:
+      - uv run ruff check src tests
+
+  lint-fix:
+    desc: Run linter with auto-fix
+    cmds:
+      - uv run ruff check --fix src tests
+
+  format:
+    desc: Format code
+    cmds:
+      - uv run ruff format src tests
+
+  format-check:
+    desc: Check formatting without making changes
+    cmds:
+      - uv run ruff format --check src tests
+
+  typecheck:
+    desc: Run type checking
+    cmds:
+      - uv run pyright
+
+  test:
+    desc: Run tests
+    cmds:
+      - uv run pytest
+
+  test-cov:
+    desc: Run tests with coverage report
+    cmds:
+      - uv run pytest --cov=italian_anki --cov-report=term-missing
+
+  check:
+    desc: Run all checks (format, lint, typecheck, test)
+    cmds:
+      - task: format-check
+      - task: lint
+      - task: typecheck
+      - task: test
+
+  pre-commit-install:
+    desc: Install pre-commit hooks
+    cmds:
+      - uv run pre-commit install
+
+  pre-commit-run:
+    desc: Run pre-commit on all files
+    cmds:
+      - uv run pre-commit run --all-files
+
+  import-wiktextract:
+    desc: Import Wiktextract data into database
+    cmds:
+      - uv run italian-anki import-wiktextract {{.CLI_ARGS}}
