@@ -30,7 +30,7 @@ TATOEBA_BASE_URL = "https://downloads.tatoeba.org/exports"
 TATOEBA_FILES = {
     "ita_sentences.tsv": f"{TATOEBA_BASE_URL}/per_language/ita/ita_sentences.tsv.bz2",
     "eng_sentences.tsv": f"{TATOEBA_BASE_URL}/per_language/eng/eng_sentences.tsv.bz2",
-    "links.csv": f"{TATOEBA_BASE_URL}/links.csv",
+    "ita_eng_links.tsv": f"{TATOEBA_BASE_URL}/per_language/ita/ita-eng_links.tsv.bz2",
     "sentences_with_audio.csv": f"{TATOEBA_BASE_URL}/sentences_with_audio.csv",
 }
 

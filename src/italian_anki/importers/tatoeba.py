@@ -59,7 +59,7 @@ def _parse_sentences_tsv(path: Path) -> dict[int, str]:
 
 
 def _stream_links(path: Path, italian_ids: set[int]) -> tuple[set[int], list[tuple[int, int]]]:
-    """Stream links.csv and filter to Italian→English pairs.
+    """Stream links TSV and filter to Italian→English pairs.
 
     Returns:
         - Set of English sentence IDs that are translations of Italian sentences
@@ -140,7 +140,7 @@ def import_tatoeba(
         conn: SQLAlchemy connection
         ita_sentences_path: Path to Italian sentences TSV
         eng_sentences_path: Path to English sentences TSV
-        links_path: Path to links CSV
+        links_path: Path to Italian-English links TSV
         batch_size: Number of rows to insert per batch
 
     Returns:

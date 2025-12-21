@@ -26,7 +26,7 @@ DEFAULT_MORPHIT_PATH = Path("data/morphit/morph-it.txt")
 DEFAULT_ITWAC_DIR = Path("data/itwac")
 DEFAULT_ITA_SENTENCES_PATH = Path("data/tatoeba/ita_sentences.tsv")
 DEFAULT_ENG_SENTENCES_PATH = Path("data/tatoeba/eng_sentences.tsv")
-DEFAULT_LINKS_PATH = Path("data/tatoeba/links.csv")
+DEFAULT_LINKS_PATH = Path("data/tatoeba/ita_eng_links.tsv")
 DEFAULT_DB_PATH = Path("italian.db")
 
 
@@ -386,7 +386,7 @@ def main() -> int:
         "--links",
         type=str,
         default=str(DEFAULT_LINKS_PATH),
-        help=f"Path to links CSV (default: {DEFAULT_LINKS_PATH})",
+        help=f"Path to Italian-English links TSV (default: {DEFAULT_LINKS_PATH})",
     )
     tatoeba_parser.add_argument(
         "-d",

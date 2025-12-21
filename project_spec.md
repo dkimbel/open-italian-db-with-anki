@@ -66,7 +66,7 @@ Build a Python system to generate Anki flashcard decks for learning Italian, usi
 - **Content**: ~951k Italian sentences, ~400k with English translations
 - **Key files**:
   - `sentences.csv`: `sentence_id`, `lang`, `text`
-  - `links.csv`: `sentence_id`, `translation_id` (bidirectional)
+  - `ita_eng_links.tsv`: `ita_sentence_id`, `eng_sentence_id` (Italian→English only)
   - `sentences_with_audio.csv`: `sentence_id`, `audio_id`, `username`, `license`, `attribution_url`
   - `tags.csv`: `sentence_id`, `tag_name` (sparse coverage)
 - **Audio**: Only 1,591 Italian sentences have audio
@@ -239,7 +239,7 @@ Example: `Mangiare` → `mangiare`, `reiterare` from both LeFFI and Wiktextract 
 
 ### Phase 5: Import Tatoeba
 1. Import Italian + English sentences into `sentences`
-2. Import `links.csv` into `translations`
+2. Import `ita_eng_links.tsv` into `translations`
 3. Tokenize Italian sentences, match against `form_lookup`
 4. Insert matches into `sentence_verbs`
 
@@ -308,7 +308,7 @@ data/
 └── tatoeba/
     ├── ita_sentences.tsv
     ├── eng_sentences.tsv
-    ├── links.csv
+    ├── ita_eng_links.tsv
     ├── sentences_with_audio.csv
     └── LICENSE                    # CC-BY 2.0 FR
 ```
