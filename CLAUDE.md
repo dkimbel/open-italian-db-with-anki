@@ -16,7 +16,7 @@ ETL Pipeline:
 - [x] Phase 2: Wiktextract import (12,888 verbs, 721k forms)
 - [x] Phase 3: Morph-it! enrichment (353k forms updated with real spelling)
 - [x] Phase 4: ItWaC frequency import (8,284 verbs with frequency data)
-- [ ] Phase 5: Tatoeba sentences
+- [x] Phase 5: Tatoeba sentences (952k Italian, 332k English, 2.7M verb links)
 
 **Important**: Stop and ask for review after completing each phase.
 

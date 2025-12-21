@@ -78,3 +78,8 @@ tasks:
     desc: Import frequency data from ItWaC corpus
     cmds:
       - uv run italian-anki import-itwac {{.CLI_ARGS}}
+
+  import-tatoeba:
+    desc: Import Tatoeba sentences and link to verbs
+    cmds:
+      - uv run italian-anki import-tatoeba {{.CLI_ARGS}}

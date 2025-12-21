@@ -5,11 +5,19 @@ import sys
 from pathlib import Path
 
 from italian_anki.db import get_connection, get_engine, init_db
-from italian_anki.importers import import_itwac, import_morphit, import_wiktextract
+from italian_anki.importers import (
+    import_itwac,
+    import_morphit,
+    import_tatoeba,
+    import_wiktextract,
+)
 
 DEFAULT_WIKTEXTRACT_PATH = Path("data/wiktextract/kaikki.org-dictionary-Italian.jsonl")
 DEFAULT_MORPHIT_PATH = Path("data/morphit/morph-it.txt")
 DEFAULT_ITWAC_PATH = Path("data/itwac/itwac_verbs_lemmas_notail_2_1_0.csv")
+DEFAULT_ITA_SENTENCES_PATH = Path("data/tatoeba/ita_sentences.tsv")
+DEFAULT_ENG_SENTENCES_PATH = Path("data/tatoeba/eng_sentences.tsv")
+DEFAULT_LINKS_PATH = Path("data/tatoeba/links.csv")
 DEFAULT_DB_PATH = Path("italian_anki.db")
 
 
@@ -104,6 +112,48 @@ def cmd_import_itwac(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import_tatoeba(args: argparse.Namespace) -> int:
+    """Run the Tatoeba sentences import command."""
+    ita_path = Path(args.ita_sentences)
+    eng_path = Path(args.eng_sentences)
+    links_path = Path(args.links)
+    db_path = Path(args.database)
+
+    for path, name in [
+        (ita_path, "Italian sentences"),
+        (eng_path, "English sentences"),
+        (links_path, "links"),
+    ]:
+        if not path.exists():
+            print(f"Error: {name} file not found: {path}", file=sys.stderr)
+            return 1
+
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        print("Run 'import-wiktextract' first to create the database.", file=sys.stderr)
+        return 1
+
+    print(f"Importing Tatoeba sentences to: {db_path}")
+    print(f"  Italian sentences: {ita_path}")
+    print(f"  English sentences: {eng_path}")
+    print(f"  Links: {links_path}")
+    print()
+
+    with get_connection(db_path) as conn:
+        stats = import_tatoeba(conn, ita_path, eng_path, links_path)
+
+    print()
+    print("Import complete!")
+    if stats["cleared"] > 0:
+        print(f"  Cleared:          {stats['cleared']:,} existing sentences")
+    print(f"  Italian sentences: {stats['ita_sentences']:,}")
+    print(f"  English sentences: {stats['eng_sentences']:,}")
+    print(f"  Translations:      {stats['translations']:,}")
+    print(f"  Sentence-verb links: {stats['sentence_verbs']:,}")
+
+    return 0
+
+
 def main() -> int:
     """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(
@@ -181,6 +231,38 @@ def main() -> int:
         help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
     )
     itwac_parser.set_defaults(func=cmd_import_itwac)
+
+    # import-tatoeba subcommand
+    tatoeba_parser = subparsers.add_parser(
+        "import-tatoeba",
+        help="Import Tatoeba sentences and link to verbs",
+    )
+    tatoeba_parser.add_argument(
+        "--ita-sentences",
+        type=str,
+        default=str(DEFAULT_ITA_SENTENCES_PATH),
+        help=f"Path to Italian sentences TSV (default: {DEFAULT_ITA_SENTENCES_PATH})",
+    )
+    tatoeba_parser.add_argument(
+        "--eng-sentences",
+        type=str,
+        default=str(DEFAULT_ENG_SENTENCES_PATH),
+        help=f"Path to English sentences TSV (default: {DEFAULT_ENG_SENTENCES_PATH})",
+    )
+    tatoeba_parser.add_argument(
+        "--links",
+        type=str,
+        default=str(DEFAULT_LINKS_PATH),
+        help=f"Path to links CSV (default: {DEFAULT_LINKS_PATH})",
+    )
+    tatoeba_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    tatoeba_parser.set_defaults(func=cmd_import_tatoeba)
 
     args = parser.parse_args()
     return args.func(args)
