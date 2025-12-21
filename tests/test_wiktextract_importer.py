@@ -8,17 +8,18 @@ from typing import Any
 from sqlalchemy import select
 
 from italian_anki.db import (
+    adjective_forms,
     definitions,
-    form_lookup,
-    forms,
+    form_lookup_new,
     get_connection,
     get_engine,
     init_db,
     lemmas,
     noun_metadata,
+    verb_forms,
     verb_metadata,
 )
-from italian_anki.importers.wiktextract import import_wiktextract
+from italian_anki.importers.wiktextract import enrich_from_form_of, import_wiktextract
 
 # Sample verb entry from Wiktextract
 SAMPLE_VERB = {
@@ -51,7 +52,7 @@ SAMPLE_VERB = {
     "sounds": [{"ipa": "/par\u02c8la\u02d0re/"}],
 }
 
-# Sample form entry (should be skipped)
+# Sample form entry (should be skipped during main import)
 SAMPLE_FORM_ENTRY = {
     "pos": "verb",
     "word": "parlo",
@@ -59,6 +60,26 @@ SAMPLE_FORM_ENTRY = {
         {
             "glosses": ["first-person singular present indicative of parlare"],
             "tags": ["form-of", "first-person", "indicative", "present", "singular"],
+            "form_of": [{"word": "parlare"}],
+        }
+    ],
+}
+
+# Sample form-of entry with label tag (for enrichment test)
+SAMPLE_FORM_OF_WITH_LABEL = {
+    "pos": "verb",
+    "word": "pàrlo",  # Same form as in SAMPLE_VERB but as a form-of entry
+    "senses": [
+        {
+            "glosses": ["first-person singular present indicative of parlare"],
+            "tags": [
+                "form-of",
+                "first-person",
+                "indicative",
+                "present",
+                "singular",
+                "literary",  # Label tag
+            ],
             "form_of": [{"word": "parlare"}],
         }
     ],
@@ -156,10 +177,10 @@ class TestWiktextractImporter:
                 assert meta.auxiliary == "avere"
                 assert meta.transitivity == "both"
 
-                # Check forms were inserted
+                # Check forms were inserted in verb_forms table
                 lemma_id = row.lemma_id
                 form_rows = conn.execute(
-                    select(forms).where(forms.c.lemma_id == lemma_id)
+                    select(verb_forms).where(verb_forms.c.lemma_id == lemma_id)
                 ).fetchall()
                 assert len(form_rows) >= 3  # At least infinitive + some conjugations
 
@@ -169,8 +190,8 @@ class TestWiktextractImporter:
                 ).fetchall()
                 assert len(def_rows) == 2
 
-                # Check form_lookup was populated
-                lookup_rows = conn.execute(select(form_lookup)).fetchall()
+                # Check form_lookup_new was populated
+                lookup_rows = conn.execute(select(form_lookup_new)).fetchall()
                 assert len(lookup_rows) > 0
         finally:
             db_path.unlink()
@@ -241,7 +262,7 @@ class TestWiktextractImporter:
             # Verify we still have exactly one lemma (not duplicates)
             with get_connection(db_path) as conn:
                 lemma_count = len(conn.execute(select(lemmas)).fetchall())
-                form_count = len(conn.execute(select(forms)).fetchall())
+                form_count = len(conn.execute(select(verb_forms)).fetchall())
                 def_count = len(conn.execute(select(definitions)).fetchall())
 
             assert lemma_count == 1
@@ -269,8 +290,8 @@ class TestWiktextractImporter:
 
             # Get counts after first import
             with get_connection(db_path) as conn:
-                forms_before = len(conn.execute(select(forms)).fetchall())
-                lookup_before = len(conn.execute(select(form_lookup)).fetchall())
+                forms_before = len(conn.execute(select(verb_forms)).fetchall())
+                lookup_before = len(conn.execute(select(form_lookup_new)).fetchall())
 
             # Second import
             with get_connection(db_path) as conn:
@@ -278,8 +299,8 @@ class TestWiktextractImporter:
 
             # Counts should be the same (not doubled)
             with get_connection(db_path) as conn:
-                forms_after = len(conn.execute(select(forms)).fetchall())
-                lookup_after = len(conn.execute(select(form_lookup)).fetchall())
+                forms_after = len(conn.execute(select(verb_forms)).fetchall())
+                lookup_after = len(conn.execute(select(form_lookup_new)).fetchall())
 
             assert forms_after == forms_before
             assert lookup_after == lookup_before
@@ -356,9 +377,9 @@ class TestWiktextractImporter:
                 assert bello.pos == "adjective"
                 assert bello.ipa == "/ˈbɛl.lo/"  # noqa: RUF001 (IPA stress marker)
 
-                # Check forms were inserted (including canonical "bello" for adjectives)
+                # Check forms were inserted in adjective_forms table
                 form_rows = conn.execute(
-                    select(forms).where(forms.c.lemma_id == bello.lemma_id)
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == bello.lemma_id)
                 ).fetchall()
                 form_texts = [row.form_stressed for row in form_rows]
                 assert "bello" in form_texts  # canonical kept for adjectives
@@ -417,6 +438,68 @@ class TestWiktextractImporter:
                 assert verb_count == 1
                 assert noun_count == 1
                 assert adj_count == 1
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_enrich_from_form_of_applies_labels(self) -> None:
+        """Test that form-of entries with label tags update existing forms."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        # JSONL with lemma and form-of entry that has a label tag
+        jsonl_path = _create_test_jsonl([SAMPLE_VERB, SAMPLE_FORM_OF_WITH_LABEL])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            # First, import the lemma
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+
+            # Verify form exists without labels
+            with get_connection(db_path) as conn:
+                parlare = conn.execute(select(lemmas).where(lemmas.c.lemma == "parlare")).fetchone()
+                assert parlare is not None
+
+                # Find the first-person singular form
+                form_row = conn.execute(
+                    select(verb_forms).where(
+                        verb_forms.c.lemma_id == parlare.lemma_id,
+                        verb_forms.c.person == 1,
+                        verb_forms.c.number == "singular",
+                        verb_forms.c.mood == "indicative",
+                        verb_forms.c.tense == "present",
+                    )
+                ).fetchone()
+                assert form_row is not None
+                assert form_row.labels is None  # No labels yet
+
+            # Now enrich from form-of entries
+            with get_connection(db_path) as conn:
+                stats = enrich_from_form_of(conn, jsonl_path)
+
+            assert stats["scanned"] >= 1
+            assert stats["updated"] >= 1
+
+            # Verify labels was applied
+            with get_connection(db_path) as conn:
+                parlare = conn.execute(select(lemmas).where(lemmas.c.lemma == "parlare")).fetchone()
+                assert parlare is not None
+
+                form_row = conn.execute(
+                    select(verb_forms).where(
+                        verb_forms.c.lemma_id == parlare.lemma_id,
+                        verb_forms.c.person == 1,
+                        verb_forms.c.number == "singular",
+                        verb_forms.c.mood == "indicative",
+                        verb_forms.c.tense == "present",
+                    )
+                ).fetchone()
+                assert form_row is not None
+                assert form_row.labels == "literary"
 
         finally:
             db_path.unlink()

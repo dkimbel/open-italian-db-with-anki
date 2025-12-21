@@ -1,6 +1,7 @@
 """Database schema definition using SQLAlchemy Core."""
 
 from sqlalchemy import (
+    Boolean,
     Column,
     Float,
     ForeignKey,
@@ -37,23 +38,64 @@ frequencies = Table(
     Column("corpus_version", String(20)),  # e.g., '2.1.0', '2024-01'
 )
 
-# Inflected forms (verbs, nouns, adjectives)
-forms = Table(
-    "forms",
+# Verb conjugations with explicit grammatical features
+verb_forms = Table(
+    "verb_forms",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
     Column("form", Text),  # real Italian spelling from Morph-it! (NULL if not found)
-    Column("form_stressed", Text, nullable=False),  # pedagogical with stress marks
-    Column("tags", Text, nullable=False),  # JSON array
+    Column("form_stressed", Text, nullable=False),  # with stress marks
+    # Grammatical features
+    Column(
+        "mood", Text, nullable=False
+    ),  # indicative, subjunctive, conditional, imperative, infinitive, participle, gerund
+    Column("tense", Text),  # present, imperfect, remote, future (NULL for non-finite)
+    Column("person", Integer),  # 1, 2, 3 (NULL for non-finite)
+    Column("number", Text),  # singular, plural (NULL for some non-finite)
+    Column("gender", Text),  # masculine, feminine (for participles only)
+    # Modifiers
+    Column("is_formal", Boolean, default=False),  # Lei/Loro forms
+    Column("is_negative", Boolean, default=False),  # negative imperative
+    # Usage labels (comma-separated if multiple)
+    Column("labels", Text),  # NULL=standard, or "archaic", "archaic,literary", etc.
 )
 
-# Lookup table for matching forms in sentences
-form_lookup = Table(
-    "form_lookup",
+# Noun forms with grammatical features
+noun_forms = Table(
+    "noun_forms",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
+    Column("form", Text),  # real Italian spelling
+    Column("form_stressed", Text, nullable=False),  # with stress marks
+    Column("number", Text, nullable=False),  # singular, plural
+    Column("labels", Text),  # NULL=standard, or comma-separated labels
+    Column("is_diminutive", Boolean, default=False),
+    Column("is_augmentative", Boolean, default=False),
+)
+
+# Adjective forms with grammatical features
+adjective_forms = Table(
+    "adjective_forms",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
+    Column("form", Text),  # real Italian spelling
+    Column("form_stressed", Text, nullable=False),  # with stress marks
+    Column("gender", Text, nullable=False),  # masculine, feminine
+    Column("number", Text, nullable=False),  # singular, plural
+    Column("degree", Text, default="positive"),  # positive, comparative, superlative
+    Column("labels", Text),  # NULL=standard, or comma-separated labels
+)
+
+# Lookup table for matching forms in sentences (with POS awareness)
+form_lookup_new = Table(
+    "form_lookup_new",
     metadata,
     Column("form_normalized", Text, nullable=False, primary_key=True),  # accent-stripped
-    Column("form_id", Integer, ForeignKey("forms.id"), nullable=False, primary_key=True),
+    Column("pos", Text, nullable=False, primary_key=True),  # verb, noun, adjective
+    Column("form_id", Integer, nullable=False, primary_key=True),  # references *_forms.id
 )
 
 # English definitions
@@ -118,10 +160,20 @@ verb_metadata = Table(
 # Indexes (defined separately for clarity)
 Index("idx_noun_metadata_gender", noun_metadata.c.gender)
 Index("idx_verb_metadata_auxiliary", verb_metadata.c.auxiliary)
-Index("idx_forms_lemma", forms.c.lemma_id)
-Index("idx_forms_form", forms.c.form)
-Index("idx_forms_form_stressed", forms.c.form_stressed)
-Index("idx_form_lookup_form_id", form_lookup.c.form_id)
+# verb_forms indexes
+Index("idx_verb_forms_lemma", verb_forms.c.lemma_id)
+Index("idx_verb_forms_mood_tense", verb_forms.c.mood, verb_forms.c.tense)
+Index("idx_verb_forms_labels", verb_forms.c.labels)
+Index("idx_verb_forms_form", verb_forms.c.form)
+# New noun_forms indexes
+Index("idx_noun_forms_lemma", noun_forms.c.lemma_id)
+Index("idx_noun_forms_form", noun_forms.c.form)
+# New adjective_forms indexes
+Index("idx_adjective_forms_lemma", adjective_forms.c.lemma_id)
+Index("idx_adjective_forms_form", adjective_forms.c.form)
+# New form_lookup indexes
+Index("idx_form_lookup_new_form_id", form_lookup_new.c.form_id)
+# Other indexes
 Index("idx_definitions_lemma", definitions.c.lemma_id)
 Index("idx_frequencies_lemma", frequencies.c.lemma_id)
 Index("idx_sentences_lang", sentences.c.lang)

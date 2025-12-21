@@ -69,6 +69,11 @@ tasks:
     cmds:
       - uv run italian-anki import-wiktextract {{.CLI_ARGS}}
 
+  enrich-formof:
+    desc: Enrich forms with register labels from form-of entries
+    cmds:
+      - uv run italian-anki enrich-formof {{.CLI_ARGS}}
+
   import-morphit:
     desc: Enrich forms with real Italian spelling from Morph-it!
     cmds:
@@ -83,3 +88,16 @@ tasks:
     desc: Import Tatoeba sentences and link to verbs
     cmds:
       - uv run italian-anki import-tatoeba {{.CLI_ARGS}}
+
+  import-all:
+    desc: Run full import pipeline for a POS (pass --pos=verb|noun|adjective)
+    cmds:
+      - task: import-wiktextract
+        vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
+      - task: enrich-formof
+        vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
+      - task: import-morphit
+        vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
+      - task: import-itwac
+        vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
+      - task: import-tatoeba

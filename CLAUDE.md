@@ -29,6 +29,7 @@ Current database stats:
 
 ## Key Files
 
+- `italian_anki.db` - SQLite database (generated, not committed)
 - `src/italian_anki/importers/` - Data importers
 - `src/italian_anki/db/` - Database schema and connection
 - `src/italian_anki/normalize.py` - Text normalization utilities

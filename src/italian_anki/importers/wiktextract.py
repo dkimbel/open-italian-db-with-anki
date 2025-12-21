@@ -8,24 +8,38 @@ from typing import Any
 from sqlalchemy import Connection, select
 
 from italian_anki.db.schema import (
+    adjective_forms,
     definitions,
-    form_lookup,
-    forms,
+    form_lookup_new,
     frequencies,
     lemmas,
+    noun_forms,
     noun_metadata,
+    verb_forms,
     verb_metadata,
 )
 from italian_anki.normalize import normalize
-
-# Tags to skip when inserting forms (metadata, not actual forms)
-SKIP_TAGS = {"table-tags", "inflection-template"}
+from italian_anki.tags import (
+    LABEL_TAGS,
+    SKIP_TAGS,
+    parse_adjective_tags,
+    parse_noun_tags,
+    parse_verb_tags,
+    should_filter_form,
+)
 
 # Mapping from our POS names to Wiktextract's abbreviated names
 WIKTEXTRACT_POS = {
     "verb": "verb",
     "noun": "noun",
     "adjective": "adj",  # Wiktextract uses "adj"
+}
+
+# POS-specific form tables
+POS_FORM_TABLES = {
+    "verb": verb_forms,
+    "noun": noun_forms,
+    "adjective": adjective_forms,
 }
 
 
@@ -224,8 +238,8 @@ def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | 
 def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     """Clear all existing data for the given POS.
 
-    Deletes in FK-safe order: form_lookup → forms → definitions → frequencies
-    → noun_metadata/verb_metadata → lemmas.
+    Deletes in FK-safe order: form_lookup_new → POS form tables
+    → definitions → frequencies → noun_metadata/verb_metadata → lemmas.
     Returns the number of lemmas cleared.
     """
     # Get existing lemma IDs for this POS
@@ -235,15 +249,23 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     if not existing_ids:
         return 0
 
+    # Get the POS-specific form table
+    pos_form_table = POS_FORM_TABLES.get(pos_filter)
+
     # Delete in FK-safe order
-    # 1. form_lookup (references forms)
-    conn.execute(
-        form_lookup.delete().where(
-            form_lookup.c.form_id.in_(select(forms.c.id).where(forms.c.lemma_id.in_(existing_ids)))
+    # 1. form_lookup_new (references *_forms tables)
+    if pos_form_table is not None:
+        conn.execute(
+            form_lookup_new.delete().where(
+                form_lookup_new.c.form_id.in_(
+                    select(pos_form_table.c.id).where(pos_form_table.c.lemma_id.in_(existing_ids))
+                ),
+                form_lookup_new.c.pos == pos_filter,
+            )
         )
-    )
-    # 2. forms (references lemmas)
-    conn.execute(forms.delete().where(forms.c.lemma_id.in_(existing_ids)))
+        # 2. POS-specific form table
+        conn.execute(pos_form_table.delete().where(pos_form_table.c.lemma_id.in_(existing_ids)))
+
     # 3. definitions (references lemmas)
     conn.execute(definitions.delete().where(definitions.c.lemma_id.in_(existing_ids)))
     # 4. frequencies (references lemmas)
@@ -257,6 +279,84 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     conn.execute(lemmas.delete().where(lemmas.c.lemma_id.in_(existing_ids)))
 
     return len(existing_ids)
+
+
+def _build_verb_form_row(
+    lemma_id: int, form_stressed: str, tags: list[str]
+) -> dict[str, Any] | None:
+    """Build a verb_forms row dict from tags, or None if should filter."""
+    if should_filter_form(tags):
+        return None
+
+    features = parse_verb_tags(tags)
+    if features.should_filter or features.mood is None:
+        return None
+
+    return {
+        "lemma_id": lemma_id,
+        "form": None,  # Will be filled by Morph-it! importer
+        "form_stressed": form_stressed,
+        "mood": features.mood,
+        "tense": features.tense,
+        "person": features.person,
+        "number": features.number,
+        "gender": features.gender,
+        "is_formal": features.is_formal,
+        "is_negative": features.is_negative,
+        "labels": features.labels,
+    }
+
+
+def _build_noun_form_row(
+    lemma_id: int, form_stressed: str, tags: list[str]
+) -> dict[str, Any] | None:
+    """Build a noun_forms row dict from tags, or None if should filter."""
+    if should_filter_form(tags):
+        return None
+
+    features = parse_noun_tags(tags)
+    if features.should_filter or features.number is None:
+        return None
+
+    return {
+        "lemma_id": lemma_id,
+        "form": None,
+        "form_stressed": form_stressed,
+        "number": features.number,
+        "labels": features.labels,
+        "is_diminutive": features.is_diminutive,
+        "is_augmentative": features.is_augmentative,
+    }
+
+
+def _build_adjective_form_row(
+    lemma_id: int, form_stressed: str, tags: list[str]
+) -> dict[str, Any] | None:
+    """Build an adjective_forms row dict from tags, or None if should filter."""
+    if should_filter_form(tags):
+        return None
+
+    features = parse_adjective_tags(tags)
+    if features.should_filter or features.gender is None or features.number is None:
+        return None
+
+    return {
+        "lemma_id": lemma_id,
+        "form": None,
+        "form_stressed": form_stressed,
+        "gender": features.gender,
+        "number": features.number,
+        "degree": features.degree,
+        "labels": features.labels,
+    }
+
+
+# Mapping from POS to form row builder
+POS_FORM_BUILDERS = {
+    "verb": _build_verb_form_row,
+    "noun": _build_noun_form_row,
+    "adjective": _build_adjective_form_row,
+}
 
 
 def import_wiktextract(
@@ -287,6 +387,7 @@ def import_wiktextract(
     stats: dict[str, int] = {
         "lemmas": 0,
         "forms": 0,
+        "forms_filtered": 0,
         "definitions": 0,
         "skipped": 0,
         "cleared": cleared,
@@ -295,6 +396,14 @@ def import_wiktextract(
         stats["nouns_with_gender"] = 0
         stats["nouns_no_gender"] = 0
 
+    # Get POS-specific table and row builder
+    pos_form_table = POS_FORM_TABLES.get(pos_filter)
+    build_form_row = POS_FORM_BUILDERS.get(pos_filter)
+
+    if pos_form_table is None or build_form_row is None:
+        msg = f"Unsupported POS: {pos_filter}"
+        raise ValueError(msg)
+
     form_batch: list[dict[str, Any]] = []
     lookup_batch: list[dict[str, Any]] = []
     definition_batch: list[dict[str, Any]] = []
@@ -302,13 +411,21 @@ def import_wiktextract(
     def flush_batches() -> None:
         nonlocal form_batch, lookup_batch, definition_batch
         if form_batch:
-            result = conn.execute(forms.insert().returning(forms.c.id), form_batch)
+            result = conn.execute(
+                pos_form_table.insert().returning(pos_form_table.c.id), form_batch
+            )
             form_ids = [row.id for row in result]
 
             # Build lookup entries with the returned IDs
             for form_id, form_data in zip(form_ids, form_batch, strict=True):
                 form_normalized = normalize(form_data["form_stressed"])
-                lookup_batch.append({"form_normalized": form_normalized, "form_id": form_id})
+                lookup_batch.append(
+                    {
+                        "form_normalized": form_normalized,
+                        "pos": pos_filter,
+                        "form_id": form_id,
+                    }
+                )
 
             form_batch = []
             stats["forms"] += len(form_ids)
@@ -316,7 +433,7 @@ def import_wiktextract(
         if lookup_batch:
             # Use INSERT OR IGNORE for lookup (same normalized form can map to multiple form_ids)
             conn.execute(
-                form_lookup.insert().prefix_with("OR IGNORE"),
+                form_lookup_new.insert().prefix_with("OR IGNORE"),
                 lookup_batch,
             )
             lookup_batch = []
@@ -389,31 +506,170 @@ def import_wiktextract(
                         )
                     )
 
-            # Queue forms for batch insert
+            # Queue forms for batch insert (using POS-specific builder)
             for form_stressed, tags in _iter_forms(entry, pos_filter):
-                form_batch.append(
-                    {
-                        "lemma_id": lemma_id,
-                        "form": None,  # Will be filled by Morph-it! importer
-                        "form_stressed": form_stressed,
-                        "tags": json.dumps(tags),
-                    }
-                )
+                row = build_form_row(lemma_id, form_stressed, tags)
+                if row is None:
+                    stats["forms_filtered"] += 1
+                    continue
+
+                form_batch.append(row)
 
                 if len(form_batch) >= batch_size:
                     flush_batches()
 
             # Queue definitions
-            for gloss, tags in _iter_definitions(entry):
+            for gloss, def_tags in _iter_definitions(entry):
                 definition_batch.append(
                     {
                         "lemma_id": lemma_id,
                         "gloss": gloss,
-                        "tags": json.dumps(tags) if tags else None,
+                        "tags": json.dumps(def_tags) if def_tags else None,
                     }
                 )
 
     # Final flush
     flush_batches()
+
+    return stats
+
+
+def _is_form_of_entry(entry: dict[str, Any], pos: str) -> bool:
+    """Check if entry is a form-of entry (inflected form reference) for the given POS."""
+    if entry.get("pos") != pos:
+        return False
+    # Form-of entries have form_of in at least one sense
+    return any("form_of" in sense for sense in entry.get("senses", []))
+
+
+def _extract_form_of_info(
+    entry: dict[str, Any],
+) -> Iterator[tuple[str, str, str | None]]:
+    """Extract form-of info from an entry.
+
+    Yields (form_word, lemma_word, labels) tuples.
+    A form-of entry can reference multiple lemmas in different senses.
+    Labels are comma-separated if multiple.
+    """
+    form_word = entry.get("word", "")
+    if not form_word:
+        return
+
+    for sense in entry.get("senses", []):
+        form_of_list = sense.get("form_of", [])
+        if not form_of_list:
+            continue
+
+        # Extract all labels from sense tags
+        tags = set(sense.get("tags", []))
+        matching_labels = sorted(tags & LABEL_TAGS)
+        labels = ",".join(matching_labels) if matching_labels else None
+
+        # Only proceed if there are labels to apply
+        if labels is None:
+            continue
+
+        # Get lemma(s) this form belongs to
+        for form_of in form_of_list:
+            lemma_word = form_of.get("word", "")
+            if lemma_word:
+                yield form_word, lemma_word, labels
+
+
+def enrich_from_form_of(
+    conn: Connection,
+    jsonl_path: Path,
+    *,
+    pos_filter: str = "verb",
+) -> dict[str, int]:
+    """Enrich forms with labels from form-of entries.
+
+    This second pass scans form-of entries (which we skip during main import)
+    to extract labels (literary, archaic, regional, etc.) and apply
+    them to existing forms in the database.
+
+    Args:
+        conn: SQLAlchemy connection
+        jsonl_path: Path to the Wiktextract JSONL file
+        pos_filter: Part of speech to enrich (default: "verb")
+
+    Returns:
+        Statistics dict with counts
+    """
+    from sqlalchemy import update
+
+    stats = {"scanned": 0, "with_labels": 0, "updated": 0, "not_found": 0}
+
+    # Get POS-specific table
+    pos_form_table = POS_FORM_TABLES.get(pos_filter)
+    if pos_form_table is None:
+        msg = f"Unsupported POS: {pos_filter}"
+        raise ValueError(msg)
+
+    # Build lemma lookup: normalized_lemma -> lemma_id
+    lemma_result = conn.execute(
+        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == pos_filter)
+    )
+    lemma_lookup: dict[str, int] = {row.lemma: row.lemma_id for row in lemma_result}
+
+    # Build form lookup: (lemma_id, normalized_form) -> list of form_ids
+    form_result = conn.execute(
+        select(pos_form_table.c.id, pos_form_table.c.lemma_id, pos_form_table.c.form_stressed)
+    )
+    form_lookup: dict[tuple[int, str], list[int]] = {}
+    for row in form_result:
+        normalized = normalize(row.form_stressed)
+        key = (row.lemma_id, normalized)
+        if key not in form_lookup:
+            form_lookup[key] = []
+        form_lookup[key].append(row.id)
+
+    # Map to Wiktextract's POS naming
+    wiktextract_pos = WIKTEXTRACT_POS.get(pos_filter, pos_filter)
+
+    with jsonl_path.open(encoding="utf-8") as f:
+        for line in f:
+            entry = _parse_entry(line)
+            if entry is None:
+                continue
+
+            # Only process form-of entries for our POS
+            if not _is_form_of_entry(entry, wiktextract_pos):
+                continue
+
+            stats["scanned"] += 1
+
+            # Extract form-of info and apply labels
+            for form_word, lemma_word, labels in _extract_form_of_info(entry):
+                if labels is None:
+                    continue
+
+                stats["with_labels"] += 1
+
+                # Look up lemma
+                lemma_normalized = normalize(lemma_word)
+                lemma_id = lemma_lookup.get(lemma_normalized)
+                if lemma_id is None:
+                    stats["not_found"] += 1
+                    continue
+
+                # Look up form
+                form_normalized = normalize(form_word)
+                key = (lemma_id, form_normalized)
+                form_ids = form_lookup.get(key)
+                if not form_ids:
+                    stats["not_found"] += 1
+                    continue
+
+                # Update labels for all matching forms (where labels is NULL)
+                for form_id in form_ids:
+                    result = conn.execute(
+                        update(pos_form_table)
+                        .where(pos_form_table.c.id == form_id)
+                        .where(pos_form_table.c.labels.is_(None))
+                        .values(labels=labels)
+                    )
+                    if result.rowcount > 0:
+                        stats["updated"] += 1
 
     return stats

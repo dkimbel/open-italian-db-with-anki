@@ -8,11 +8,11 @@ from typing import Any
 from sqlalchemy import select
 
 from italian_anki.db import (
-    form_lookup,
-    forms,
+    form_lookup_new,
     get_connection,
     get_engine,
     init_db,
+    verb_forms,
 )
 from italian_anki.importers.morphit import import_morphit
 from italian_anki.importers.wiktextract import import_wiktextract
@@ -91,7 +91,9 @@ class TestMorphitImporter:
 
             # Check that forms now have real spelling
             with get_connection(db_path) as conn:
-                form_rows = conn.execute(select(forms).where(forms.c.form.isnot(None))).fetchall()
+                form_rows = conn.execute(
+                    select(verb_forms).where(verb_forms.c.form.isnot(None))
+                ).fetchall()
 
                 assert len(form_rows) > 0, "Should have forms with real spelling"
 
@@ -136,7 +138,9 @@ class TestMorphitImporter:
 
             # Check that some forms still have NULL form
             with get_connection(db_path) as conn:
-                null_forms = conn.execute(select(forms).where(forms.c.form.is_(None))).fetchall()
+                null_forms = conn.execute(
+                    select(verb_forms).where(verb_forms.c.form.is_(None))
+                ).fetchall()
                 assert len(null_forms) > 0
 
         finally:
@@ -194,14 +198,14 @@ class TestMorphitImporter:
             with get_connection(db_path) as conn:
                 import_wiktextract(conn, jsonl_path)
                 # Count lookup entries before
-                before_count = conn.execute(select(form_lookup)).fetchall()
+                before_count = conn.execute(select(form_lookup_new)).fetchall()
 
             with get_connection(db_path) as conn:
                 import_morphit(conn, morphit_path)
 
             with get_connection(db_path) as conn:
                 # Count lookup entries after
-                after_count = conn.execute(select(form_lookup)).fetchall()
+                after_count = conn.execute(select(form_lookup_new)).fetchall()
 
                 # Should have at least as many entries as before
                 assert len(after_count) >= len(before_count)

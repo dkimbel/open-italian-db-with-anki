@@ -6,11 +6,11 @@ from pathlib import Path
 from sqlalchemy import Connection, inspect, select, text
 
 from italian_anki.db import (
-    forms,
     get_connection,
     get_engine,
     init_db,
     lemmas,
+    verb_forms,
 )
 
 
@@ -71,8 +71,10 @@ class TestSchema:
             expected_tables = {
                 "lemmas",
                 "frequencies",
-                "forms",
-                "form_lookup",
+                "verb_forms",
+                "noun_forms",
+                "adjective_forms",
+                "form_lookup_new",
                 "definitions",
                 "sentences",
                 "translations",
@@ -129,7 +131,7 @@ class TestSchema:
         finally:
             db_path.unlink()
 
-    def test_forms_foreign_key(self) -> None:
+    def test_verb_forms_foreign_key(self) -> None:
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = Path(f.name)
 
@@ -140,25 +142,31 @@ class TestSchema:
             with get_connection(db_path) as conn:
                 # Insert a lemma first
                 result = conn.execute(
-                    lemmas.insert().values(lemma="parlare", lemma_stressed="parlare")
+                    lemmas.insert().values(lemma="parlare", lemma_stressed="parlare", pos="verb")
                 )
                 pk = result.inserted_primary_key
                 assert pk is not None
                 lemma_id: int = pk[0]
 
-                # Insert a form
+                # Insert a verb form
                 conn.execute(
-                    forms.insert().values(
+                    verb_forms.insert().values(
                         lemma_id=lemma_id,
                         form="parlo",
                         form_stressed="parlo",
-                        tags='["first-person", "singular", "present"]',
+                        mood="indicative",
+                        tense="present",
+                        person=1,
+                        number="singular",
                     )
                 )
 
-                row = conn.execute(select(forms).where(forms.c.lemma_id == lemma_id)).fetchone()
+                row = conn.execute(
+                    select(verb_forms).where(verb_forms.c.lemma_id == lemma_id)
+                ).fetchone()
                 assert row is not None
                 assert row.form == "parlo"
                 assert row.form_stressed == "parlo"
+                assert row.mood == "indicative"
         finally:
             db_path.unlink()

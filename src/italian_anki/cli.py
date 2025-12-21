@@ -12,6 +12,7 @@ from italian_anki.importers import (
     import_wiktextract,
 )
 from italian_anki.importers.itwac import ITWAC_CSV_FILES
+from italian_anki.importers.wiktextract import enrich_from_form_of
 
 DEFAULT_WIKTEXTRACT_PATH = Path("data/wiktextract/kaikki.org-dictionary-Italian.jsonl")
 DEFAULT_MORPHIT_PATH = Path("data/morphit/morph-it.txt")
@@ -53,6 +54,38 @@ def cmd_import_wiktextract(args: argparse.Namespace) -> int:
     if args.pos == "noun":
         print(f"  With gender: {stats.get('nouns_with_gender', 0):,}")
         print(f"  No gender:   {stats.get('nouns_no_gender', 0):,}")
+
+    return 0
+
+
+def cmd_enrich_formof(args: argparse.Namespace) -> int:
+    """Run the form-of enrichment command."""
+    jsonl_path = Path(args.input)
+    db_path = Path(args.database)
+
+    if not jsonl_path.exists():
+        print(f"Error: Input file not found: {jsonl_path}", file=sys.stderr)
+        return 1
+
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        print("Run 'import-wiktextract' first to create the database.", file=sys.stderr)
+        return 1
+
+    print(f"Enriching forms from form-of entries: {db_path}")
+    print(f"Using Wiktextract data from: {jsonl_path}")
+    print(f"Filtering to: {args.pos}")
+    print()
+
+    with get_connection(db_path) as conn:
+        stats = enrich_from_form_of(conn, jsonl_path, pos_filter=args.pos)
+
+    print()
+    print("Enrichment complete!")
+    print(f"  Form-of entries scanned: {stats['scanned']:,}")
+    print(f"  With label tags:         {stats['with_labels']:,}")
+    print(f"  Forms updated:           {stats['updated']:,}")
+    print(f"  Not found:               {stats['not_found']:,}")
 
     return 0
 
@@ -204,6 +237,34 @@ def main() -> int:
         help="Part of speech to import (default: verb)",
     )
     import_parser.set_defaults(func=cmd_import_wiktextract)
+
+    # enrich-formof subcommand
+    enrich_parser = subparsers.add_parser(
+        "enrich-formof",
+        help="Enrich forms with labels from form-of entries",
+    )
+    enrich_parser.add_argument(
+        "-i",
+        "--input",
+        type=str,
+        default=str(DEFAULT_WIKTEXTRACT_PATH),
+        help=f"Path to Wiktextract JSONL file (default: {DEFAULT_WIKTEXTRACT_PATH})",
+    )
+    enrich_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    enrich_parser.add_argument(
+        "--pos",
+        type=str,
+        default="verb",
+        choices=["verb", "noun", "adjective"],
+        help="Part of speech to enrich (default: verb)",
+    )
+    enrich_parser.set_defaults(func=cmd_enrich_formof)
 
     # import-morphit subcommand
     morphit_parser = subparsers.add_parser(

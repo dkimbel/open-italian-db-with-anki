@@ -5,7 +5,15 @@ from typing import Any
 
 from sqlalchemy import Connection, select
 
-from italian_anki.db.schema import form_lookup, forms, sentence_lemmas, sentences, translations
+from italian_anki.db.schema import (
+    adjective_forms,
+    form_lookup_new,
+    noun_forms,
+    sentence_lemmas,
+    sentences,
+    translations,
+    verb_forms,
+)
 from italian_anki.normalize import normalize, tokenize
 
 
@@ -80,19 +88,33 @@ def _stream_links(path: Path, italian_ids: set[int]) -> tuple[set[int], list[tup
 
 def _build_form_lookup_dict(conn: Connection) -> dict[str, list[int]]:
     """Build a dict mapping normalized_form -> list of lemma_ids."""
-    # Get form_lookup entries
-    lookup_result = conn.execute(select(form_lookup.c.form_normalized, form_lookup.c.form_id))
+    # Build form_id -> lemma_id mappings for each POS table
+    pos_tables = {
+        "verb": verb_forms,
+        "noun": noun_forms,
+        "adjective": adjective_forms,
+    }
 
-    # Get forms to map form_id -> lemma_id
-    forms_result = conn.execute(select(forms.c.id, forms.c.lemma_id))
-    form_to_lemma: dict[int, int] = {row.id: row.lemma_id for row in forms_result}
+    form_to_lemma: dict[str, dict[int, int]] = {}  # pos -> {form_id -> lemma_id}
+    for pos, table in pos_tables.items():
+        pos_result = conn.execute(select(table.c.id, table.c.lemma_id))
+        form_to_lemma[pos] = {row.id: row.lemma_id for row in pos_result}
+
+    # Get form_lookup_new entries
+    lookup_result = conn.execute(
+        select(form_lookup_new.c.form_normalized, form_lookup_new.c.pos, form_lookup_new.c.form_id)
+    )
 
     # Build normalized -> lemma_ids dict
     result: dict[str, list[int]] = {}
     for row in lookup_result:
         form_normalized = row.form_normalized
+        pos = row.pos
         form_id = row.form_id
-        lemma_id = form_to_lemma.get(form_id)
+
+        pos_mapping = form_to_lemma.get(pos, {})
+        lemma_id = pos_mapping.get(form_id)
+
         if lemma_id is not None:
             if form_normalized not in result:
                 result[form_normalized] = []
