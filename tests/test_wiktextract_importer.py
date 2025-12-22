@@ -133,6 +133,23 @@ SAMPLE_ADJECTIVE = {
     "sounds": [{"ipa": "/ˈbɛl.lo/"}],  # noqa: RUF001 (IPA stress marker)
 }
 
+# Sample noun entry without gender (should be filtered out)
+SAMPLE_NOUN_NO_GENDER = {
+    "pos": "noun",
+    "word": "acronimo",
+    # No categories containing gender info
+    "categories": ["Italian lemmas"],
+    "forms": [
+        {"form": "acronimo", "tags": ["canonical", "singular"]},
+        {"form": "acronimi", "tags": ["plural"]},
+    ],
+    "senses": [
+        # No gender tags
+        {"glosses": ["acronym"]},
+    ],
+    "sounds": [{"ipa": "/aˈkrɔ.ni.mo/"}],  # noqa: RUF001 (IPA stress marker)
+}
+
 
 def _create_test_jsonl(entries: list[dict[str, Any]]) -> Path:
     """Create a temporary JSONL file with test entries."""
@@ -563,3 +580,47 @@ class TestWiktextractImporter:
             ita_path.unlink()
             eng_path.unlink()
             links_path.unlink()
+
+    def test_filters_noun_without_gender(self) -> None:
+        """Test that nouns without gender are filtered out and counted."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        # Include both nouns with gender and one without
+        jsonl_path = _create_test_jsonl(
+            [SAMPLE_NOUN_MASCULINE, SAMPLE_NOUN_FEMININE, SAMPLE_NOUN_NO_GENDER]
+        )
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            # Two nouns with gender should be imported
+            assert stats["lemmas"] == 3  # All 3 lemmas are created
+            assert stats["nouns_without_gender"] == 1  # One noun lacks gender
+
+            with get_connection(db_path) as conn:
+                # The noun without gender should have no forms
+                acronimo = conn.execute(
+                    select(lemmas).where(lemmas.c.lemma == "acronimo")
+                ).fetchone()
+                assert acronimo is not None  # Lemma exists
+
+                acronimo_forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == acronimo.lemma_id)
+                ).fetchall()
+                assert len(acronimo_forms) == 0  # But no forms (filtered out)
+
+                # Nouns with gender should have forms
+                libro_forms = conn.execute(
+                    select(noun_forms).join(lemmas).where(lemmas.c.lemma == "libro")
+                ).fetchall()
+                assert len(libro_forms) > 0
+                assert all(f.gender is not None for f in libro_forms)
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()

@@ -69,7 +69,7 @@ noun_forms = Table(
     Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
     Column("form", Text),  # real Italian spelling
     Column("form_stressed", Text, nullable=False),  # with stress marks
-    Column("gender", String(1)),  # 'm' or 'f' (per-form, for nouns like paio/paia)
+    Column("gender", String(1), nullable=False),  # 'm' or 'f' (per-form, for nouns like paio/paia)
     Column("number", Text, nullable=False),  # singular, plural
     Column("labels", Text),  # NULL=standard, or comma-separated labels
     Column("is_diminutive", Boolean, default=False),

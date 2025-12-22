@@ -372,6 +372,10 @@ def _build_noun_form_row(
         # Fall back to lemma gender for forms without explicit gender tag
         gender = lemma_gender
 
+    # Filter out forms without gender (incomplete data)
+    if gender is None:
+        return None
+
     return {
         "lemma_id": lemma_id,
         "form": None,
@@ -451,6 +455,7 @@ def import_wiktextract(
         "lemmas": 0,
         "forms": 0,
         "forms_filtered": 0,
+        "nouns_without_gender": 0,
         "definitions": 0,
         "skipped": 0,
         "cleared": cleared,
@@ -558,6 +563,8 @@ def import_wiktextract(
             lemma_gender: str | None = None
             if pos_filter == "noun":
                 lemma_gender = _extract_gender(entry)
+                if lemma_gender is None:
+                    stats["nouns_without_gender"] += 1
             elif pos_filter == "verb":
                 auxiliary = _extract_auxiliary(entry)
                 transitivity = _extract_transitivity(entry)

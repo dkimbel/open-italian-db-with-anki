@@ -72,6 +72,8 @@ def cmd_import_wiktextract(args: argparse.Namespace) -> int:
     print(f"  Forms:       {stats['forms']:,}")
     print(f"  Definitions: {stats['definitions']:,}")
     print(f"  Skipped:     {stats['skipped']:,}")
+    if stats.get("nouns_without_gender", 0) > 0:
+        print(f"  Warning: {stats['nouns_without_gender']:,} nouns skipped (no gender)")
 
     return 0
 
@@ -416,6 +418,8 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             print(f"    Forms:       {stats['forms']:,}")
             print(f"    Definitions: {stats['definitions']:,}")
             print(f"    Skipped:     {stats['skipped']:,}")
+            if stats.get("nouns_without_gender", 0) > 0:
+                print(f"    Warning: {stats['nouns_without_gender']:,} nouns skipped (no gender)")
             print()
 
             # Step 2: Form-of enrichment
