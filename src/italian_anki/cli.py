@@ -4,7 +4,19 @@ import argparse
 import sys
 from pathlib import Path
 
-from italian_anki.db import get_connection, get_engine, init_db
+from italian_anki.db import (
+    adjective_forms,
+    frequencies,
+    get_connection,
+    get_engine,
+    init_db,
+    lemmas,
+    noun_forms,
+    noun_metadata,
+    sentence_lemmas,
+    sentences,
+    verb_forms,
+)
 from italian_anki.download import (
     download_all,
     download_itwac,
@@ -208,6 +220,97 @@ def cmd_import_tatoeba(args: argparse.Namespace) -> int:
     print(f"  English sentences: {stats['eng_sentences']:,}")
     print(f"  Translations:      {stats['translations']:,}")
     print(f"  Sentence-lemma links: {stats['sentence_lemmas']:,}")
+
+    return 0
+
+
+def cmd_stats(args: argparse.Namespace) -> int:
+    """Print database statistics."""
+    from sqlalchemy import func, select
+
+    db_path = Path(args.database)
+
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        return 1
+
+    with get_connection(db_path) as conn:
+        # Lemma counts
+        total_lemmas = conn.execute(select(func.count()).select_from(lemmas)).scalar()
+        n_verbs = conn.execute(
+            select(func.count()).select_from(lemmas).where(lemmas.c.pos == "verb")
+        ).scalar()
+        n_nouns = conn.execute(
+            select(func.count()).select_from(lemmas).where(lemmas.c.pos == "noun")
+        ).scalar()
+        n_adjectives = conn.execute(
+            select(func.count()).select_from(lemmas).where(lemmas.c.pos == "adjective")
+        ).scalar()
+
+        # Form counts (separate tables)
+        n_verb_forms = conn.execute(select(func.count()).select_from(verb_forms)).scalar() or 0
+        n_noun_forms = conn.execute(select(func.count()).select_from(noun_forms)).scalar() or 0
+        n_adj_forms = conn.execute(select(func.count()).select_from(adjective_forms)).scalar() or 0
+        total_forms = n_verb_forms + n_noun_forms + n_adj_forms
+
+        # Forms with real spelling
+        verb_with_spelling = (
+            conn.execute(
+                select(func.count()).select_from(verb_forms).where(verb_forms.c.form.isnot(None))
+            ).scalar()
+            or 0
+        )
+        noun_with_spelling = (
+            conn.execute(
+                select(func.count()).select_from(noun_forms).where(noun_forms.c.form.isnot(None))
+            ).scalar()
+            or 0
+        )
+        adj_with_spelling = (
+            conn.execute(
+                select(func.count())
+                .select_from(adjective_forms)
+                .where(adjective_forms.c.form.isnot(None))
+            ).scalar()
+            or 0
+        )
+        forms_with_spelling = verb_with_spelling + noun_with_spelling + adj_with_spelling
+
+        # Metadata
+        nouns_with_gender = conn.execute(select(func.count()).select_from(noun_metadata)).scalar()
+        lemmas_with_freq = conn.execute(
+            select(func.count(func.distinct(frequencies.c.lemma_id)))
+        ).scalar()
+
+        # Sentences
+        ita_sentences = conn.execute(
+            select(func.count()).select_from(sentences).where(sentences.c.lang == "ita")
+        ).scalar()
+        eng_sentences = conn.execute(
+            select(func.count()).select_from(sentences).where(sentences.c.lang == "eng")
+        ).scalar()
+        lemma_links = conn.execute(select(func.count()).select_from(sentence_lemmas)).scalar()
+
+    print(f"Database: {db_path}")
+    print()
+    print("Lemmas:")
+    print(f"  Total:      {total_lemmas:,}")
+    print(f"  Verbs:      {n_verbs:,}")
+    print(f"  Nouns:      {n_nouns:,}")
+    print(f"  Adjectives: {n_adjectives:,}")
+    print()
+    print("Forms:")
+    print(f"  Total:         {total_forms:,}")
+    print(f"  With spelling: {forms_with_spelling:,}")
+    print()
+    print("Metadata:")
+    print(f"  Nouns with gender:     {nouns_with_gender:,}")
+    print(f"  Lemmas with frequency: {lemmas_with_freq:,}")
+    print()
+    print("Sentences:")
+    print(f"  Italian:     {ita_sentences:,}")
+    print(f"  English:     {eng_sentences:,}")
+    print(f"  Lemma links: {lemma_links:,}")
 
     return 0
 
@@ -572,6 +675,20 @@ def main() -> int:
         help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
     )
     import_all_parser.set_defaults(func=cmd_import_all)
+
+    # stats subcommand
+    stats_parser = subparsers.add_parser(
+        "stats",
+        help="Show database statistics",
+    )
+    stats_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    stats_parser.set_defaults(func=cmd_stats)
 
     # download-wiktextract subcommand
     dl_wikt_parser = subparsers.add_parser(

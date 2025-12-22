@@ -211,43 +211,9 @@ Example: `Mangiare` → `mangiare`, `reiterare` from both LeFFI and Wiktextract 
 
 ---
 
-## ETL Workflow
+## ETL Pipeline
 
-### Phase 1: Download (complete)
-- `data/wiktextract/kaikki.org-dictionary-Italian.jsonl` — CC-BY-SA + GFDL
-- `data/morphit/morph-it.txt` — CC-BY-SA 2.0 + LGPL
-- `data/itwac/*.csv` — MIT
-- `data/tatoeba/*.tsv` — CC-BY 2.0 FR
-
-### Phase 2: Import Wiktextract
-1. Stream JSONL, filter to `pos == 'verb'`
-2. For each entry:
-   - Insert into `lemmas` (normalized lemma + stressed form) with auxiliary, transitivity, IPA
-   - Insert `forms` from `forms` array (form_stressed from Wiktextract)
-   - Insert `definitions` from `senses` array
-3. Build initial `form_lookup` from normalized forms
-
-### Phase 3: Enrich with Morph-it!
-1. Parse `morph-it.txt` into a lookup dict (normalized → real spelling)
-2. Update `forms.form` with real Italian spelling where available
-3. Update `form_lookup` with Morph-it! normalized forms
-
-### Phase 4: Import ItWaC frequencies
-1. Parse CSV files (convert ISO-8859-1 → UTF-8)
-2. Match lemmas by normalized form
-3. Insert into `frequencies` table with corpus version
-
-### Phase 5: Import Tatoeba
-1. Import Italian + English sentences into `sentences`
-2. Import `ita_eng_links.tsv` into `translations`
-3. Tokenize Italian sentences, match against `form_lookup`
-4. Insert matches into `sentence_verbs`
-
-### Phase 6: Import Nouns & Adjectives
-1. Run Wiktextract import with `--pos noun` and `--pos adjective`
-2. Extract gender for nouns → `noun_metadata` table
-3. Run Morph-it! enrichment for nouns and adjectives
-4. Import ItWaC frequencies for nouns and adjectives
+Data flows through a pipeline: Wiktextract provides lemmas, forms, and definitions → Morph-it! enriches forms with real Italian spelling → ItWaC adds frequency data → Tatoeba links example sentences. Each step is idempotent and can be run with `task import-*` commands. Run `task stats` to see current database state.
 
 ---
 
@@ -325,23 +291,16 @@ data/
 
 ---
 
-## Nouns & Adjectives (Implemented)
+## Nouns & Adjectives
 
-Nouns and adjectives are now supported:
+Nouns and adjectives use the same pipeline as verbs:
 - `lemmas.pos` = 'noun' or 'adjective'
 - `noun_metadata.gender` stores 'm' or 'f' for nouns (gender is derivational)
-- Adjective gender is stored in form tags (gender is inflectional)
-- Same import pipeline: Wiktextract → Morph-it! enrichment → ItWaC frequencies
-
-Current stats (Phase 6):
-- 56,923 nouns (56,892 with gender data)
-- 19,883 adjectives
-- Morph-it! enrichment: 14k noun forms, 12k adjective forms
-- ItWaC frequencies: 33k nouns, 13k adjectives
+- Adjective gender is stored in form columns (gender is inflectional)
 
 ---
 
-## Open Questions / Deferred
+## Open Questions
 
 1. **DiPI integration**: Format unknown; research later for per-form IPA
 2. **Card templates**: Specific Anki note types TBD
