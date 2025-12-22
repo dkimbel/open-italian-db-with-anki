@@ -3,6 +3,9 @@
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
+
+from sqlalchemy import Connection
 
 from italian_anki.db import (
     adjective_forms,
@@ -65,19 +68,10 @@ def cmd_import_wiktextract(args: argparse.Namespace) -> int:
     print()
 
     with get_connection(db_path) as conn:
-        stats = import_wiktextract(conn, jsonl_path, pos_filter=args.pos)
+        _run_wiktextract_import(conn, jsonl_path, args.pos)
 
     print()
     print("Import complete!")
-    if stats["cleared"] > 0:
-        print(f"  Cleared:     {stats['cleared']:,} existing lemmas")
-    print(f"  Lemmas:      {stats['lemmas']:,}")
-    print(f"  Forms:       {stats['forms']:,}")
-    print(f"  Definitions: {stats['definitions']:,}")
-    print(f"  Skipped:     {stats['skipped']:,}")
-    if stats.get("nouns_without_gender", 0) > 0:
-        print(f"    no gender: {stats['nouns_without_gender']:,}")
-
     return 0
 
 
@@ -101,15 +95,10 @@ def cmd_enrich_formof(args: argparse.Namespace) -> int:
     print()
 
     with get_connection(db_path) as conn:
-        stats = enrich_from_form_of(conn, jsonl_path, pos_filter=args.pos)
+        _run_formof_enrichment(conn, jsonl_path, args.pos)
 
     print()
     print("Enrichment complete!")
-    print(f"  Form-of entries scanned: {stats['scanned']:,}")
-    print(f"  With label tags:         {stats['with_labels']:,}")
-    print(f"  Forms updated:           {stats['updated']:,}")
-    print(f"  Not found:               {stats['not_found']:,}")
-
     return 0
 
 
@@ -133,14 +122,10 @@ def cmd_import_morphit(args: argparse.Namespace) -> int:
     print()
 
     with get_connection(db_path) as conn:
-        stats = import_morphit(conn, morphit_path, pos_filter=args.pos)
+        _run_morphit_import(conn, morphit_path, args.pos)
 
     print()
     print("Enrichment complete!")
-    print(f"  Forms updated:    {stats['updated']:,}")
-    print(f"  Forms not found:  {stats['not_found']:,}")
-    print(f"  Lookup entries:   {stats['lookup_added']:,}")
-
     return 0
 
 
@@ -173,13 +158,10 @@ def cmd_import_itwac(args: argparse.Namespace) -> int:
     print()
 
     with get_connection(db_path) as conn:
-        stats = import_itwac(conn, csv_path, pos_filter=args.pos)
+        _run_itwac_import(conn, csv_path, args.pos)
 
     print()
     print("Import complete!")
-    print(f"  Lemmas matched:     {stats['matched']:,}")
-    print(f"  Lemmas not found:   {stats['not_found']:,}")
-
     return 0
 
 
@@ -211,17 +193,10 @@ def cmd_import_tatoeba(args: argparse.Namespace) -> int:
     print()
 
     with get_connection(db_path) as conn:
-        stats = import_tatoeba(conn, ita_path, eng_path, links_path)
+        _run_tatoeba_import(conn, ita_path, eng_path, links_path)
 
     print()
     print("Import complete!")
-    if stats["cleared"] > 0:
-        print(f"  Cleared:          {stats['cleared']:,} existing sentences")
-    print(f"  Italian sentences: {stats['ita_sentences']:,}")
-    print(f"  English sentences: {stats['eng_sentences']:,}")
-    print(f"  Translations:      {stats['translations']:,}")
-    print(f"  Sentence-lemma links: {stats['sentence_lemmas']:,}")
-
     return 0
 
 
@@ -364,6 +339,115 @@ def _print_progress(current: int, total: int, desc: str = "Processing") -> None:
         print()  # newline when done
 
 
+def _make_progress_callback(desc: str = "Processing"):
+    """Create a progress callback for import functions."""
+
+    def callback(current: int, total: int) -> None:
+        _print_progress(current, total, desc)
+
+    return callback
+
+
+# --- Shared import helpers ---
+# These encapsulate the import logic + output formatting, used by both
+# standalone commands and cmd_import_all.
+
+
+def _run_wiktextract_import(
+    conn: Connection, jsonl_path: Path, pos: str, indent: str = "  "
+) -> dict[str, Any]:
+    """Run wiktextract import and print stats."""
+    stats = import_wiktextract(
+        conn, jsonl_path, pos_filter=pos, progress_callback=_make_progress_callback()
+    )
+    print()
+    if stats["cleared"] > 0:
+        print(f"{indent}Cleared:     {stats['cleared']:,} existing lemmas")
+    print(f"{indent}Lemmas:      {stats['lemmas']:,}")
+    print(f"{indent}Forms:       {stats['forms']:,}")
+    print(f"{indent}Definitions: {stats['definitions']:,}")
+    print(f"{indent}Skipped:     {stats['skipped']:,}")
+    if stats.get("nouns_without_gender", 0) > 0:
+        print(f"{indent}  No gender: {stats['nouns_without_gender']:,}")
+    return stats
+
+
+def _run_formof_enrichment(
+    conn: Connection, jsonl_path: Path, pos: str, indent: str = "  "
+) -> dict[str, Any]:
+    """Run form-of enrichment and print stats."""
+    stats = enrich_from_form_of(
+        conn, jsonl_path, pos_filter=pos, progress_callback=_make_progress_callback()
+    )
+    print()
+    print(f"{indent}Form-of entries scanned: {stats['scanned']:,}")
+    print(f"{indent}With label tags:         {stats['with_labels']:,}")
+    print(f"{indent}Forms updated:           {stats['updated']:,}")
+    print(f"{indent}Not found:               {stats['not_found']:,}")
+    return stats
+
+
+def _run_morphit_import(
+    conn: Connection, morphit_path: Path, pos: str, indent: str = "  "
+) -> dict[str, Any]:
+    """Run Morph-it! enrichment and print stats."""
+    stats = import_morphit(
+        conn, morphit_path, pos_filter=pos, progress_callback=_make_progress_callback()
+    )
+    print()
+    print(f"{indent}Forms updated:    {stats['updated']:,}")
+    print(f"{indent}Forms not found:  {stats['not_found']:,}")
+    print(f"{indent}Lookup entries:   {stats['lookup_added']:,}")
+    return stats
+
+
+def _run_formof_spelling_enrichment(
+    conn: Connection, jsonl_path: Path, pos: str, indent: str = "  "
+) -> dict[str, Any]:
+    """Run form-of spelling enrichment and print stats."""
+    stats = enrich_form_spelling_from_form_of(
+        conn, jsonl_path, pos_filter=pos, progress_callback=_make_progress_callback()
+    )
+    print()
+    print(f"{indent}Form-of entries scanned: {stats['scanned']:,}")
+    print(f"{indent}Forms updated:           {stats['updated']:,}")
+    print(f"{indent}Already had spelling:    {stats['already_filled']:,}")
+    print(f"{indent}Not found:               {stats['not_found']:,}")
+    return stats
+
+
+def _run_itwac_import(
+    conn: Connection, csv_path: Path, pos: str, indent: str = "  "
+) -> dict[str, Any] | None:
+    """Run ItWaC frequency import and print stats. Returns None if file doesn't exist."""
+    if not csv_path.exists():
+        return None
+    stats = import_itwac(
+        conn, csv_path, pos_filter=pos, progress_callback=_make_progress_callback()
+    )
+    print()
+    print(f"{indent}Lemmas matched:     {stats['matched']:,}")
+    print(f"{indent}Lemmas not found:   {stats['not_found']:,}")
+    return stats
+
+
+def _run_tatoeba_import(
+    conn: Connection, ita_path: Path, eng_path: Path, links_path: Path, indent: str = "  "
+) -> dict[str, Any]:
+    """Run Tatoeba import and print stats."""
+    stats = import_tatoeba(
+        conn, ita_path, eng_path, links_path, progress_callback=_make_progress_callback()
+    )
+    print()
+    if stats["cleared"] > 0:
+        print(f"{indent}Cleared:          {stats['cleared']:,} existing sentences")
+    print(f"{indent}Italian sentences: {stats['ita_sentences']:,}")
+    print(f"{indent}English sentences: {stats['eng_sentences']:,}")
+    print(f"{indent}Translations:      {stats['translations']:,}")
+    print(f"{indent}Sentence-lemma links: {stats['sentence_lemmas']:,}")
+    return stats
+
+
 def cmd_import_all(args: argparse.Namespace) -> int:
     """Run the full import pipeline for all parts of speech."""
     db_path = Path(args.database)
@@ -394,6 +478,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
 
     pos_list = ["verb", "noun", "adjective"]
     total_pos = len(pos_list)
+    indent = "    "
 
     # Import each POS
     for pos_idx, pos in enumerate(pos_list, 1):
@@ -406,94 +491,32 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         with get_connection(db_path) as conn:
             # Step 1: Wiktextract import
             print("[1/5] Importing from Wiktextract...")
-
-            def wikt_progress(current: int, total: int) -> None:
-                _print_progress(current, total, "Processing")
-
-            stats = import_wiktextract(
-                conn, jsonl_path, pos_filter=pos, progress_callback=wikt_progress
-            )
-            print()
-            print("  Import complete!")
-            if stats["cleared"] > 0:
-                print(f"    Cleared:     {stats['cleared']:,} existing lemmas")
-            print(f"    Lemmas:      {stats['lemmas']:,}")
-            print(f"    Forms:       {stats['forms']:,}")
-            print(f"    Definitions: {stats['definitions']:,}")
-            print(f"    Skipped:     {stats['skipped']:,}")
-            if stats.get("nouns_without_gender", 0) > 0:
-                print(f"      no gender: {stats['nouns_without_gender']:,}")
+            _run_wiktextract_import(conn, jsonl_path, pos, indent=indent)
             print()
 
             # Step 2: Form-of enrichment
             print("[2/5] Enriching from form-of entries...")
-
-            def formof_progress(current: int, total: int) -> None:
-                _print_progress(current, total, "Processing")
-
-            stats = enrich_from_form_of(
-                conn, jsonl_path, pos_filter=pos, progress_callback=formof_progress
-            )
-            print()
-            print("  Enrichment complete!")
-            print(f"    Form-of entries scanned: {stats['scanned']:,}")
-            print(f"    With label tags:         {stats['with_labels']:,}")
-            print(f"    Forms updated:           {stats['updated']:,}")
-            print(f"    Not found:               {stats['not_found']:,}")
+            _run_formof_enrichment(conn, jsonl_path, pos, indent=indent)
             print()
 
             # Step 3: Morph-it! enrichment
             print("[3/5] Enriching with Morph-it! spelling...")
-
-            def morphit_progress(current: int, total: int) -> None:
-                _print_progress(current, total, "Processing")
-
-            stats = import_morphit(
-                conn, morphit_path, pos_filter=pos, progress_callback=morphit_progress
-            )
-            print()
-            print("  Enrichment complete!")
-            print(f"    Forms updated:    {stats['updated']:,}")
-            print(f"    Forms not found:  {stats['not_found']:,}")
-            print(f"    Lookup entries:   {stats['lookup_added']:,}")
+            _run_morphit_import(conn, morphit_path, pos, indent=indent)
             print()
 
             # Step 4: Form-of spelling fallback
             print("[4/5] Enriching form spelling from form-of entries...")
-
-            def formof_spelling_progress(current: int, total: int) -> None:
-                _print_progress(current, total, "Processing")
-
-            stats = enrich_form_spelling_from_form_of(
-                conn, jsonl_path, pos_filter=pos, progress_callback=formof_spelling_progress
-            )
-            print()
-            print("  Enrichment complete!")
-            print(f"    Form-of entries scanned: {stats['scanned']:,}")
-            print(f"    Forms updated:           {stats['updated']:,}")
-            print(f"    Already had spelling:    {stats['already_filled']:,}")
-            print(f"    Not found:               {stats['not_found']:,}")
+            _run_formof_spelling_enrichment(conn, jsonl_path, pos, indent=indent)
             print()
 
             # Step 5: ItWaC frequency import
             csv_filename = ITWAC_CSV_FILES.get(pos)
             if csv_filename:
                 csv_path = DEFAULT_ITWAC_DIR / csv_filename
-                if csv_path.exists():
-                    print("[5/5] Importing ItWaC frequencies...")
-
-                    def itwac_progress(current: int, total: int) -> None:
-                        _print_progress(current, total, "Processing")
-
-                    stats = import_itwac(
-                        conn, csv_path, pos_filter=pos, progress_callback=itwac_progress
-                    )
-                    print()
-                    print("  Import complete!")
-                    print(f"    Lemmas matched:     {stats['matched']:,}")
-                    print(f"    Lemmas not found:   {stats['not_found']:,}")
-                else:
-                    print("[5/5] Skipped: ItWaC file not found")
+                print("[5/5] Importing ItWaC frequencies...")
+                result = _run_itwac_import(conn, csv_path, pos, indent=indent)
+                if result is None:
+                    print(f"{indent}Skipped: ItWaC file not found")
             else:
                 print("[5/5] Skipped: No ItWaC file for this POS")
             print()
@@ -505,21 +528,8 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     print()
     print("Importing sentences and linking to lemmas...")
 
-    def tatoeba_progress(current: int, total: int) -> None:
-        _print_progress(current, total, "Processing")
-
     with get_connection(db_path) as conn:
-        stats = import_tatoeba(
-            conn, ita_path, eng_path, links_path, progress_callback=tatoeba_progress
-        )
-    print()
-    print("Import complete!")
-    if stats["cleared"] > 0:
-        print(f"  Cleared:          {stats['cleared']:,} existing sentences")
-    print(f"  Italian sentences: {stats['ita_sentences']:,}")
-    print(f"  English sentences: {stats['eng_sentences']:,}")
-    print(f"  Translations:      {stats['translations']:,}")
-    print(f"  Sentence-lemma links: {stats['sentence_lemmas']:,}")
+        _run_tatoeba_import(conn, ita_path, eng_path, links_path, indent="  ")
     print()
 
     print("=" * 80)
