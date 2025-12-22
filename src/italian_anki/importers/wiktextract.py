@@ -14,6 +14,7 @@ from italian_anki.db.schema import (
     frequencies,
     lemmas,
     noun_forms,
+    noun_metadata,
     sentence_lemmas,
     verb_forms,
     verb_metadata,
@@ -41,6 +42,40 @@ POS_FORM_TABLES = {
     "noun": noun_forms,
     "adjective": adjective_forms,
 }
+
+# Known gender patterns in Wiktextract head_template args
+# Maps raw values to normalized forms
+GENDER_PATTERNS: dict[str, str] = {
+    "m": "m",
+    "f": "f",
+    "mf": "mf",
+    "mfbysense": "mfbysense",
+    "m-p": "m-p",  # masculine pluralia tantum
+    "f-p": "f-p",  # feminine pluralia tantum
+    "m-s": "m-s",  # masculine singularia tantum
+    "f-s": "f-s",  # feminine singularia tantum
+}
+
+
+def _find_gender_in_args(args: dict[str, Any]) -> str | None:
+    """Search all arg values for a known gender pattern.
+
+    Wiktextract head_template args have inconsistent key positions:
+    - {'1': 'm'}                           # gender in position 1
+    - {'1': 'mfbysense'}                   # common gender in position 1
+    - {'1': 'it', '2': 'noun', 'g': 'f'}   # gender in 'g' key
+    - {'1': 'm', '2': '#'}                 # gender in 1, invariable in 2
+
+    This function robustly scans ALL values to find a known gender marker.
+
+    Returns:
+        The matched gender pattern string, or None if not found.
+    """
+    for value in args.values():
+        if isinstance(value, str) and value in GENDER_PATTERNS:
+            return value
+    return None
+
 
 # Tags to filter out from definitions.tags (already extracted to proper columns
 # or not useful for learners).
@@ -74,13 +109,20 @@ def _is_pos_lemma(entry: dict[str, Any], pos: str) -> bool:
     """Check if entry is a lemma for the given POS (not an inflected form entry).
 
     Works for verbs, nouns, and adjectives.
+
+    Note: Some lemmas (e.g., pluralia tantum nouns like 'forbici') have no
+    'forms' array at all. The key indicator is that lemmas don't have 'form_of'
+    in any sense, while form-of entries do.
     """
     if entry.get("pos") != pos:
         return False
-    # Lemmas have a forms array; form entries have form_of in senses
-    if "forms" not in entry:
+
+    # For verbs, require forms array (all verbs have conjugation tables)
+    # For nouns/adjectives, don't require forms (some may not have explicit declensions)
+    if pos == "verb" and "forms" not in entry:
         return False
-    # Check if any sense has form_of (meaning this is a form, not a lemma)
+
+    # Check if any sense has form_of (meaning this is a form-of entry, not a lemma)
     return all("form_of" not in sense for sense in entry.get("senses", []))
 
 
@@ -139,10 +181,21 @@ def _extract_ipa(entry: dict[str, Any]) -> str | None:
 def _extract_gender(entry: dict[str, Any]) -> str | None:
     """Extract grammatical gender for nouns.
 
-    Priority: categories → senses tags → head_templates.
+    Priority: head_templates (robustly scanned) → categories → senses tags.
     Returns 'm' for masculine, 'f' for feminine, None if unknown.
     """
-    # Check categories first (most reliable)
+    # Check head_templates first (most reliable when using robust scanning)
+    for template in entry.get("head_templates", []):
+        args = template.get("args", {})
+        gender_arg = _find_gender_in_args(args)
+        if gender_arg is not None:
+            if gender_arg.startswith("m"):
+                return "m"
+            if gender_arg.startswith("f"):
+                return "f"
+            # mf/mfbysense don't give us a single gender
+
+    # Check categories as fallback
     categories: list[str | dict[str, Any]] = entry.get("categories", [])
     for cat in categories:
         cat_name = str(cat.get("name", "")) if isinstance(cat, dict) else (str(cat) if cat else "")
@@ -151,7 +204,7 @@ def _extract_gender(entry: dict[str, Any]) -> str | None:
         if "Italian feminine nouns" in cat_name:
             return "f"
 
-    # Check senses tags as fallback
+    # Check senses tags as last resort
     for sense in entry.get("senses", []):
         tags = sense.get("tags", [])
         if "masculine" in tags:
@@ -159,17 +212,140 @@ def _extract_gender(entry: dict[str, Any]) -> str | None:
         if "feminine" in tags:
             return "f"
 
-    # Check head_templates as last resort
+    return None
+
+
+def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
+    """Extract noun classification from Wiktextract entry.
+
+    Returns a dict with:
+    - gender_class: 'm', 'f', 'common_gender_fixed', 'common_gender_variable'
+    - number_class: 'standard', 'pluralia_tantum', 'singularia_tantum', 'invariable'
+    - genders: list of genders present in the forms
+    """
+    result: dict[str, Any] = {
+        "gender_class": None,
+        "number_class": "standard",
+        "genders": [],
+    }
+
+    # Check head_templates for gender markers
+    has_masculine = False
+    has_feminine = False
+    is_mfbysense = False  # Different meanings per gender (fine)
+    is_invariable = False
+    is_pluralia_tantum = False
+    is_singularia_tantum = False
+
     for template in entry.get("head_templates", []):
         args = template.get("args", {})
-        # Common pattern: {"1": "it", "2": "m"} or {"1": "it", "2": "f"}
-        gender_arg = args.get("2", "") or args.get("g", "")
-        if gender_arg in ("m", "m-s", "m-p"):
-            return "m"
-        if gender_arg in ("f", "f-s", "f-p"):
-            return "f"
+        # Robustly find gender marker by scanning all arg values
+        gender_arg = _find_gender_in_args(args)
 
-    return None
+        if gender_arg is None:
+            # Check for invariable marker (# in Wiktextract) even without gender
+            if "#" in str(args):
+                is_invariable = True
+            continue
+
+        # Check for common gender markers
+        if gender_arg in ("mf", "mfbysense"):
+            has_masculine = True
+            has_feminine = True
+            if gender_arg == "mfbysense":
+                is_mfbysense = True
+        # Check for masculine-only or feminine-only
+        elif gender_arg.startswith("m"):
+            has_masculine = True
+        elif gender_arg.startswith("f"):
+            has_feminine = True
+
+        # Check for invariable marker (# in Wiktextract)
+        if "#" in str(args):
+            is_invariable = True
+
+        # Check for pluralia tantum (f-p, m-p)
+        if gender_arg in ("m-p", "f-p"):
+            is_pluralia_tantum = True
+        # Check for singularia tantum markers
+        if gender_arg.endswith("-s") or gender_arg.endswith("-s!"):
+            is_singularia_tantum = True
+
+    # Also check categories for number restrictions
+    categories: list[str | dict[str, Any]] = entry.get("categories", [])
+    for cat in categories:
+        cat_name = str(cat.get("name", "")) if isinstance(cat, dict) else (str(cat) if cat else "")
+        if "Italian pluralia tantum" in cat_name or "plurale tantum" in cat_name.lower():
+            is_pluralia_tantum = True
+        if "Italian uncountable nouns" in cat_name:
+            is_singularia_tantum = True
+        if "Italian indeclinable nouns" in cat_name:
+            is_invariable = True
+
+    # Check forms to see if singular/plural have the same text (invariable)
+    forms_by_number: dict[str, set[str]] = {"singular": set(), "plural": set()}
+    for form_data in entry.get("forms", []):
+        form_stressed = form_data.get("form", "")
+        tags = form_data.get("tags", [])
+        if "singular" in tags:
+            forms_by_number["singular"].add(form_stressed)
+        if "plural" in tags:
+            forms_by_number["plural"].add(form_stressed)
+
+    # If singular and plural forms are identical, mark as invariable
+    if (
+        forms_by_number["singular"]
+        and forms_by_number["plural"]
+        and forms_by_number["singular"] == forms_by_number["plural"]
+    ):
+        is_invariable = True
+
+    # Determine gender_class
+    if has_masculine and has_feminine:
+        if is_mfbysense:
+            # Different meanings per gender - will create separate lemmas
+            result["gender_class"] = "mfbysense"
+        else:
+            # Check if forms differ by gender
+            masc_forms: set[str] = set()
+            fem_forms: set[str] = set()
+            for form_data in entry.get("forms", []):
+                form_stressed = form_data.get("form", "")
+                tags = form_data.get("tags", [])
+                if "masculine" in tags:
+                    masc_forms.add(form_stressed)
+                if "feminine" in tags:
+                    fem_forms.add(form_stressed)
+
+            if masc_forms and fem_forms and masc_forms != fem_forms:
+                result["gender_class"] = "common_gender_variable"
+            else:
+                result["gender_class"] = "common_gender_fixed"
+        result["genders"] = ["m", "f"]
+    elif has_masculine:
+        result["gender_class"] = "m"
+        result["genders"] = ["m"]
+    elif has_feminine:
+        result["gender_class"] = "f"
+        result["genders"] = ["f"]
+    else:
+        # Fall back to _extract_gender for simple cases
+        simple_gender = _extract_gender(entry)
+        if simple_gender:
+            result["gender_class"] = simple_gender
+            result["genders"] = [simple_gender]
+
+    # Determine number_class
+    if is_pluralia_tantum:
+        result["number_class"] = "pluralia_tantum"
+    elif is_singularia_tantum:
+        result["number_class"] = "singularia_tantum"
+    elif is_invariable:
+        result["number_class"] = "invariable"
+    else:
+        result["number_class"] = "standard"
+
+    return result
 
 
 def _extract_lemma_stressed(entry: dict[str, Any]) -> str:
@@ -191,16 +367,27 @@ def _iter_forms(entry: dict[str, Any], pos: str) -> Iterator[tuple[str, list[str
         pos: Part of speech (verb, noun, adjective)
     """
     seen: set[tuple[str, tuple[str, ...]]] = set()
-    has_singular = False
     has_masc_singular = False
 
     for form_data in entry.get("forms", []):
         form_stressed = form_data.get("form", "")
         tags = form_data.get("tags", [])
+        tag_set = set(tags)
 
-        # Skip metadata entries
-        if not form_stressed or set(tags) & SKIP_TAGS:
+        # Skip empty forms
+        if not form_stressed:
             continue
+
+        # For verbs, skip all metadata tags
+        if pos == "verb" and tag_set & SKIP_TAGS:
+            continue
+
+        # For nouns/adjectives, skip metadata-only forms but keep forms with meaningful info
+        # (e.g., ["canonical", "plural"] has meaningful "plural" tag)
+        if pos in ("noun", "adjective"):
+            meaningful_tags = tag_set - SKIP_TAGS
+            if not meaningful_tags:
+                continue
 
         # Skip auxiliary markers (they're metadata, not conjugated forms)
         if "auxiliary" in tags:
@@ -211,9 +398,7 @@ def _iter_forms(entry: dict[str, Any], pos: str) -> Iterator[tuple[str, list[str
         if pos == "verb" and "canonical" in tags:
             continue
 
-        # Track whether we've seen the base form
-        if pos == "noun" and "singular" in tags:
-            has_singular = True
+        # Track whether we've seen the base form (for adjectives)
         if pos == "adjective" and "masculine" in tags and "singular" in tags:
             has_masc_singular = True
 
@@ -226,14 +411,9 @@ def _iter_forms(entry: dict[str, Any], pos: str) -> Iterator[tuple[str, list[str
         yield form_stressed, tags
 
     # Add base form if missing (Wiktextract stores it in 'word', not in 'forms')
-    # For nouns: add singular form if not present
     # For adjectives: add masculine singular form if not present
+    # Note: noun base forms are handled in the main import loop with proper gender logic
     lemma_stressed = _extract_lemma_stressed(entry)
-
-    if pos == "noun" and not has_singular:
-        key = (lemma_stressed, ("singular",))
-        if key not in seen:
-            yield lemma_stressed, ["singular"]
 
     if pos == "adjective" and not has_masc_singular:
         key = (lemma_stressed, ("masculine", "singular"))
@@ -313,6 +493,8 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     # 5. POS-specific metadata tables
     if pos_filter == "verb":
         conn.execute(verb_metadata.delete().where(verb_metadata.c.lemma_id.in_(lemma_subq)))
+    elif pos_filter == "noun":
+        conn.execute(noun_metadata.delete().where(noun_metadata.c.lemma_id.in_(lemma_subq)))
     # 6. sentence_lemmas (references lemmas)
     conn.execute(sentence_lemmas.delete().where(sentence_lemmas.c.lemma_id.in_(lemma_subq)))
     # 7. lemmas (direct filter, no subquery needed)
@@ -559,12 +741,34 @@ def import_wiktextract(
                 stats["skipped"] += 1
                 continue
 
-            # Insert POS-specific metadata (verbs only - noun gender is per-form now)
+            # Insert POS-specific metadata
             lemma_gender: str | None = None
+            noun_class: dict[str, Any] | None = None
             if pos_filter == "noun":
-                lemma_gender = _extract_gender(entry)
-                if lemma_gender is None:
+                noun_class = _extract_noun_classification(entry)
+                gender_class = noun_class.get("gender_class")
+                number_class = noun_class.get("number_class", "standard")
+
+                if gender_class is None:
                     stats["nouns_without_gender"] += 1
+                    # Fall back to simple gender for backward compatibility
+                    lemma_gender = _extract_gender(entry)
+                else:
+                    # Insert noun_metadata
+                    conn.execute(
+                        noun_metadata.insert().values(
+                            lemma_id=lemma_id,
+                            gender_class=gender_class,
+                            number_class=number_class,
+                        )
+                    )
+                    # Set lemma_gender for form generation (fallback for forms without explicit gender)
+                    if gender_class in ("m", "f"):
+                        lemma_gender = gender_class
+                    elif gender_class in ("common_gender_fixed", "common_gender_variable"):
+                        # For common gender nouns, we don't have a default - each form needs explicit gender
+                        lemma_gender = None
+
             elif pos_filter == "verb":
                 auxiliary = _extract_auxiliary(entry)
                 transitivity = _extract_transitivity(entry)
@@ -578,19 +782,92 @@ def import_wiktextract(
                     )
 
             # Queue forms for batch insert (using POS-specific builder)
+            # Track what number/gender combinations we've already added for nouns
+            seen_noun_forms: set[tuple[str, str]] = set()  # (number, gender)
+
             for form_stressed, tags in _iter_forms(entry, pos_filter):
                 if pos_filter == "noun":
-                    row = _build_noun_form_row(lemma_id, form_stressed, tags, lemma_gender)
+                    # Skip singular forms for pluralia tantum nouns
+                    is_pluralia_tantum = (
+                        noun_class and noun_class.get("number_class") == "pluralia_tantum"
+                    )
+                    if is_pluralia_tantum and "singular" in tags:
+                        continue
+
+                    # Check if this is a common gender noun without explicit gender in tags
+                    has_gender_tag = "masculine" in tags or "feminine" in tags
+                    is_common_gender = noun_class and noun_class.get("gender_class") in (
+                        "common_gender_fixed",
+                        "common_gender_variable",
+                        "mfbysense",
+                    )
+
+                    if is_common_gender and not has_gender_tag:
+                        # Generate forms for both genders
+                        for gender in ("m", "f"):
+                            row = _build_noun_form_row(lemma_id, form_stressed, tags, gender)
+                            if row is None:
+                                stats["forms_filtered"] += 1
+                                continue
+                            form_batch.append(row)
+                            # Track what we've added
+                            number = "plural" if "plural" in tags else "singular"
+                            seen_noun_forms.add((number, gender))
+                    else:
+                        row = _build_noun_form_row(lemma_id, form_stressed, tags, lemma_gender)
+                        if row is None:
+                            stats["forms_filtered"] += 1
+                            continue
+                        form_batch.append(row)
+                        # Track what we've added
+                        number = "plural" if "plural" in tags else "singular"
+                        gender = (
+                            "m"
+                            if "masculine" in tags
+                            else ("f" if "feminine" in tags else lemma_gender)
+                        )
+                        if gender:
+                            seen_noun_forms.add((number, gender))
                 else:
                     row = build_form_row(lemma_id, form_stressed, tags)
-                if row is None:
-                    stats["forms_filtered"] += 1
-                    continue
-
-                form_batch.append(row)
+                    if row is None:
+                        stats["forms_filtered"] += 1
+                        continue
+                    form_batch.append(row)
 
                 if len(form_batch) >= batch_size:
                     flush_batches()
+
+            # For nouns: add base form from lemma word if not already present
+            # The lemma word is always the base form (singular for regular, plural for pluralia tantum)
+            if pos_filter == "noun" and noun_class:
+                number_class = noun_class.get("number_class", "standard")
+                gender_class = noun_class.get("gender_class")
+                is_pluralia_tantum = number_class == "pluralia_tantum"
+                base_number = "plural" if is_pluralia_tantum else "singular"
+
+                is_common_gender = gender_class in (
+                    "common_gender_fixed",
+                    "common_gender_variable",
+                    "mfbysense",
+                )
+
+                if is_common_gender:
+                    # Add base form for both genders if not already present
+                    for gender in ("m", "f"):
+                        if (base_number, gender) not in seen_noun_forms:
+                            row = _build_noun_form_row(
+                                lemma_id, lemma_stressed, [base_number], gender
+                            )
+                            if row:
+                                form_batch.append(row)
+                elif lemma_gender and (base_number, lemma_gender) not in seen_noun_forms:
+                    # Add base form for single gender if not already present
+                    row = _build_noun_form_row(
+                        lemma_id, lemma_stressed, [base_number], lemma_gender
+                    )
+                    if row:
+                        form_batch.append(row)
 
             # Queue definitions
             for gloss, def_tags in _iter_definitions(entry):

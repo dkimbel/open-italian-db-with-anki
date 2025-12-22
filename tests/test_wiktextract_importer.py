@@ -16,6 +16,7 @@ from italian_anki.db import (
     init_db,
     lemmas,
     noun_forms,
+    noun_metadata,
     sentence_lemmas,
     verb_forms,
     verb_metadata,
@@ -798,6 +799,279 @@ class TestEnrichFormSpellingFromFormOf:
             # Should count as not found since lemma doesn't exist
             assert stats["not_found"] > 0
             assert stats["updated"] == 0
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+
+# Sample common gender variable noun (collega) - different plural forms by gender
+# Real Wiktextract pattern: gender marker in args["1"], only plurals in forms array
+SAMPLE_NOUN_COMMON_GENDER_VARIABLE = {
+    "pos": "noun",
+    "word": "collega",
+    "head_templates": [{"args": {"1": "mf"}}],  # Gender in position 1
+    "categories": ["Italian lemmas"],
+    "forms": [
+        # Real data: only plural forms, singular comes from word field
+        {"form": "colleghi", "tags": ["masculine", "plural"]},
+        {"form": "colleghe", "tags": ["feminine", "plural"]},
+    ],
+    "senses": [
+        {"glosses": ["colleague"], "tags": []},
+    ],
+}
+
+# Sample common gender fixed noun (cantante) - same form for both genders
+# Real Wiktextract pattern: mfbysense in args, only plural in forms array
+SAMPLE_NOUN_COMMON_GENDER_FIXED = {
+    "pos": "noun",
+    "word": "cantante",
+    "head_templates": [{"args": {"1": "mfbysense"}}],  # Gender in position 1
+    "categories": ["Italian lemmas"],
+    "forms": [
+        # Real data: only plural form, singular comes from word field
+        {"form": "cantanti", "tags": ["plural"]},
+    ],
+    "senses": [
+        {"glosses": ["singer"], "tags": []},
+    ],
+}
+
+# Sample pluralia tantum noun (forbici)
+# Real Wiktextract pattern: f-p in args, EMPTY forms array!
+SAMPLE_NOUN_PLURALIA_TANTUM = {
+    "pos": "noun",
+    "word": "forbici",
+    "head_templates": [{"args": {"1": "f-p"}}],  # f-p = feminine pluralia tantum
+    "categories": ["Italian pluralia tantum", "Italian lemmas"],
+    "forms": [],  # Real data: empty forms array! Plural form is the word field itself.
+    "senses": [
+        {"glosses": ["scissors"], "tags": ["feminine"]},
+    ],
+}
+
+# Sample invariable noun (città)
+# Real Wiktextract pattern: gender in args, # marker for invariable
+SAMPLE_NOUN_INVARIABLE = {
+    "pos": "noun",
+    "word": "città",
+    "head_templates": [{"args": {"1": "f", "2": "#"}}],  # f = feminine, # = invariable
+    "categories": ["Italian indeclinable nouns", "Italian lemmas", "Italian feminine nouns"],
+    "forms": [
+        # Real data may have archaic alternatives but same form for both numbers
+        {"form": "città", "tags": ["singular"]},
+        {"form": "città", "tags": ["plural"]},  # Same form
+    ],
+    "senses": [
+        {"glosses": ["city", "town"], "tags": ["feminine"]},
+    ],
+}
+
+
+class TestNounClassification:
+    """Tests for noun classification and noun_metadata."""
+
+    def test_common_gender_variable_generates_both_genders(self) -> None:
+        """Test that common gender variable nouns generate M/F singular forms."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_NOUN_COMMON_GENDER_VARIABLE])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            assert stats["lemmas"] == 1
+
+            with get_connection(db_path) as conn:
+                # Check lemma
+                collega = conn.execute(select(lemmas).where(lemmas.c.lemma == "collega")).fetchone()
+                assert collega is not None
+
+                # Check noun_metadata
+                meta = conn.execute(
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == collega.lemma_id)
+                ).fetchone()
+                assert meta is not None
+                assert meta.gender_class == "common_gender_variable"
+                assert meta.number_class == "standard"
+
+                # Check forms - should have 4 forms: M/F singular, M/F plural
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == collega.lemma_id)
+                ).fetchall()
+                assert len(forms) >= 4
+
+                # Check we have both genders for singular
+                sing_forms = [f for f in forms if f.number == "singular"]
+                sing_genders = {f.gender for f in sing_forms}
+                assert "m" in sing_genders
+                assert "f" in sing_genders
+
+                # Check plurals have explicit gender
+                plural_forms = [f for f in forms if f.number == "plural"]
+                plural_genders = {f.gender for f in plural_forms}
+                assert "m" in plural_genders
+                assert "f" in plural_genders
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_common_gender_fixed_generates_both_genders(self) -> None:
+        """Test that mfbysense nouns generate M/F forms with same text."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_NOUN_COMMON_GENDER_FIXED])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            assert stats["lemmas"] == 1
+
+            with get_connection(db_path) as conn:
+                # Check lemma
+                cantante = conn.execute(
+                    select(lemmas).where(lemmas.c.lemma == "cantante")
+                ).fetchone()
+                assert cantante is not None
+
+                # Check noun_metadata - mfbysense is detected from args
+                meta = conn.execute(
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == cantante.lemma_id)
+                ).fetchone()
+                assert meta is not None
+                assert meta.gender_class == "mfbysense"
+
+                # Check forms - should have M/F singular and M/F plural
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == cantante.lemma_id)
+                ).fetchall()
+                assert len(forms) >= 4
+
+                # Check both genders exist for singular
+                sing_forms = [f for f in forms if f.number == "singular"]
+                sing_genders = {f.gender for f in sing_forms}
+                assert "m" in sing_genders
+                assert "f" in sing_genders
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_pluralia_tantum_classified_correctly(self) -> None:
+        """Test that pluralia tantum nouns are correctly classified."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_NOUN_PLURALIA_TANTUM])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            assert stats["lemmas"] == 1
+
+            with get_connection(db_path) as conn:
+                # Check lemma
+                forbici = conn.execute(select(lemmas).where(lemmas.c.lemma == "forbici")).fetchone()
+                assert forbici is not None
+
+                # Check noun_metadata
+                meta = conn.execute(
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == forbici.lemma_id)
+                ).fetchone()
+                assert meta is not None
+                assert meta.gender_class == "f"
+                assert meta.number_class == "pluralia_tantum"
+
+                # Check forms - should only have plural form
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == forbici.lemma_id)
+                ).fetchall()
+                assert len(forms) >= 1
+                assert all(f.number == "plural" for f in forms)
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_invariable_noun_classified_correctly(self) -> None:
+        """Test that invariable nouns are correctly classified."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_NOUN_INVARIABLE])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            assert stats["lemmas"] == 1
+
+            with get_connection(db_path) as conn:
+                # Check lemma
+                citta = conn.execute(select(lemmas).where(lemmas.c.lemma == "citta")).fetchone()
+                assert citta is not None
+
+                # Check noun_metadata
+                meta = conn.execute(
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == citta.lemma_id)
+                ).fetchone()
+                assert meta is not None
+                assert meta.gender_class == "f"
+                assert meta.number_class == "invariable"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_noun_metadata_cleared_on_reimport(self) -> None:
+        """Test that noun_metadata is cleared on reimport."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_NOUN_MASCULINE])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            # First import
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            # Check metadata exists
+            with get_connection(db_path) as conn:
+                meta_count = len(conn.execute(select(noun_metadata)).fetchall())
+                assert meta_count == 1
+
+            # Second import (should clear and reimport)
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            assert stats["cleared"] == 1
+
+            # Check we still have exactly one metadata entry
+            with get_connection(db_path) as conn:
+                meta_count = len(conn.execute(select(noun_metadata)).fetchall())
+                assert meta_count == 1
 
         finally:
             db_path.unlink()

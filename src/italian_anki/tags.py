@@ -250,8 +250,11 @@ def parse_noun_tags(tags: list[str]) -> NounFormFeatures:
         result.should_filter = True
         return result
 
-    # Skip metadata tags
-    if tag_set & SKIP_TAGS:
+    # Skip metadata-only tags for nouns, but keep forms that have number info
+    # (canonical is allowed for nouns/adjectives when combined with number)
+    metadata_tags = tag_set & SKIP_TAGS
+    meaningful_tags = tag_set - SKIP_TAGS
+    if metadata_tags and not (meaningful_tags & (NUMBER_TAGS | NOUN_DERIVATION_TAGS)):
         result.should_filter = True
         return result
 
@@ -288,8 +291,11 @@ def parse_adjective_tags(tags: list[str]) -> AdjectiveFormFeatures:
         result.should_filter = True
         return result
 
-    # Skip metadata tags
-    if tag_set & SKIP_TAGS:
+    # Skip metadata-only tags for adjectives, but keep forms that have gender/number info
+    # (canonical is allowed for adjectives when combined with gender/number)
+    metadata_tags = tag_set & SKIP_TAGS
+    meaningful_tags = tag_set - SKIP_TAGS
+    if metadata_tags and not (meaningful_tags & (NUMBER_TAGS | GENDER_TAGS | DEGREE_TAGS)):
         result.should_filter = True
         return result
 

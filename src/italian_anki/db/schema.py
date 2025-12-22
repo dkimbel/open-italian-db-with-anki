@@ -21,7 +21,9 @@ lemmas = Table(
     "lemmas",
     metadata,
     Column("lemma_id", Integer, primary_key=True, autoincrement=True),
-    Column("lemma", Text, nullable=False, unique=True),  # normalized (lowercase, no accents)
+    Column(
+        "lemma", Text, nullable=False
+    ),  # normalized (lowercase, no accents) - not unique for nouns
     Column("lemma_stressed", Text, nullable=False),  # with stress mark (e.g., "parlàre")
     Column("pos", String(20), default="verb"),
     Column("ipa", Text),  # IPA pronunciation from Wiktextract
@@ -76,6 +78,7 @@ noun_forms = Table(
     Column("labels", Text),  # NULL=standard, or comma-separated labels
     Column("is_diminutive", Boolean, default=False),
     Column("is_augmentative", Boolean, default=False),
+    Column("meaning_hint", Text),  # e.g., 'anatomical', 'figurative' for braccio-type plurals
 )
 
 # Adjective forms with grammatical features
@@ -110,6 +113,10 @@ definitions = Table(
     Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
     Column("gloss", Text, nullable=False),
     Column("tags", Text),  # JSON array (e.g., ["transitive"])
+    # Optional linkage to specific forms (for nouns with meaning-dependent gender/plurals)
+    Column("form_gender", String(1)),  # NULL (all), 'm', 'f'
+    Column("form_number", Text),  # NULL (all), 'singular', 'plural'
+    Column("form_meaning_hint", Text),  # matches noun_forms.meaning_hint
 )
 
 # Tatoeba sentences
@@ -153,17 +160,47 @@ verb_metadata = Table(
     Column("transitivity", String(20)),  # 'transitive', 'intransitive', 'both', NULL
 )
 
+# Noun-specific metadata (gender classification, number behavior, and links)
+noun_metadata = Table(
+    "noun_metadata",
+    metadata,
+    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), primary_key=True),
+    # Gender classification (mutually exclusive):
+    # 'm' = masculine only, 'f' = feminine only,
+    # 'common_gender_fixed' = both genders, identical forms (cantante),
+    # 'common_gender_variable' = both genders, forms can differ (collega)
+    Column("gender_class", Text, nullable=False),
+    # Number behavior (mutually exclusive):
+    # 'standard' = has both singular and plural,
+    # 'pluralia_tantum' = plural only (forbici),
+    # 'singularia_tantum' = singular only/uncountable (latte),
+    # 'invariable' = same form for both (città)
+    Column("number_class", Text, default="standard"),
+    # Links to related lemmas
+    Column(
+        "counterpart_lemma_id", Integer, ForeignKey("lemmas.lemma_id")
+    ),  # professore↔professoressa
+    Column("base_lemma_id", Integer, ForeignKey("lemmas.lemma_id")),  # tavolino→tavola
+    Column("derivation_type", Text),  # 'diminutive', 'augmentative', 'pejorative'
+)
+
 # Indexes (defined separately for clarity)
+Index("idx_lemmas_lemma_pos", lemmas.c.lemma, lemmas.c.pos)  # For lookups by word+POS
 Index("idx_verb_metadata_auxiliary", verb_metadata.c.auxiliary)
+# noun_metadata indexes
+Index("idx_noun_metadata_gender_class", noun_metadata.c.gender_class)
+Index("idx_noun_metadata_counterpart", noun_metadata.c.counterpart_lemma_id)
+Index("idx_noun_metadata_base", noun_metadata.c.base_lemma_id)
 # verb_forms indexes
 Index("idx_verb_forms_lemma", verb_forms.c.lemma_id)
 Index("idx_verb_forms_mood_tense", verb_forms.c.mood, verb_forms.c.tense)
 Index("idx_verb_forms_labels", verb_forms.c.labels)
 Index("idx_verb_forms_form", verb_forms.c.form)
-# New noun_forms indexes
+# noun_forms indexes
 Index("idx_noun_forms_lemma", noun_forms.c.lemma_id)
 Index("idx_noun_forms_form", noun_forms.c.form)
 Index("idx_noun_forms_gender", noun_forms.c.gender)
+Index("idx_noun_forms_meaning_hint", noun_forms.c.meaning_hint)
 # New adjective_forms indexes
 Index("idx_adjective_forms_lemma", adjective_forms.c.lemma_id)
 Index("idx_adjective_forms_form", adjective_forms.c.form)
