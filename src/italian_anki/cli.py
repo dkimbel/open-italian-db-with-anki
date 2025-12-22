@@ -76,7 +76,7 @@ def cmd_import_wiktextract(args: argparse.Namespace) -> int:
     print(f"  Definitions: {stats['definitions']:,}")
     print(f"  Skipped:     {stats['skipped']:,}")
     if stats.get("nouns_without_gender", 0) > 0:
-        print(f"  Warning: {stats['nouns_without_gender']:,} nouns skipped (no gender)")
+        print(f"    no gender: {stats['nouns_without_gender']:,}")
 
     return 0
 
@@ -405,7 +405,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
 
         with get_connection(db_path) as conn:
             # Step 1: Wiktextract import
-            print("[1/4] Importing from Wiktextract...")
+            print("[1/5] Importing from Wiktextract...")
 
             def wikt_progress(current: int, total: int) -> None:
                 _print_progress(current, total, "Processing")
@@ -422,11 +422,11 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             print(f"    Definitions: {stats['definitions']:,}")
             print(f"    Skipped:     {stats['skipped']:,}")
             if stats.get("nouns_without_gender", 0) > 0:
-                print(f"    Warning: {stats['nouns_without_gender']:,} nouns skipped (no gender)")
+                print(f"      no gender: {stats['nouns_without_gender']:,}")
             print()
 
             # Step 2: Form-of enrichment
-            print("[2/4] Enriching from form-of entries...")
+            print("[2/5] Enriching from form-of entries...")
 
             def formof_progress(current: int, total: int) -> None:
                 _print_progress(current, total, "Processing")
@@ -443,7 +443,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             print()
 
             # Step 3: Morph-it! enrichment
-            print("[3/4] Enriching with Morph-it! spelling...")
+            print("[3/5] Enriching with Morph-it! spelling...")
 
             def morphit_progress(current: int, total: int) -> None:
                 _print_progress(current, total, "Processing")
@@ -458,8 +458,8 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             print(f"    Lookup entries:   {stats['lookup_added']:,}")
             print()
 
-            # Step 3b: Form-of spelling fallback
-            print("[3b/4] Enriching form spelling from form-of entries...")
+            # Step 4: Form-of spelling fallback
+            print("[4/5] Enriching form spelling from form-of entries...")
 
             def formof_spelling_progress(current: int, total: int) -> None:
                 _print_progress(current, total, "Processing")
@@ -475,12 +475,12 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             print(f"    Not found:               {stats['not_found']:,}")
             print()
 
-            # Step 4: ItWaC frequency import
+            # Step 5: ItWaC frequency import
             csv_filename = ITWAC_CSV_FILES.get(pos)
             if csv_filename:
                 csv_path = DEFAULT_ITWAC_DIR / csv_filename
                 if csv_path.exists():
-                    print("[4/4] Importing ItWaC frequencies...")
+                    print("[5/5] Importing ItWaC frequencies...")
 
                     def itwac_progress(current: int, total: int) -> None:
                         _print_progress(current, total, "Processing")
@@ -493,9 +493,9 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                     print(f"    Lemmas matched:     {stats['matched']:,}")
                     print(f"    Lemmas not found:   {stats['not_found']:,}")
                 else:
-                    print("[4/4] Skipped: ItWaC file not found")
+                    print("[5/5] Skipped: ItWaC file not found")
             else:
-                print("[4/4] Skipped: No ItWaC file for this POS")
+                print("[5/5] Skipped: No ItWaC file for this POS")
             print()
 
     # Final step: Tatoeba sentences (for all POS)
