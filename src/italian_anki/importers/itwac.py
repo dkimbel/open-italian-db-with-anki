@@ -3,6 +3,7 @@
 import csv
 import math
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
 
 from sqlalchemy import Connection, select
@@ -80,6 +81,7 @@ def import_itwac(
     csv_path: Path,
     *,
     pos_filter: str = "verb",
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Import ItWaC frequency data into the database.
 
@@ -87,6 +89,7 @@ def import_itwac(
         conn: SQLAlchemy connection
         csv_path: Path to ItWaC CSV file (verb, noun, or adjective)
         pos_filter: Part of speech to import (default: "verb")
+        progress_callback: Optional callback for progress reporting (current, total)
 
     Returns:
         Statistics dict with counts
@@ -103,10 +106,14 @@ def import_itwac(
     result = conn.execute(
         select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == pos_filter)
     )
+    all_lemmas = result.fetchall()
+    total_lemmas = len(all_lemmas)
 
     insert_batch: list[dict[str, str | int | float]] = []
 
-    for row in result:
+    for idx, row in enumerate(all_lemmas, 1):
+        if progress_callback and idx % 5000 == 0:
+            progress_callback(idx, total_lemmas)
         lemma_id = row.lemma_id
         normalized = row.lemma  # Already normalized in DB
 
@@ -131,5 +138,9 @@ def import_itwac(
             frequencies.insert().prefix_with("OR REPLACE"),
             insert_batch,
         )
+
+    # Final progress callback
+    if progress_callback:
+        progress_callback(total_lemmas, total_lemmas)
 
     return stats

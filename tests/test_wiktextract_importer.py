@@ -16,9 +16,11 @@ from italian_anki.db import (
     init_db,
     lemmas,
     noun_metadata,
+    sentence_lemmas,
     verb_forms,
     verb_metadata,
 )
+from italian_anki.importers.tatoeba import import_tatoeba
 from italian_anki.importers.wiktextract import enrich_from_form_of, import_wiktextract
 
 # Sample verb entry from Wiktextract
@@ -139,6 +141,22 @@ def _create_test_jsonl(entries: list[dict[str, Any]]) -> Path:
     ) as f:
         for entry in entries:
             f.write(json.dumps(entry) + "\n")
+        return Path(f.name)
+
+
+def _create_test_tsv(lines: list[str]) -> Path:
+    """Create a temporary TSV file."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv", delete=False, encoding="utf-8") as f:
+        for line in lines:
+            f.write(line + "\n")
+        return Path(f.name)
+
+
+def _create_test_csv(lines: list[str]) -> Path:
+    """Create a temporary CSV file."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8") as f:
+        for line in lines:
+            f.write(line + "\n")
         return Path(f.name)
 
 
@@ -504,3 +522,44 @@ class TestWiktextractImporter:
         finally:
             db_path.unlink()
             jsonl_path.unlink()
+
+    def test_idempotent_after_tatoeba(self) -> None:
+        """Verify reimport works after tatoeba populates sentence_lemmas (FK constraint)."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_VERB])
+        ita_path = _create_test_tsv(["100\tita\tIo parlo italiano."])
+        eng_path = _create_test_tsv(["200\teng\tI speak Italian."])
+        links_path = _create_test_csv(["100\t200"])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            # First: import wiktextract
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+
+            # Then: import tatoeba (creates sentence_lemmas links)
+            with get_connection(db_path) as conn:
+                import_tatoeba(conn, ita_path, eng_path, links_path)
+
+            # Verify sentence_lemmas was populated
+            with get_connection(db_path) as conn:
+                sl_count = len(conn.execute(select(sentence_lemmas)).fetchall())
+                assert sl_count > 0, "Tatoeba should have created sentence_lemmas"
+
+            # Re-import wiktextract (must clear sentence_lemmas first - tests FK)
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path)
+
+            assert stats["cleared"] == 1
+            assert stats["lemmas"] == 1  # Still have our verb
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+            ita_path.unlink()
+            eng_path.unlink()
+            links_path.unlink()

@@ -1,5 +1,6 @@
 """Import Tatoeba sentences and link to lemmas."""
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -131,6 +132,7 @@ def import_tatoeba(
     links_path: Path,
     *,
     batch_size: int = 1000,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Import Tatoeba sentences and link to verb lemmas.
 
@@ -142,6 +144,7 @@ def import_tatoeba(
         eng_sentences_path: Path to English sentences TSV
         links_path: Path to Italian-English links TSV
         batch_size: Number of rows to insert per batch
+        progress_callback: Optional callback for progress reporting (current, total)
 
     Returns:
         Statistics dict with counts
@@ -213,8 +216,11 @@ def import_tatoeba(
 
     verb_batch: list[dict[str, Any]] = []
     seen_pairs: set[tuple[int, int]] = set()  # (sentence_id, lemma_id)
+    total_sentences = len(ita_sentences)
 
-    for sentence_id, text in ita_sentences.items():
+    for idx, (sentence_id, text) in enumerate(ita_sentences.items(), 1):
+        if progress_callback and idx % 50000 == 0:
+            progress_callback(idx, total_sentences)
         tokens = tokenize(text)
         for token in tokens:
             normalized_token = normalize(token)
@@ -239,5 +245,9 @@ def import_tatoeba(
     if verb_batch:
         conn.execute(sentence_lemmas.insert(), verb_batch)
         stats["sentence_lemmas"] += len(verb_batch)
+
+    # Final progress callback
+    if progress_callback:
+        progress_callback(total_sentences, total_sentences)
 
     return stats

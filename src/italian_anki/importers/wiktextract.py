@@ -1,11 +1,11 @@
 """Import Italian verb data from Wiktextract JSONL."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Connection, select
+from sqlalchemy import Connection, func, select
 
 from italian_anki.db.schema import (
     adjective_forms,
@@ -15,6 +15,7 @@ from italian_anki.db.schema import (
     lemmas,
     noun_forms,
     noun_metadata,
+    sentence_lemmas,
     verb_forms,
     verb_metadata,
 )
@@ -274,16 +275,21 @@ def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | 
 def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     """Clear all existing data for the given POS.
 
-    Deletes in FK-safe order: form_lookup → POS form tables
-    → definitions → frequencies → noun_metadata/verb_metadata → lemmas.
+    Deletes in FK-safe order: form_lookup → POS form tables → definitions
+    → frequencies → noun_metadata/verb_metadata → sentence_lemmas → lemmas.
     Returns the number of lemmas cleared.
     """
-    # Get existing lemma IDs for this POS
-    result = conn.execute(select(lemmas.c.lemma_id).where(lemmas.c.pos == pos_filter))
-    existing_ids = [row.lemma_id for row in result]
+    # Count existing lemmas for this POS (for return value)
+    count_result = conn.execute(
+        select(func.count()).select_from(lemmas).where(lemmas.c.pos == pos_filter)
+    )
+    count = count_result.scalar() or 0
 
-    if not existing_ids:
+    if count == 0:
         return 0
+
+    # Use subquery to avoid "too many SQL variables" with large POS categories
+    lemma_subq = select(lemmas.c.lemma_id).where(lemmas.c.pos == pos_filter)
 
     # Get the POS-specific form table
     pos_form_table = POS_FORM_TABLES.get(pos_filter)
@@ -291,30 +297,31 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     # Delete in FK-safe order
     # 1. form_lookup (references *_forms tables)
     if pos_form_table is not None:
+        form_id_subq = select(pos_form_table.c.id).where(pos_form_table.c.lemma_id.in_(lemma_subq))
         conn.execute(
             form_lookup.delete().where(
-                form_lookup.c.form_id.in_(
-                    select(pos_form_table.c.id).where(pos_form_table.c.lemma_id.in_(existing_ids))
-                ),
+                form_lookup.c.form_id.in_(form_id_subq),
                 form_lookup.c.pos == pos_filter,
             )
         )
         # 2. POS-specific form table
-        conn.execute(pos_form_table.delete().where(pos_form_table.c.lemma_id.in_(existing_ids)))
+        conn.execute(pos_form_table.delete().where(pos_form_table.c.lemma_id.in_(lemma_subq)))
 
     # 3. definitions (references lemmas)
-    conn.execute(definitions.delete().where(definitions.c.lemma_id.in_(existing_ids)))
+    conn.execute(definitions.delete().where(definitions.c.lemma_id.in_(lemma_subq)))
     # 4. frequencies (references lemmas)
-    conn.execute(frequencies.delete().where(frequencies.c.lemma_id.in_(existing_ids)))
+    conn.execute(frequencies.delete().where(frequencies.c.lemma_id.in_(lemma_subq)))
     # 5. POS-specific metadata tables
     if pos_filter == "noun":
-        conn.execute(noun_metadata.delete().where(noun_metadata.c.lemma_id.in_(existing_ids)))
+        conn.execute(noun_metadata.delete().where(noun_metadata.c.lemma_id.in_(lemma_subq)))
     elif pos_filter == "verb":
-        conn.execute(verb_metadata.delete().where(verb_metadata.c.lemma_id.in_(existing_ids)))
-    # 6. lemmas
-    conn.execute(lemmas.delete().where(lemmas.c.lemma_id.in_(existing_ids)))
+        conn.execute(verb_metadata.delete().where(verb_metadata.c.lemma_id.in_(lemma_subq)))
+    # 6. sentence_lemmas (references lemmas)
+    conn.execute(sentence_lemmas.delete().where(sentence_lemmas.c.lemma_id.in_(lemma_subq)))
+    # 7. lemmas (direct filter, no subquery needed)
+    conn.execute(lemmas.delete().where(lemmas.c.pos == pos_filter))
 
-    return len(existing_ids)
+    return count
 
 
 def _build_verb_form_row(
@@ -395,12 +402,19 @@ POS_FORM_BUILDERS = {
 }
 
 
+def _count_lines(path: Path) -> int:
+    """Count lines in a file efficiently."""
+    with path.open(encoding="utf-8") as f:
+        return sum(1 for _ in f)
+
+
 def import_wiktextract(
     conn: Connection,
     jsonl_path: Path,
     *,
     pos_filter: str = "verb",
     batch_size: int = 1000,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Import Wiktextract data into the database.
 
@@ -413,6 +427,7 @@ def import_wiktextract(
         jsonl_path: Path to the Wiktextract JSONL file
         pos_filter: Part of speech to import (default: "verb")
         batch_size: Number of forms to insert per batch
+        progress_callback: Optional callback for progress reporting (current, total)
 
     Returns:
         Statistics dict with counts of imported items
@@ -482,8 +497,16 @@ def import_wiktextract(
     # Map to Wiktextract's POS naming
     wiktextract_pos = WIKTEXTRACT_POS.get(pos_filter, pos_filter)
 
+    # Count lines for progress if callback provided
+    total_lines = _count_lines(jsonl_path) if progress_callback else 0
+    current_line = 0
+
     with jsonl_path.open(encoding="utf-8") as f:
         for line in f:
+            current_line += 1
+            if progress_callback and current_line % 10000 == 0:
+                progress_callback(current_line, total_lines)
+
             entry = _parse_entry(line)
             if entry is None:
                 continue
@@ -567,6 +590,10 @@ def import_wiktextract(
     # Final flush
     flush_batches()
 
+    # Final progress callback
+    if progress_callback:
+        progress_callback(total_lines, total_lines)
+
     return stats
 
 
@@ -617,6 +644,7 @@ def enrich_from_form_of(
     jsonl_path: Path,
     *,
     pos_filter: str = "verb",
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Enrich forms with labels from form-of entries.
 
@@ -628,6 +656,7 @@ def enrich_from_form_of(
         conn: SQLAlchemy connection
         jsonl_path: Path to the Wiktextract JSONL file
         pos_filter: Part of speech to enrich (default: "verb")
+        progress_callback: Optional callback for progress reporting (current, total)
 
     Returns:
         Statistics dict with counts
@@ -663,8 +692,16 @@ def enrich_from_form_of(
     # Map to Wiktextract's POS naming
     wiktextract_pos = WIKTEXTRACT_POS.get(pos_filter, pos_filter)
 
+    # Count lines for progress if callback provided
+    total_lines = _count_lines(jsonl_path) if progress_callback else 0
+    current_line = 0
+
     with jsonl_path.open(encoding="utf-8") as f:
         for line in f:
+            current_line += 1
+            if progress_callback and current_line % 10000 == 0:
+                progress_callback(current_line, total_lines)
+
             entry = _parse_entry(line)
             if entry is None:
                 continue
@@ -707,5 +744,9 @@ def enrich_from_form_of(
                     )
                     if result.rowcount > 0:
                         stats["updated"] += 1
+
+    # Final progress callback
+    if progress_callback:
+        progress_callback(total_lines, total_lines)
 
     return stats

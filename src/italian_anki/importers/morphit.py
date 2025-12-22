@@ -1,6 +1,6 @@
 """Enrich forms with real Italian spelling from Morph-it!."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +95,7 @@ def import_morphit(
     *,
     pos_filter: str = "verb",
     batch_size: int = 1000,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Update POS-specific form tables with real Italian spelling from Morph-it!.
 
@@ -108,6 +109,7 @@ def import_morphit(
         morphit_path: Path to morph-it.txt file
         pos_filter: Part of speech to enrich (default: "verb")
         batch_size: Number of updates per batch
+        progress_callback: Optional callback for progress reporting (current, total)
 
     Returns:
         Statistics dict with counts
@@ -130,6 +132,7 @@ def import_morphit(
         .where(pos_form_table.c.form.is_(None))
     )
     all_forms = result.fetchall()
+    total_forms = len(all_forms)
 
     # Batch updates
     update_batch: list[dict[str, Any]] = []
@@ -157,7 +160,10 @@ def import_morphit(
             stats["lookup_added"] += len(lookup_batch)
             lookup_batch = []
 
-    for row in all_forms:
+    for idx, row in enumerate(all_forms, 1):
+        if progress_callback and idx % 10000 == 0:
+            progress_callback(idx, total_forms)
+
         form_id = row.id
         form_stressed = row.form_stressed
 
@@ -187,5 +193,9 @@ def import_morphit(
 
     # Final flush
     flush_batches()
+
+    # Final progress callback
+    if progress_callback:
+        progress_callback(total_forms, total_forms)
 
     return stats

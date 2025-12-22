@@ -90,22 +90,9 @@ tasks:
       - uv run italian-anki import-tatoeba {{.CLI_ARGS}}
 
   import-all:
-    desc: Run full import pipeline (use POS=verb|noun|adjective for single POS, or omit for all)
+    desc: Run full import pipeline
     cmds:
-      - |
-        if [ -n "{{.POS}}" ]; then
-          positions="{{.POS}}"
-        else
-          positions="verb noun adjective"
-        fi
-        for pos in $positions; do
-          echo "=== Importing $pos ==="
-          uv run italian-anki import-wiktextract --pos=$pos
-          uv run italian-anki enrich-formof --pos=$pos
-          uv run italian-anki import-morphit --pos=$pos
-          uv run italian-anki import-itwac --pos=$pos
-        done
-      - uv run italian-anki import-tatoeba
+      - uv run italian-anki import-all
 
   download-wiktextract:
     desc: Download Wiktextract Italian dictionary

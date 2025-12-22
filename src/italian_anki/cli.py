@@ -29,6 +29,9 @@ DEFAULT_ENG_SENTENCES_PATH = Path("data/tatoeba/eng_sentences.tsv")
 DEFAULT_LINKS_PATH = Path("data/tatoeba/ita_eng_links.tsv")
 DEFAULT_DB_PATH = Path("italian.db")
 
+# Mapping from singular POS values to plural forms for display
+POS_PLURAL = {"verb": "verbs", "noun": "nouns", "adjective": "adjectives", "adverb": "adverbs"}
+
 
 def cmd_import_wiktextract(args: argparse.Namespace) -> int:
     """Run the Wiktextract import command."""
@@ -44,7 +47,7 @@ def cmd_import_wiktextract(args: argparse.Namespace) -> int:
     init_db(engine)
 
     print(f"Importing from: {jsonl_path}")
-    print(f"Filtering to: {args.pos}")
+    print(f"Filtering to: {POS_PLURAL.get(args.pos, args.pos)}")
     print()
 
     with get_connection(db_path) as conn:
@@ -81,7 +84,7 @@ def cmd_enrich_formof(args: argparse.Namespace) -> int:
 
     print(f"Enriching forms from form-of entries: {db_path}")
     print(f"Using Wiktextract data from: {jsonl_path}")
-    print(f"Filtering to: {args.pos}")
+    print(f"Filtering to: {POS_PLURAL.get(args.pos, args.pos)}")
     print()
 
     with get_connection(db_path) as conn:
@@ -113,7 +116,7 @@ def cmd_import_morphit(args: argparse.Namespace) -> int:
 
     print(f"Enriching database: {db_path}")
     print(f"Using Morph-it! data from: {morphit_path}")
-    print(f"Filtering to: {args.pos}")
+    print(f"Filtering to: {POS_PLURAL.get(args.pos, args.pos)}")
     print()
 
     with get_connection(db_path) as conn:
@@ -153,7 +156,7 @@ def cmd_import_itwac(args: argparse.Namespace) -> int:
 
     print(f"Importing frequencies to: {db_path}")
     print(f"Using ItWaC data from: {csv_path}")
-    print(f"Filtering to: {args.pos}")
+    print(f"Filtering to: {POS_PLURAL.get(args.pos, args.pos)}")
     print()
 
     with get_connection(db_path) as conn:
@@ -242,6 +245,165 @@ def cmd_download_tatoeba(args: argparse.Namespace) -> int:
 def cmd_download_all(args: argparse.Namespace) -> int:
     """Download all data sources."""
     download_all(force=args.force)
+    return 0
+
+
+def _print_progress(current: int, total: int, desc: str = "Processing") -> None:
+    """Print progress in-place using carriage return."""
+    if total == 0:
+        return
+    pct = current * 100 // total
+    print(f"\r  {desc}... {pct}% ({current:,} / {total:,})", end="", flush=True)
+    if current >= total:
+        print()  # newline when done
+
+
+def cmd_import_all(args: argparse.Namespace) -> int:
+    """Run the full import pipeline for all parts of speech."""
+    db_path = Path(args.database)
+    jsonl_path = DEFAULT_WIKTEXTRACT_PATH
+    morphit_path = DEFAULT_MORPHIT_PATH
+    ita_path = DEFAULT_ITA_SENTENCES_PATH
+    eng_path = DEFAULT_ENG_SENTENCES_PATH
+    links_path = DEFAULT_LINKS_PATH
+
+    # Validate input files exist
+    for path, name in [
+        (jsonl_path, "Wiktextract JSONL"),
+        (morphit_path, "Morph-it!"),
+        (ita_path, "Italian sentences"),
+        (eng_path, "English sentences"),
+        (links_path, "Links"),
+    ]:
+        if not path.exists():
+            print(f"Error: {name} file not found: {path}", file=sys.stderr)
+            print("Run 'download-all' first to download data files.", file=sys.stderr)
+            return 1
+
+    # Initialize database
+    print(f"Initializing database: {db_path}")
+    engine = get_engine(db_path)
+    init_db(engine)
+    print()
+
+    pos_list = ["verb", "noun", "adjective"]
+    total_pos = len(pos_list)
+
+    # Import each POS
+    for pos_idx, pos in enumerate(pos_list, 1):
+        pos_plural = POS_PLURAL[pos]
+        print("=" * 80)
+        print(f"Importing {pos_plural} (Step {pos_idx} of {total_pos})")
+        print("=" * 80)
+        print()
+
+        with get_connection(db_path) as conn:
+            # Step 1: Wiktextract import
+            print("[1/4] Importing from Wiktextract...")
+
+            def wikt_progress(current: int, total: int) -> None:
+                _print_progress(current, total, "Processing")
+
+            stats = import_wiktextract(
+                conn, jsonl_path, pos_filter=pos, progress_callback=wikt_progress
+            )
+            print()
+            print("  Import complete!")
+            if stats["cleared"] > 0:
+                print(f"    Cleared:     {stats['cleared']:,} existing lemmas")
+            print(f"    Lemmas:      {stats['lemmas']:,}")
+            print(f"    Forms:       {stats['forms']:,}")
+            print(f"    Definitions: {stats['definitions']:,}")
+            print(f"    Skipped:     {stats['skipped']:,}")
+            if pos == "noun":
+                print(f"    With gender: {stats.get('nouns_with_gender', 0):,}")
+                print(f"    No gender:   {stats.get('nouns_no_gender', 0):,}")
+            print()
+
+            # Step 2: Form-of enrichment
+            print("[2/4] Enriching from form-of entries...")
+
+            def formof_progress(current: int, total: int) -> None:
+                _print_progress(current, total, "Processing")
+
+            stats = enrich_from_form_of(
+                conn, jsonl_path, pos_filter=pos, progress_callback=formof_progress
+            )
+            print()
+            print("  Enrichment complete!")
+            print(f"    Form-of entries scanned: {stats['scanned']:,}")
+            print(f"    With label tags:         {stats['with_labels']:,}")
+            print(f"    Forms updated:           {stats['updated']:,}")
+            print(f"    Not found:               {stats['not_found']:,}")
+            print()
+
+            # Step 3: Morph-it! enrichment
+            print("[3/4] Enriching with Morph-it! spelling...")
+
+            def morphit_progress(current: int, total: int) -> None:
+                _print_progress(current, total, "Processing")
+
+            stats = import_morphit(
+                conn, morphit_path, pos_filter=pos, progress_callback=morphit_progress
+            )
+            print()
+            print("  Enrichment complete!")
+            print(f"    Forms updated:    {stats['updated']:,}")
+            print(f"    Forms not found:  {stats['not_found']:,}")
+            print(f"    Lookup entries:   {stats['lookup_added']:,}")
+            print()
+
+            # Step 4: ItWaC frequency import
+            csv_filename = ITWAC_CSV_FILES.get(pos)
+            if csv_filename:
+                csv_path = DEFAULT_ITWAC_DIR / csv_filename
+                if csv_path.exists():
+                    print("[4/4] Importing ItWaC frequencies...")
+
+                    def itwac_progress(current: int, total: int) -> None:
+                        _print_progress(current, total, "Processing")
+
+                    stats = import_itwac(
+                        conn, csv_path, pos_filter=pos, progress_callback=itwac_progress
+                    )
+                    print()
+                    print("  Import complete!")
+                    print(f"    Lemmas matched:     {stats['matched']:,}")
+                    print(f"    Lemmas not found:   {stats['not_found']:,}")
+                else:
+                    print("[4/4] Skipped: ItWaC file not found")
+            else:
+                print("[4/4] Skipped: No ItWaC file for this POS")
+            print()
+
+    # Final step: Tatoeba sentences (for all POS)
+    print("=" * 80)
+    print("Importing Tatoeba sentences")
+    print("=" * 80)
+    print()
+    print("Importing sentences and linking to lemmas...")
+
+    def tatoeba_progress(current: int, total: int) -> None:
+        _print_progress(current, total, "Processing")
+
+    with get_connection(db_path) as conn:
+        stats = import_tatoeba(
+            conn, ita_path, eng_path, links_path, progress_callback=tatoeba_progress
+        )
+    print()
+    print("Import complete!")
+    if stats["cleared"] > 0:
+        print(f"  Cleared:          {stats['cleared']:,} existing sentences")
+    print(f"  Italian sentences: {stats['ita_sentences']:,}")
+    print(f"  English sentences: {stats['eng_sentences']:,}")
+    print(f"  Translations:      {stats['translations']:,}")
+    print(f"  Sentence-lemma links: {stats['sentence_lemmas']:,}")
+    print()
+
+    print("=" * 80)
+    print("Import pipeline complete!")
+    print("=" * 80)
+
     return 0
 
 
@@ -396,6 +558,20 @@ def main() -> int:
         help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
     )
     tatoeba_parser.set_defaults(func=cmd_import_tatoeba)
+
+    # import-all subcommand
+    import_all_parser = subparsers.add_parser(
+        "import-all",
+        help="Run full import pipeline for all parts of speech",
+    )
+    import_all_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    import_all_parser.set_defaults(func=cmd_import_all)
 
     # download-wiktextract subcommand
     dl_wikt_parser = subparsers.add_parser(
