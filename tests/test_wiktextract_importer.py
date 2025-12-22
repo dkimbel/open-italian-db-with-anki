@@ -378,6 +378,11 @@ class TestWiktextractImporter:
                 assert len(libro_forms) >= 1
                 # Check that forms have gender
                 assert all(f.gender == "m" for f in libro_forms)
+                # Check that articles are computed
+                libro_sing = [f for f in libro_forms if f.number == "singular"]
+                assert len(libro_sing) >= 1
+                assert libro_sing[0].def_article == "il"  # il libro
+                assert libro_sing[0].article_source == "inferred"
 
                 # Check feminine noun
                 casa = conn.execute(select(lemmas).where(lemmas.c.lemma == "casa")).fetchone()
@@ -388,6 +393,11 @@ class TestWiktextractImporter:
                 ).fetchall()
                 assert len(casa_forms) >= 1
                 assert all(f.gender == "f" for f in casa_forms)
+                # Check feminine articles
+                casa_sing = [f for f in casa_forms if f.number == "singular"]
+                assert len(casa_sing) >= 1
+                assert casa_sing[0].def_article == "la"  # la casa
+                assert casa_sing[0].article_source == "inferred"
 
         finally:
             db_path.unlink()
@@ -426,6 +436,15 @@ class TestWiktextractImporter:
                 assert "bella" in form_texts
                 assert "belli" in form_texts
                 assert "belle" in form_texts
+
+                # Check articles are computed for adjectives
+                bello_form = next(f for f in form_rows if f.form_stressed == "bello")
+                assert bello_form.def_article == "il"  # il bello
+                assert bello_form.article_source == "inferred"
+
+                bella_form = next(f for f in form_rows if f.form_stressed == "bella")
+                assert bella_form.def_article == "la"  # la bella
+                assert bella_form.article_source == "inferred"
 
         finally:
             db_path.unlink()

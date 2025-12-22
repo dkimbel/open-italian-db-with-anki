@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import Connection, func, select
 
+from italian_anki.articles import get_definite
 from italian_anki.db.schema import (
     adjective_forms,
     definitions,
@@ -558,6 +559,9 @@ def _build_noun_form_row(
     if gender is None:
         return None
 
+    # Compute definite article from orthography
+    def_article, article_source = get_definite(form_stressed, gender, features.number)
+
     return {
         "lemma_id": lemma_id,
         "form": None,
@@ -567,6 +571,8 @@ def _build_noun_form_row(
         "labels": features.labels,
         "is_diminutive": features.is_diminutive,
         "is_augmentative": features.is_augmentative,
+        "def_article": def_article,
+        "article_source": article_source,
     }
 
 
@@ -581,6 +587,12 @@ def _build_adjective_form_row(
     if features.should_filter or features.gender is None or features.number is None:
         return None
 
+    # Normalize gender for article computation: "masculine" -> "m", "feminine" -> "f"
+    gender_short = "m" if features.gender == "masculine" else "f"
+
+    # Compute definite article from orthography
+    def_article, article_source = get_definite(form_stressed, gender_short, features.number)
+
     return {
         "lemma_id": lemma_id,
         "form": None,
@@ -589,6 +601,8 @@ def _build_adjective_form_row(
         "number": features.number,
         "degree": features.degree,
         "labels": features.labels,
+        "def_article": def_article,
+        "article_source": article_source,
     }
 
 

@@ -79,6 +79,9 @@ noun_forms = Table(
     Column("is_diminutive", Boolean, default=False),
     Column("is_augmentative", Boolean, default=False),
     Column("meaning_hint", Text),  # e.g., 'anatomical', 'figurative' for braccio-type plurals
+    # Article columns (computed from orthography)
+    Column("def_article", Text),  # 'il', 'lo', 'la', "l'", 'i', 'gli', 'le'
+    Column("article_source", Text),  # 'inferred' or 'exception:<reason>'
 )
 
 # Adjective forms with grammatical features
@@ -94,6 +97,9 @@ adjective_forms = Table(
     Column("number", Text, nullable=False),  # singular, plural
     Column("degree", Text, default="positive"),  # positive, comparative, superlative
     Column("labels", Text),  # NULL=standard, or comma-separated labels
+    # Article columns (computed from orthography)
+    Column("def_article", Text),  # 'il', 'lo', 'la', "l'", 'i', 'gli', 'le'
+    Column("article_source", Text),  # 'inferred' or 'exception:<reason>'
 )
 
 # Lookup table for matching forms in sentences (with POS awareness)
