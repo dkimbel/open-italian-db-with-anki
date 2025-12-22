@@ -133,18 +133,19 @@ def download_morphit(force: bool = False) -> dict[str, int]:
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     with tarfile.open(fileobj=BytesIO(content), mode="r:gz") as tar:
-        # Find the morph-it.txt file in the archive
+        # Find the morph-it data file (versioned like morph-it_048.txt, not readme)
         for member in tar.getmembers():
-            if member.name.endswith("morph-it.txt"):
+            basename = member.name.split("/")[-1]
+            if basename.startswith("morph-it_") and basename.endswith(".txt"):
                 # Extract the file content
                 extracted = tar.extractfile(member)
                 if extracted is None:
-                    raise ValueError("Failed to extract morph-it.txt from archive")
+                    raise ValueError("Failed to extract morph-it data from archive")
                 dest.write_bytes(extracted.read())
                 print(f"  Extracted: {dest} ({dest.stat().st_size / (1024 * 1024):.1f} MB)")
                 return {"downloaded": 1, "skipped": 0}
 
-    raise ValueError("morph-it.txt not found in archive")
+    raise ValueError("morph-it data file not found in archive")
 
 
 def download_itwac(force: bool = False) -> dict[str, int]:
