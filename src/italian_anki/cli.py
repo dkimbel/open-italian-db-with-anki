@@ -12,7 +12,6 @@ from italian_anki.db import (
     init_db,
     lemmas,
     noun_forms,
-    noun_metadata,
     sentence_lemmas,
     sentences,
     verb_forms,
@@ -73,9 +72,6 @@ def cmd_import_wiktextract(args: argparse.Namespace) -> int:
     print(f"  Forms:       {stats['forms']:,}")
     print(f"  Definitions: {stats['definitions']:,}")
     print(f"  Skipped:     {stats['skipped']:,}")
-    if args.pos == "noun":
-        print(f"  With gender: {stats.get('nouns_with_gender', 0):,}")
-        print(f"  No gender:   {stats.get('nouns_no_gender', 0):,}")
 
     return 0
 
@@ -277,7 +273,9 @@ def cmd_stats(args: argparse.Namespace) -> int:
         forms_with_spelling = verb_with_spelling + noun_with_spelling + adj_with_spelling
 
         # Metadata
-        nouns_with_gender = conn.execute(select(func.count()).select_from(noun_metadata)).scalar()
+        nouns_with_gender = conn.execute(
+            select(func.count()).select_from(noun_forms).where(noun_forms.c.gender.isnot(None))
+        ).scalar()
         lemmas_with_freq = conn.execute(
             select(func.count(func.distinct(frequencies.c.lemma_id)))
         ).scalar()
@@ -304,8 +302,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print(f"  With spelling: {forms_with_spelling:,}")
     print()
     print("Metadata:")
-    print(f"  Nouns with gender:     {nouns_with_gender:,}")
-    print(f"  Lemmas with frequency: {lemmas_with_freq:,}")
+    print(f"  Noun forms with gender: {nouns_with_gender:,}")
+    print(f"  Lemmas with frequency:  {lemmas_with_freq:,}")
     print()
     print("Sentences:")
     print(f"  Italian:     {ita_sentences:,}")
@@ -418,9 +416,6 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             print(f"    Forms:       {stats['forms']:,}")
             print(f"    Definitions: {stats['definitions']:,}")
             print(f"    Skipped:     {stats['skipped']:,}")
-            if pos == "noun":
-                print(f"    With gender: {stats.get('nouns_with_gender', 0):,}")
-                print(f"    No gender:   {stats.get('nouns_no_gender', 0):,}")
             print()
 
             # Step 2: Form-of enrichment

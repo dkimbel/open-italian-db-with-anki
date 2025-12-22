@@ -166,13 +166,6 @@ CREATE TABLE sentence_lemmas (
     FOREIGN KEY (lemma_id) REFERENCES lemmas(lemma_id)
 );
 
--- Noun-specific metadata (gender is derivational for nouns)
-CREATE TABLE noun_metadata (
-    lemma_id INTEGER PRIMARY KEY,
-    gender TEXT NOT NULL,             -- 'm' or 'f'
-    FOREIGN KEY (lemma_id) REFERENCES lemmas(lemma_id)
-);
-
 -- Verb-specific metadata (auxiliary and transitivity)
 CREATE TABLE verb_metadata (
     lemma_id INTEGER PRIMARY KEY,
@@ -193,7 +186,6 @@ CREATE INDEX idx_frequencies_lemma ON frequencies(lemma_id);
 CREATE INDEX idx_sentences_lang ON sentences(lang);
 CREATE INDEX idx_sentence_lemmas_lemma ON sentence_lemmas(lemma_id);
 CREATE INDEX idx_sentence_lemmas_sentence ON sentence_lemmas(sentence_id);
-CREATE INDEX idx_noun_metadata_gender ON noun_metadata(gender);
 CREATE INDEX idx_verb_metadata_auxiliary ON verb_metadata(auxiliary);
 ```
 
@@ -295,7 +287,7 @@ data/
 
 Nouns and adjectives use the same pipeline as verbs:
 - `lemmas.pos` = 'noun' or 'adjective'
-- `noun_metadata.gender` stores 'm' or 'f' for nouns (gender is derivational)
+- `noun_forms.gender` stores 'm' or 'f' per form (supports nouns like paio/paia that change gender in plural)
 - Adjective gender is stored in form columns (gender is inflectional)
 
 ---

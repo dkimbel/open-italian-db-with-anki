@@ -79,7 +79,6 @@ class TestSchema:
                 "sentences",
                 "translations",
                 "sentence_lemmas",
-                "noun_metadata",
                 "verb_metadata",
             }
             assert expected_tables.issubset(table_names)

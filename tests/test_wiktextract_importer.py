@@ -15,7 +15,7 @@ from italian_anki.db import (
     get_engine,
     init_db,
     lemmas,
-    noun_metadata,
+    noun_forms,
     sentence_lemmas,
     verb_forms,
     verb_metadata,
@@ -342,8 +342,6 @@ class TestWiktextractImporter:
                 stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
 
             assert stats["lemmas"] == 2
-            assert stats["nouns_with_gender"] == 2
-            assert stats["nouns_no_gender"] == 0
 
             with get_connection(db_path) as conn:
                 # Check masculine noun
@@ -351,21 +349,23 @@ class TestWiktextractImporter:
                 assert libro is not None
                 assert libro.pos == "noun"
 
-                libro_gender = conn.execute(
-                    select(noun_metadata).where(noun_metadata.c.lemma_id == libro.lemma_id)
-                ).fetchone()
-                assert libro_gender is not None
-                assert libro_gender.gender == "m"
+                # Gender is now stored per-form in noun_forms
+                libro_forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == libro.lemma_id)
+                ).fetchall()
+                assert len(libro_forms) >= 1
+                # Check that forms have gender
+                assert all(f.gender == "m" for f in libro_forms)
 
                 # Check feminine noun
                 casa = conn.execute(select(lemmas).where(lemmas.c.lemma == "casa")).fetchone()
                 assert casa is not None
 
-                casa_gender = conn.execute(
-                    select(noun_metadata).where(noun_metadata.c.lemma_id == casa.lemma_id)
-                ).fetchone()
-                assert casa_gender is not None
-                assert casa_gender.gender == "f"
+                casa_forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == casa.lemma_id)
+                ).fetchall()
+                assert len(casa_forms) >= 1
+                assert all(f.gender == "f" for f in casa_forms)
 
         finally:
             db_path.unlink()

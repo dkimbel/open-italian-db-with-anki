@@ -14,7 +14,6 @@ from italian_anki.db.schema import (
     frequencies,
     lemmas,
     noun_forms,
-    noun_metadata,
     sentence_lemmas,
     verb_forms,
     verb_metadata,
@@ -47,7 +46,7 @@ POS_FORM_TABLES = {
 # or not useful for learners).
 DEFINITION_TAG_BLOCKLIST = frozenset(
     {
-        # Gender - extracted to noun_metadata.gender
+        # Gender - extracted to noun_forms.gender
         "masculine",
         "feminine",
         "by-personal-gender",  # derivable from context
@@ -246,7 +245,7 @@ def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | 
     """Yield (gloss, filtered_tags) for each definition.
 
     Tags in DEFINITION_TAG_BLOCKLIST are filtered out since they're either:
-    - Already extracted to proper columns (gender → noun_metadata, transitivity → verb_metadata)
+    - Already extracted to proper columns (gender → noun_forms, transitivity → verb_metadata)
     - Noise that doesn't help learners (alt-of, alternative)
     """
     for sense in entry.get("senses", []):
@@ -276,7 +275,7 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     """Clear all existing data for the given POS.
 
     Deletes in FK-safe order: form_lookup → POS form tables → definitions
-    → frequencies → noun_metadata/verb_metadata → sentence_lemmas → lemmas.
+    → frequencies → verb_metadata → sentence_lemmas → lemmas.
     Returns the number of lemmas cleared.
     """
     # Count existing lemmas for this POS (for return value)
@@ -312,9 +311,7 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     # 4. frequencies (references lemmas)
     conn.execute(frequencies.delete().where(frequencies.c.lemma_id.in_(lemma_subq)))
     # 5. POS-specific metadata tables
-    if pos_filter == "noun":
-        conn.execute(noun_metadata.delete().where(noun_metadata.c.lemma_id.in_(lemma_subq)))
-    elif pos_filter == "verb":
+    if pos_filter == "verb":
         conn.execute(verb_metadata.delete().where(verb_metadata.c.lemma_id.in_(lemma_subq)))
     # 6. sentence_lemmas (references lemmas)
     conn.execute(sentence_lemmas.delete().where(sentence_lemmas.c.lemma_id.in_(lemma_subq)))
@@ -351,9 +348,13 @@ def _build_verb_form_row(
 
 
 def _build_noun_form_row(
-    lemma_id: int, form_stressed: str, tags: list[str]
+    lemma_id: int, form_stressed: str, tags: list[str], lemma_gender: str | None = None
 ) -> dict[str, Any] | None:
-    """Build a noun_forms row dict from tags, or None if should filter."""
+    """Build a noun_forms row dict from tags, or None if should filter.
+
+    Gender is extracted per-form from tags. For forms without explicit gender tags,
+    falls back to lemma_gender (typically for singular forms).
+    """
     if should_filter_form(tags):
         return None
 
@@ -361,10 +362,21 @@ def _build_noun_form_row(
     if features.should_filter or features.number is None:
         return None
 
+    # Extract gender from tags (for forms like "uova" with ["feminine", "plural"])
+    gender: str | None = None
+    if "masculine" in tags:
+        gender = "m"
+    elif "feminine" in tags:
+        gender = "f"
+    elif lemma_gender:
+        # Fall back to lemma gender for forms without explicit gender tag
+        gender = lemma_gender
+
     return {
         "lemma_id": lemma_id,
         "form": None,
         "form_stressed": form_stressed,
+        "gender": gender,
         "number": features.number,
         "labels": features.labels,
         "is_diminutive": features.is_diminutive,
@@ -443,9 +455,6 @@ def import_wiktextract(
         "skipped": 0,
         "cleared": cleared,
     }
-    if pos_filter == "noun":
-        stats["nouns_with_gender"] = 0
-        stats["nouns_no_gender"] = 0
 
     # Get POS-specific table and row builder
     pos_form_table = POS_FORM_TABLES.get(pos_filter)
@@ -545,14 +554,10 @@ def import_wiktextract(
                 stats["skipped"] += 1
                 continue
 
-            # Insert POS-specific metadata
+            # Insert POS-specific metadata (verbs only - noun gender is per-form now)
+            lemma_gender: str | None = None
             if pos_filter == "noun":
-                gender = _extract_gender(entry)
-                if gender:
-                    conn.execute(noun_metadata.insert().values(lemma_id=lemma_id, gender=gender))
-                    stats["nouns_with_gender"] += 1
-                else:
-                    stats["nouns_no_gender"] += 1
+                lemma_gender = _extract_gender(entry)
             elif pos_filter == "verb":
                 auxiliary = _extract_auxiliary(entry)
                 transitivity = _extract_transitivity(entry)
@@ -567,7 +572,10 @@ def import_wiktextract(
 
             # Queue forms for batch insert (using POS-specific builder)
             for form_stressed, tags in _iter_forms(entry, pos_filter):
-                row = build_form_row(lemma_id, form_stressed, tags)
+                if pos_filter == "noun":
+                    row = _build_noun_form_row(lemma_id, form_stressed, tags, lemma_gender)
+                else:
+                    row = build_form_row(lemma_id, form_stressed, tags)
                 if row is None:
                     stats["forms_filtered"] += 1
                     continue

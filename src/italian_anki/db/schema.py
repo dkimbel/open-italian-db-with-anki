@@ -69,6 +69,7 @@ noun_forms = Table(
     Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
     Column("form", Text),  # real Italian spelling
     Column("form_stressed", Text, nullable=False),  # with stress marks
+    Column("gender", String(1)),  # 'm' or 'f' (per-form, for nouns like paio/paia)
     Column("number", Text, nullable=False),  # singular, plural
     Column("labels", Text),  # NULL=standard, or comma-separated labels
     Column("is_diminutive", Boolean, default=False),
@@ -140,14 +141,6 @@ sentence_lemmas = Table(
     Column("form_found", Text),  # the inflected form matched
 )
 
-# Noun-specific metadata (gender is derivational for nouns)
-noun_metadata = Table(
-    "noun_metadata",
-    metadata,
-    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), primary_key=True),
-    Column("gender", String(1), nullable=False),  # 'm' or 'f'
-)
-
 # Verb-specific metadata (auxiliary and transitivity)
 verb_metadata = Table(
     "verb_metadata",
@@ -158,7 +151,6 @@ verb_metadata = Table(
 )
 
 # Indexes (defined separately for clarity)
-Index("idx_noun_metadata_gender", noun_metadata.c.gender)
 Index("idx_verb_metadata_auxiliary", verb_metadata.c.auxiliary)
 # verb_forms indexes
 Index("idx_verb_forms_lemma", verb_forms.c.lemma_id)
@@ -168,6 +160,7 @@ Index("idx_verb_forms_form", verb_forms.c.form)
 # New noun_forms indexes
 Index("idx_noun_forms_lemma", noun_forms.c.lemma_id)
 Index("idx_noun_forms_form", noun_forms.c.form)
+Index("idx_noun_forms_gender", noun_forms.c.gender)
 # New adjective_forms indexes
 Index("idx_adjective_forms_lemma", adjective_forms.c.lemma_id)
 Index("idx_adjective_forms_form", adjective_forms.c.form)
