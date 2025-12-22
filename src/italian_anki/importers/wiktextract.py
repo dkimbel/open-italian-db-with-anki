@@ -765,3 +765,129 @@ def enrich_from_form_of(
         progress_callback(total_lines, total_lines)
 
     return stats
+
+
+def enrich_form_spelling_from_form_of(
+    conn: Connection,
+    jsonl_path: Path,
+    *,
+    pos_filter: str = "verb",
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
+    """Fill form column from form-of entries where Morph-it! didn't have it.
+
+    This is a fallback enrichment that runs after Morph-it! to fill
+    the 'form' column using the spelling from Wiktionary form-of entries.
+
+    Args:
+        conn: SQLAlchemy connection
+        jsonl_path: Path to the Wiktextract JSONL file
+        pos_filter: Part of speech to enrich (default: "verb")
+        progress_callback: Optional callback for progress reporting (current, total)
+
+    Returns:
+        Statistics dict with counts
+    """
+    from sqlalchemy import update
+
+    stats = {"scanned": 0, "updated": 0, "already_filled": 0, "not_found": 0}
+
+    # Get POS-specific table
+    pos_form_table = POS_FORM_TABLES.get(pos_filter)
+    if pos_form_table is None:
+        msg = f"Unsupported POS: {pos_filter}"
+        raise ValueError(msg)
+
+    # Build lemma lookup: normalized_lemma -> lemma_id
+    lemma_result = conn.execute(
+        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == pos_filter)
+    )
+    lemma_lookup: dict[str, int] = {row.lemma: row.lemma_id for row in lemma_result}
+
+    # Build form lookup: (lemma_id, normalized_form) -> list of form_ids
+    # Only include forms where form IS NULL (not already filled by Morph-it!)
+    form_result = conn.execute(
+        select(
+            pos_form_table.c.id, pos_form_table.c.lemma_id, pos_form_table.c.form_stressed
+        ).where(pos_form_table.c.form.is_(None))
+    )
+    form_lookup: dict[tuple[int, str], list[int]] = {}
+    for row in form_result:
+        normalized = normalize(row.form_stressed)
+        key = (row.lemma_id, normalized)
+        if key not in form_lookup:
+            form_lookup[key] = []
+        form_lookup[key].append(row.id)
+
+    # Map to Wiktextract's POS naming
+    wiktextract_pos = WIKTEXTRACT_POS.get(pos_filter, pos_filter)
+
+    # Count lines for progress if callback provided
+    total_lines = _count_lines(jsonl_path) if progress_callback else 0
+    current_line = 0
+
+    with jsonl_path.open(encoding="utf-8") as f:
+        for line in f:
+            current_line += 1
+            if progress_callback and current_line % 10000 == 0:
+                progress_callback(current_line, total_lines)
+
+            entry = _parse_entry(line)
+            if entry is None:
+                continue
+
+            # Only process form-of entries for our POS
+            if not _is_form_of_entry(entry, wiktextract_pos):
+                continue
+
+            stats["scanned"] += 1
+
+            # The entry's 'word' field is the actual written form (e.g., "parlo")
+            form_word = entry.get("word", "")
+            if not form_word:
+                continue
+
+            # Process each sense's form_of references
+            for sense in entry.get("senses", []):
+                form_of_list = sense.get("form_of", [])
+                if not form_of_list:
+                    continue
+
+                for form_of in form_of_list:
+                    lemma_word = form_of.get("word", "")
+                    if not lemma_word:
+                        continue
+
+                    # Look up lemma
+                    lemma_normalized = normalize(lemma_word)
+                    lemma_id = lemma_lookup.get(lemma_normalized)
+                    if lemma_id is None:
+                        stats["not_found"] += 1
+                        continue
+
+                    # Look up form (only forms with NULL 'form' are in the lookup)
+                    form_normalized = normalize(form_word)
+                    key = (lemma_id, form_normalized)
+                    form_ids = form_lookup.get(key)
+                    if not form_ids:
+                        # Either already filled by Morph-it! or not found
+                        stats["already_filled"] += 1
+                        continue
+
+                    # Update form and form_source for all matching forms
+                    for form_id in form_ids:
+                        conn.execute(
+                            update(pos_form_table)
+                            .where(pos_form_table.c.id == form_id)
+                            .values(form=form_word, form_source="wiktionary")
+                        )
+                        stats["updated"] += 1
+
+                    # Remove from lookup to avoid duplicate updates
+                    del form_lookup[key]
+
+    # Final progress callback
+    if progress_callback:
+        progress_callback(total_lines, total_lines)
+
+    return stats

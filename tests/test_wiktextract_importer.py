@@ -21,7 +21,11 @@ from italian_anki.db import (
     verb_metadata,
 )
 from italian_anki.importers.tatoeba import import_tatoeba
-from italian_anki.importers.wiktextract import enrich_from_form_of, import_wiktextract
+from italian_anki.importers.wiktextract import (
+    enrich_form_spelling_from_form_of,
+    enrich_from_form_of,
+    import_wiktextract,
+)
 
 # Sample verb entry from Wiktextract
 SAMPLE_VERB = {
@@ -620,6 +624,180 @@ class TestWiktextractImporter:
                 ).fetchall()
                 assert len(libro_forms) > 0
                 assert all(f.gender is not None for f in libro_forms)
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+
+class TestEnrichFormSpellingFromFormOf:
+    """Tests for the form-of spelling fallback enrichment."""
+
+    def test_fills_form_from_formof_entry(self) -> None:
+        """Test that form column is filled from form-of entry when form is NULL."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        # Lemma entry with stressed forms
+        lemma_entry = {
+            "pos": "verb",
+            "word": "parlare",
+            "forms": [
+                {"form": "parlàre", "tags": ["canonical"]},
+                {"form": "parlàre", "tags": ["infinitive"]},
+                {"form": "pàrlo", "tags": ["first-person", "indicative", "present", "singular"]},
+            ],
+            "senses": [{"glosses": ["to speak"]}],
+        }
+
+        # Form-of entry with unaccented spelling
+        formof_entry = {
+            "pos": "verb",
+            "word": "parlo",  # Unaccented form
+            "senses": [
+                {
+                    "glosses": ["first-person singular present indicative of parlare"],
+                    "tags": ["form-of", "first-person", "indicative", "present", "singular"],
+                    "form_of": [{"word": "parlare"}],
+                }
+            ],
+        }
+
+        jsonl_path = _create_test_jsonl([lemma_entry, formof_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            # Import Wiktextract (form column will be NULL)
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+
+            # Verify form is NULL before enrichment
+            with get_connection(db_path) as conn:
+                form_row = conn.execute(
+                    select(verb_forms).where(verb_forms.c.form_stressed == "pàrlo")
+                ).fetchone()
+                assert form_row is not None
+                assert form_row.form is None
+
+            # Run form-of spelling enrichment
+            with get_connection(db_path) as conn:
+                stats = enrich_form_spelling_from_form_of(conn, jsonl_path)
+
+            assert stats["updated"] > 0
+
+            # Verify form is now filled
+            with get_connection(db_path) as conn:
+                form_row = conn.execute(
+                    select(verb_forms).where(verb_forms.c.form_stressed == "pàrlo")
+                ).fetchone()
+                assert form_row is not None
+                assert form_row.form == "parlo"
+                assert form_row.form_source == "wiktionary"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_does_not_overwrite_morphit_spelling(self) -> None:
+        """Test that form-of doesn't overwrite forms already filled by Morph-it!."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        lemma_entry = {
+            "pos": "verb",
+            "word": "parlare",
+            "forms": [
+                {"form": "parlàre", "tags": ["canonical"]},
+                {"form": "pàrlo", "tags": ["first-person", "indicative", "present", "singular"]},
+            ],
+            "senses": [{"glosses": ["to speak"]}],
+        }
+
+        formof_entry = {
+            "pos": "verb",
+            "word": "parlo",
+            "senses": [
+                {
+                    "form_of": [{"word": "parlare"}],
+                    "tags": ["form-of"],
+                }
+            ],
+        }
+
+        jsonl_path = _create_test_jsonl([lemma_entry, formof_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+
+            # Simulate Morph-it! having already filled the form
+            with get_connection(db_path) as conn:
+                from sqlalchemy import update
+
+                conn.execute(
+                    update(verb_forms)
+                    .where(verb_forms.c.form_stressed == "pàrlo")
+                    .values(form="parlo", form_source="morphit")
+                )
+                conn.commit()
+
+            # Run form-of enrichment
+            with get_connection(db_path) as conn:
+                stats = enrich_form_spelling_from_form_of(conn, jsonl_path)
+
+            # Should not have updated anything (already filled)
+            assert stats["updated"] == 0
+            assert stats["already_filled"] > 0
+
+            # Verify form_source is still "morphit"
+            with get_connection(db_path) as conn:
+                form_row = conn.execute(
+                    select(verb_forms).where(verb_forms.c.form_stressed == "pàrlo")
+                ).fetchone()
+                assert form_row is not None
+                assert form_row.form_source == "morphit"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_handles_missing_lemma(self) -> None:
+        """Test that form-of entries referencing missing lemmas are counted as not_found."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        # Only a form-of entry, no lemma
+        formof_entry = {
+            "pos": "verb",
+            "word": "parlo",
+            "senses": [
+                {
+                    "form_of": [{"word": "parlare"}],  # This lemma doesn't exist
+                    "tags": ["form-of"],
+                }
+            ],
+        }
+
+        jsonl_path = _create_test_jsonl([formof_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+
+            with get_connection(db_path) as conn:
+                stats = enrich_form_spelling_from_form_of(conn, jsonl_path)
+
+            # Should count as not found since lemma doesn't exist
+            assert stats["not_found"] > 0
+            assert stats["updated"] == 0
 
         finally:
             db_path.unlink()

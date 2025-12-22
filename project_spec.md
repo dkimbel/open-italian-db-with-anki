@@ -119,7 +119,8 @@ CREATE TABLE frequencies (
 CREATE TABLE forms (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     lemma_id INTEGER NOT NULL,
-    form TEXT,                        -- real Italian spelling from Morph-it! (NULL if not found)
+    form TEXT,                        -- real Italian spelling (NULL if not found)
+    form_source TEXT,                 -- "morphit" or "wiktionary" (source of form spelling)
     form_stressed TEXT NOT NULL,      -- pedagogical with stress marks from Wiktextract
     tags TEXT NOT NULL,               -- JSON array
     FOREIGN KEY (lemma_id) REFERENCES lemmas(lemma_id)
@@ -205,7 +206,7 @@ Example: `Mangiare` → `mangiare`, `reiterare` from both LeFFI and Wiktextract 
 
 ## ETL Pipeline
 
-Data flows through a pipeline: Wiktextract provides lemmas, forms, and definitions → Morph-it! enriches forms with real Italian spelling → ItWaC adds frequency data → Tatoeba links example sentences. Each step is idempotent and can be run with `task import-*` commands. Run `task stats` to see current database state.
+Data flows through a pipeline: Wiktextract provides lemmas, forms, and definitions → Morph-it! enriches forms with real Italian spelling (form_source="morphit") → Form-of fallback fills remaining gaps from Wiktionary (form_source="wiktionary") → ItWaC adds frequency data → Tatoeba links example sentences. Each step is idempotent and can be run with `task import-*` commands. Run `task stats` to see current database state.
 
 ---
 

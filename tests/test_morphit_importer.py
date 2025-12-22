@@ -275,3 +275,44 @@ class TestMorphitImporter:
             db_path.unlink()
             jsonl_path.unlink()
             morphit_path.unlink()
+
+    def test_sets_form_source_to_morphit(self) -> None:
+        """Verify that form_source is set to 'morphit' when updating forms."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_VERB])
+        morphit_path = _create_test_morphit(
+            [
+                "parlo\tparlare\tVER:ind+pres+1+s",
+                "parli\tparlare\tVER:ind+pres+2+s",
+            ]
+        )
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+
+            with get_connection(db_path) as conn:
+                import_morphit(conn, morphit_path)
+
+            # Check that form_source is set to "morphit"
+            with get_connection(db_path) as conn:
+                form_rows = conn.execute(
+                    select(verb_forms).where(verb_forms.c.form.isnot(None))
+                ).fetchall()
+
+                assert len(form_rows) > 0, "Should have forms with real spelling"
+
+                for row in form_rows:
+                    assert (
+                        row.form_source == "morphit"
+                    ), f"Expected form_source='morphit', got '{row.form_source}'"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+            morphit_path.unlink()

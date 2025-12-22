@@ -30,7 +30,10 @@ from italian_anki.importers import (
     import_wiktextract,
 )
 from italian_anki.importers.itwac import ITWAC_CSV_FILES
-from italian_anki.importers.wiktextract import enrich_from_form_of
+from italian_anki.importers.wiktextract import (
+    enrich_form_spelling_from_form_of,
+    enrich_from_form_of,
+)
 
 DEFAULT_WIKTEXTRACT_PATH = Path("data/wiktextract/kaikki.org-dictionary-Italian.jsonl")
 DEFAULT_MORPHIT_PATH = Path("data/morphit/morph-it.txt")
@@ -453,6 +456,23 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             print(f"    Forms updated:    {stats['updated']:,}")
             print(f"    Forms not found:  {stats['not_found']:,}")
             print(f"    Lookup entries:   {stats['lookup_added']:,}")
+            print()
+
+            # Step 3b: Form-of spelling fallback
+            print("[3b/4] Enriching form spelling from form-of entries...")
+
+            def formof_spelling_progress(current: int, total: int) -> None:
+                _print_progress(current, total, "Processing")
+
+            stats = enrich_form_spelling_from_form_of(
+                conn, jsonl_path, pos_filter=pos, progress_callback=formof_spelling_progress
+            )
+            print()
+            print("  Enrichment complete!")
+            print(f"    Form-of entries scanned: {stats['scanned']:,}")
+            print(f"    Forms updated:           {stats['updated']:,}")
+            print(f"    Already had spelling:    {stats['already_filled']:,}")
+            print(f"    Not found:               {stats['not_found']:,}")
             print()
 
             # Step 4: ItWaC frequency import

@@ -147,7 +147,7 @@ def import_morphit(
                 conn.execute(
                     update(pos_form_table)
                     .where(pos_form_table.c.id == item["id"])
-                    .values(form=item["form"])
+                    .values(form=item["form"], form_source=item["form_source"])
                 )
             stats["updated"] += len(update_batch)
             update_batch = []
@@ -172,7 +172,7 @@ def import_morphit(
         real_form = morphit_lookup.get(normalized)
 
         if real_form:
-            update_batch.append({"id": form_id, "form": real_form})
+            update_batch.append({"id": form_id, "form": real_form, "form_source": "morphit"})
 
             # Also add the Morph-it! normalized form to lookup
             # (in case it differs from Wiktextract normalization)

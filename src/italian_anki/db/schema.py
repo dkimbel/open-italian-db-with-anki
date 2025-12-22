@@ -45,6 +45,7 @@ verb_forms = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
     Column("form", Text),  # real Italian spelling from Morph-it! (NULL if not found)
+    Column("form_source", Text),  # "morphit" or "wiktionary", NULL if not found
     Column("form_stressed", Text, nullable=False),  # with stress marks
     # Grammatical features
     Column(
@@ -68,6 +69,7 @@ noun_forms = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
     Column("form", Text),  # real Italian spelling
+    Column("form_source", Text),  # "morphit" or "wiktionary", NULL if not found
     Column("form_stressed", Text, nullable=False),  # with stress marks
     Column("gender", String(1), nullable=False),  # 'm' or 'f' (per-form, for nouns like paio/paia)
     Column("number", Text, nullable=False),  # singular, plural
@@ -83,6 +85,7 @@ adjective_forms = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
     Column("form", Text),  # real Italian spelling
+    Column("form_source", Text),  # "morphit" or "wiktionary", NULL if not found
     Column("form_stressed", Text, nullable=False),  # with stress marks
     Column("gender", Text, nullable=False),  # masculine, feminine
     Column("number", Text, nullable=False),  # singular, plural
