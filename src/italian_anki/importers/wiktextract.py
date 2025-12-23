@@ -73,10 +73,10 @@ ACCENTED_CHARS = frozenset("àèéìòóùÀÈÉÌÒÓÙ")
 # A definition matches a form if ANY topic or phrase matches.
 DEFINITION_FORM_LINKAGE: dict[str, dict[str, dict[str, list[str]]]] = {
     "braccio": {
-        "braccia": {"topics": ["anatomy"], "phrases": ["fathom"]},
+        "braccia": {"topics": ["anatomy"], "phrases": ["fathom", "work", "effort"]},
         "bracci": {
-            "topics": ["mechanics", "geography", "figurative"],
-            "phrases": ["branch (of a river", "wing (of a building)"],
+            "topics": ["mechanics", "geography"],
+            "phrases": ["branch (of a river", "wing (of a building)", "power", "authority"],
         },
     },
     "grido": {
