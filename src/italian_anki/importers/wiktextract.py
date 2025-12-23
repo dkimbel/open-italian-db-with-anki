@@ -669,6 +669,10 @@ def _iter_forms(
     """
     seen: set[tuple[str, tuple[str, ...]]] = set()
     has_masc_singular = False
+    has_fem_singular = False
+    # 2-form adjectives (like "facile") have genderless number tags in Wiktextract
+    # (e.g., ["plural"] instead of ["masculine", "plural"])
+    is_two_form = False
 
     for form_data in entry.get("forms", []):
         form_stressed = form_data.get("form", "")
@@ -706,6 +710,44 @@ def _iter_forms(
                 tags = [*tags, "singular"]  # Create new list, don't mutate original
                 tag_set = set(tags)
 
+        # For adjectives: infer singular for forms with gender but no number
+        # (e.g., {"form": "alta", "tags": ["feminine"]} → add "singular")
+        if pos == "adjective":
+            has_gender = "masculine" in tag_set or "feminine" in tag_set
+            has_number = "singular" in tag_set or "plural" in tag_set
+            if has_gender and not has_number:
+                tags = [*tags, "singular"]
+                tag_set = set(tags)
+
+        # For adjectives: forms with number but no gender (2-form adjectives)
+        # Generate both masculine and feminine entries since these forms agree with both
+        # (e.g., {"form": "facili", "tags": ["plural"]} → m.pl AND f.pl)
+        if pos == "adjective":
+            has_gender = "masculine" in tag_set or "feminine" in tag_set
+            has_number = "singular" in tag_set or "plural" in tag_set
+            if has_number and not has_gender:
+                # Genderless number tag = 2-form adjective (Wiktextract's explicit signal)
+                is_two_form = True
+                # Yield masculine version
+                tags_m = [*tags, "masculine"]
+                key_m = (form_stressed, tuple(sorted(tags_m)))
+                if key_m not in seen:
+                    seen.add(key_m)
+                    # Track if this is the masculine singular base form
+                    if "singular" in tag_set:
+                        has_masc_singular = True
+                    yield form_stressed, tags_m
+                # Yield feminine version
+                tags_f = [*tags, "feminine"]
+                key_f = (form_stressed, tuple(sorted(tags_f)))
+                if key_f not in seen:
+                    seen.add(key_f)
+                    # Track if this is the feminine singular form
+                    if "singular" in tag_set:
+                        has_fem_singular = True
+                    yield form_stressed, tags_f
+                continue  # Skip the default yield
+
         # Skip auxiliary markers (they're metadata, not conjugated forms)
         if "auxiliary" in tags:
             continue
@@ -715,9 +757,11 @@ def _iter_forms(
         if pos == "verb" and "canonical" in tags:
             continue
 
-        # Track whether we've seen the base form (for adjectives)
+        # Track whether we've seen the base forms (for adjectives)
         if pos == "adjective" and "masculine" in tags and "singular" in tags:
             has_masc_singular = True
+        if pos == "adjective" and "feminine" in tags and "singular" in tags:
+            has_fem_singular = True
 
         # Deduplicate
         key = (form_stressed, tuple(sorted(tags)))
@@ -735,7 +779,15 @@ def _iter_forms(
     if pos == "adjective" and not has_masc_singular:
         key = (lemma_stressed, ("masculine", "singular"))
         if key not in seen:
+            seen.add(key)
             yield lemma_stressed, ["masculine", "singular"]
+
+    # For 2-form adjectives, add feminine singular too (same form as masculine)
+    # is_two_form is set when Wiktextract provides genderless number tags
+    if pos == "adjective" and not has_fem_singular and is_two_form:
+        key = (lemma_stressed, ("feminine", "singular"))
+        if key not in seen:
+            yield lemma_stressed, ["feminine", "singular"]
 
 
 def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | None]]:

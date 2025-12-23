@@ -138,6 +138,31 @@ SAMPLE_ADJECTIVE = {
     "sounds": [{"ipa": "/ˈbɛl.lo/"}],  # noqa: RUF001 (IPA stress marker)
 }
 
+# Adjective with incomplete tags (missing "singular" on feminine form)
+# This matches real Wiktextract data where forms like {"form": "alta", "tags": ["feminine"]}
+# are common - the importer should infer "singular"
+SAMPLE_ADJECTIVE_INCOMPLETE_TAGS = {
+    "pos": "adj",
+    "word": "alto",
+    "forms": [
+        {"form": "alta", "tags": ["feminine"]},  # Missing "singular" - should be inferred
+        {"form": "alti", "tags": ["masculine", "plural"]},
+        {"form": "alte", "tags": ["feminine", "plural"]},
+    ],
+    "senses": [{"glosses": ["tall", "high"]}],
+}
+
+# Two-form adjective where forms have number but no gender
+# (e.g., {"form": "facili", "tags": ["plural"]} needs both masculine and feminine rows)
+SAMPLE_ADJECTIVE_TWO_FORM = {
+    "pos": "adj",
+    "word": "facile",
+    "forms": [
+        {"form": "facili", "tags": ["plural"]},  # No gender - should generate m.pl AND f.pl
+    ],
+    "senses": [{"glosses": ["easy"]}],
+}
+
 # Sample noun entry without gender (should be filtered out)
 SAMPLE_NOUN_NO_GENDER = {
     "pos": "noun",
@@ -445,6 +470,97 @@ class TestWiktextractImporter:
                 bella_form = next(f for f in form_rows if f.form_stressed == "bella")
                 assert bella_form.def_article == "la"  # la bella
                 assert bella_form.article_source == "inferred"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_imports_adjective_with_inferred_singular(self) -> None:
+        """Test that feminine forms without 'singular' tag get it inferred."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_ADJECTIVE_INCOMPLETE_TAGS])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+
+            assert stats["lemmas"] == 1
+            # Should have 4 forms: alto (base), alta (inferred singular), alti, alte
+            assert stats["forms"] >= 4
+
+            with get_connection(db_path) as conn:
+                alto = conn.execute(select(lemmas).where(lemmas.c.lemma == "alto")).fetchone()
+                assert alto is not None
+
+                form_rows = conn.execute(
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == alto.lemma_id)
+                ).fetchall()
+
+                # Check alta was imported with inferred singular
+                alta_form = next((f for f in form_rows if f.form_stressed == "alta"), None)
+                assert alta_form is not None, "alta should be imported"
+                assert alta_form.gender == "feminine"
+                assert alta_form.number == "singular"
+                assert alta_form.def_article == "l'"  # l'alta
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_imports_adjective_two_form_plural(self) -> None:
+        """Test that plural-only forms generate both masculine and feminine entries."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_ADJECTIVE_TWO_FORM])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+
+            assert stats["lemmas"] == 1
+            # Should have 4 forms for 2-form adjective:
+            # - facile m.sg (base form auto-added)
+            # - facile f.sg (base form auto-added for -e adjectives)
+            # - facili m.pl (from plural tag + inferred masculine)
+            # - facili f.pl (from plural tag + inferred feminine)
+            assert stats["forms"] == 4
+
+            with get_connection(db_path) as conn:
+                facile = conn.execute(select(lemmas).where(lemmas.c.lemma == "facile")).fetchone()
+                assert facile is not None
+
+                form_rows = conn.execute(
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == facile.lemma_id)
+                ).fetchall()
+
+                # Check facili appears as both masculine and feminine plural
+                facili_forms = [f for f in form_rows if f.form_stressed == "facili"]
+                assert len(facili_forms) == 2, "facili should appear twice (m.pl and f.pl)"
+
+                genders = {f.gender for f in facili_forms}
+                assert genders == {"masculine", "feminine"}
+
+                for f in facili_forms:
+                    assert f.number == "plural"
+
+                # Check facile appears as both masculine and feminine singular
+                facile_forms = [f for f in form_rows if f.form_stressed == "facile"]
+                assert len(facile_forms) == 2, "facile should appear twice (m.sg and f.sg)"
+
+                genders = {f.gender for f in facile_forms}
+                assert genders == {"masculine", "feminine"}
+
+                for f in facile_forms:
+                    assert f.number == "singular"
 
         finally:
             db_path.unlink()
