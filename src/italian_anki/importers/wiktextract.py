@@ -57,6 +57,64 @@ GENDER_PATTERNS: dict[str, str] = {
     "f-s": "f-s",  # feminine singularia tantum
 }
 
+# Italian accented vowels (used to detect stressed/accented forms)
+ACCENTED_CHARS = frozenset("àèéìòóùÀÈÉÌÒÓÙ")
+
+
+def _has_accents(text: str) -> bool:
+    """Check if text contains any accented characters."""
+    return any(c in ACCENTED_CHARS for c in text)
+
+
+def _build_stressed_alternatives(jsonl_path: Path) -> dict[str, str]:
+    """Build a lookup of unaccented forms to their accented alternatives.
+
+    Scans form-of entries in the Wiktextract data for "alternative" tagged forms
+    that have accents. This allows enriching unaccented forms with their proper
+    stressed spellings (e.g., "dei" → "dèi").
+
+    Args:
+        jsonl_path: Path to Wiktextract JSONL file
+
+    Returns:
+        Dict mapping normalized (unaccented) forms to their accented alternatives.
+        E.g., {"dei": "dèi", "principi": "prìncipi"}
+    """
+    lookup: dict[str, str] = {}
+
+    with jsonl_path.open(encoding="utf-8") as f:
+        for line in f:
+            entry = _parse_entry(line)
+            if entry is None:
+                continue
+
+            # Only process form-of entries (entries with "form_of" in any sense)
+            senses = entry.get("senses", [])
+            if not any("form_of" in sense for sense in senses):
+                continue
+
+            # The entry's word is the unaccented form we want to map from
+            word = entry.get("word", "")
+            if not word:
+                continue
+
+            # Look for accented alternatives in the forms array
+            for form_data in entry.get("forms", []):
+                form = form_data.get("form", "")
+                tags = form_data.get("tags", [])
+
+                # We want forms tagged as "alternative" that have accents
+                if "alternative" in tags and _has_accents(form):
+                    # Map the unaccented word to the accented form
+                    # Use normalize() to ensure consistent lookup keys
+                    key = normalize(word)
+                    # Only store if we don't have one yet (first alternative wins)
+                    # or if the new one is shorter (prefer simpler forms)
+                    if key not in lookup or len(form) < len(lookup[key]):
+                        lookup[key] = form
+
+    return lookup
+
 
 def _find_gender_in_args(args: dict[str, Any]) -> str | None:
     """Search all arg values for a known gender pattern.
@@ -233,6 +291,7 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
     # Check head_templates for gender markers
     has_masculine = False
     has_feminine = False
+    has_counterpart_marker = False  # "f": "+" or "m": "+" indicates forms differ by gender
     is_mfbysense = False  # Different meanings per gender (fine)
     is_invariable = False
     is_pluralia_tantum = False
@@ -260,6 +319,16 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
             has_masculine = True
         elif gender_arg.startswith("f"):
             has_feminine = True
+
+        # Check for counterpart markers (e.g., "f": "+" means has feminine counterpart)
+        # These indicate the noun has forms in both genders even if main gender is m or f
+        # When a counterpart marker exists, the forms differ by gender (e.g., amico/amica)
+        if args.get("f"):  # Has feminine counterpart (e.g., amico → amica)
+            has_feminine = True
+            has_counterpart_marker = True
+        if args.get("m"):  # Has masculine counterpart (e.g., amica → amico)
+            has_masculine = True
+            has_counterpart_marker = True
 
         # Check for invariable marker (# in Wiktextract)
         if "#" in str(args):
@@ -306,6 +375,10 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
         if is_mfbysense:
             # Different meanings per gender - will create separate lemmas
             result["gender_class"] = "mfbysense"
+        elif has_counterpart_marker:
+            # Counterpart marker (f: "+" or m: "+") means forms differ by gender
+            # (e.g., amico/amica, professore/professoressa)
+            result["gender_class"] = "common_gender_variable"
         else:
             # Check if forms differ by gender
             masc_forms: set[str] = set()
@@ -360,18 +433,31 @@ def _extract_lemma_stressed(entry: dict[str, Any]) -> str:
     return entry["word"]
 
 
-def _iter_forms(entry: dict[str, Any], pos: str) -> Iterator[tuple[str, list[str]]]:
+def _iter_forms(
+    entry: dict[str, Any],
+    pos: str,
+    stressed_alternatives: dict[str, str] | None = None,
+) -> Iterator[tuple[str, list[str]]]:
     """Yield (form_stressed, tags) for each inflected form.
 
     Args:
         entry: Wiktextract entry dict
         pos: Part of speech (verb, noun, adjective)
+        stressed_alternatives: Optional lookup for enriching unaccented forms with
+            their proper accented spellings (e.g., "dei" → "dèi")
     """
     seen: set[tuple[str, tuple[str, ...]]] = set()
     has_masc_singular = False
 
     for form_data in entry.get("forms", []):
         form_stressed = form_data.get("form", "")
+
+        # Enrich with accented alternative if available
+        # (fixes bug where Wiktextract stores "dei" but correct spelling is "dèi")
+        if stressed_alternatives and not _has_accents(form_stressed):
+            key = normalize(form_stressed)
+            if key in stressed_alternatives:
+                form_stressed = stressed_alternatives[key]
         tags = form_data.get("tags", [])
         tag_set = set(tags)
 
@@ -389,6 +475,15 @@ def _iter_forms(entry: dict[str, Any], pos: str) -> Iterator[tuple[str, list[str
             meaningful_tags = tag_set - SKIP_TAGS
             if not meaningful_tags:
                 continue
+
+        # For nouns: infer singular for forms with gender but no number
+        # (e.g., {"form": "amica", "tags": ["feminine"]} → add "singular")
+        if pos == "noun":
+            has_gender = "masculine" in tag_set or "feminine" in tag_set
+            has_number = "singular" in tag_set or "plural" in tag_set
+            if has_gender and not has_number:
+                tags = [*tags, "singular"]  # Create new list, don't mutate original
+                tag_set = set(tags)
 
         # Skip auxiliary markers (they're metadata, not conjugated forms)
         if "auxiliary" in tags:
@@ -707,6 +802,12 @@ def import_wiktextract(
     # Map to Wiktextract's POS naming
     wiktextract_pos = WIKTEXTRACT_POS.get(pos_filter, pos_filter)
 
+    # Build lookup of accented alternatives for nouns
+    # (fixes bug where Wiktextract stores "dei" but correct spelling is "dèi")
+    stressed_alternatives: dict[str, str] | None = None
+    if pos_filter == "noun":
+        stressed_alternatives = _build_stressed_alternatives(jsonl_path)
+
     # Count lines for progress if callback provided
     total_lines = _count_lines(jsonl_path) if progress_callback else 0
     current_line = 0
@@ -799,7 +900,7 @@ def import_wiktextract(
             # Track what number/gender combinations we've already added for nouns
             seen_noun_forms: set[tuple[str, str]] = set()  # (number, gender)
 
-            for form_stressed, tags in _iter_forms(entry, pos_filter):
+            for form_stressed, tags in _iter_forms(entry, pos_filter, stressed_alternatives):
                 if pos_filter == "noun":
                     # Skip singular forms for pluralia tantum nouns
                     is_pluralia_tantum = (

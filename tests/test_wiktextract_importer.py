@@ -1095,3 +1095,123 @@ class TestNounClassification:
         finally:
             db_path.unlink()
             jsonl_path.unlink()
+
+    def test_counterpart_marker_detects_feminine(self) -> None:
+        """Test that 'f': '+' in head_templates marks noun as having feminine forms."""
+        # This matches real Wiktextract data for "amico" which has "f": "+"
+        sample_amico = {
+            "pos": "noun",
+            "word": "amico",
+            "head_templates": [{"args": {"1": "m", "f": "+"}}],
+            "categories": ["Italian lemmas"],
+            "forms": [
+                {"form": "amici", "tags": ["plural"]},
+                {"form": "amica", "tags": ["feminine"]},  # No number tag!
+                {"form": "amiche", "tags": ["feminine", "plural"]},
+            ],
+            "senses": [{"glosses": ["friend"], "tags": []}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([sample_amico])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            assert stats["lemmas"] == 1
+
+            with get_connection(db_path) as conn:
+                # Check lemma
+                amico = conn.execute(select(lemmas).where(lemmas.c.lemma == "amico")).fetchone()
+                assert amico is not None
+
+                # Check noun_metadata - should detect both genders from "f": "+"
+                meta = conn.execute(
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == amico.lemma_id)
+                ).fetchone()
+                assert meta is not None
+                assert meta.gender_class == "common_gender_variable"
+
+                # Check forms - should have masculine and feminine forms
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == amico.lemma_id)
+                ).fetchall()
+
+                # Check we have feminine singular form (amica)
+                fem_sing = [f for f in forms if f.gender == "f" and f.number == "singular"]
+                assert len(fem_sing) == 1, f"Expected 1 feminine singular, got {len(fem_sing)}"
+                assert fem_sing[0].form_stressed == "amica"
+
+                # Check we have feminine plural form (amiche)
+                fem_plur = [f for f in forms if f.gender == "f" and f.number == "plural"]
+                assert len(fem_plur) >= 1, f"Expected feminine plural, got {len(fem_plur)}"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_stressed_alternatives_enriches_forms(self) -> None:
+        """Test that unaccented forms get enriched with accented alternatives."""
+        # Main lemma entry: dio with unaccented "dei" plural
+        sample_dio = {
+            "pos": "noun",
+            "word": "dio",
+            "head_templates": [{"args": {"1": "m"}}],
+            "categories": ["Italian lemmas"],
+            "forms": [
+                {"form": "dei", "tags": ["plural"]},  # Unaccented
+            ],
+            "senses": [{"glosses": ["god"], "tags": []}],
+        }
+
+        # Form-of entry: "dei" with accented alternative "dèi"
+        sample_dei_formof = {
+            "pos": "noun",
+            "word": "dei",
+            "head_templates": [{"args": {"1": "it", "2": "noun form"}}],
+            "categories": [],
+            "forms": [
+                {"form": "dèi", "tags": ["alternative"]},  # Accented alternative
+            ],
+            "senses": [{"form_of": [{"word": "dio"}], "glosses": ["plural of dio"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([sample_dio, sample_dei_formof])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            assert stats["lemmas"] == 1  # Only dio is a lemma
+
+            with get_connection(db_path) as conn:
+                # Check the plural form is accented
+                dio = conn.execute(select(lemmas).where(lemmas.c.lemma == "dio")).fetchone()
+                assert dio is not None
+
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == dio.lemma_id)
+                ).fetchall()
+
+                plural_forms = [f for f in forms if f.number == "plural"]
+                assert len(plural_forms) >= 1
+
+                # The plural should be the accented "dèi", not unaccented "dei"
+                plural_stressed = [f.form_stressed for f in plural_forms]
+                assert "dèi" in plural_stressed, f"Expected 'dèi' in {plural_stressed}"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
