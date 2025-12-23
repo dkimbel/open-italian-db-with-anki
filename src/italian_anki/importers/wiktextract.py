@@ -1,6 +1,7 @@
 """Import Italian verb data from Wiktextract JSONL."""
 
 import json
+import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,8 @@ from italian_anki.tags import (
     parse_verb_tags,
     should_filter_form,
 )
+
+logger = logging.getLogger(__name__)
 
 # Mapping from our POS names to Wiktextract's abbreviated names
 WIKTEXTRACT_POS = {
@@ -112,6 +115,77 @@ def _build_stressed_alternatives(jsonl_path: Path) -> dict[str, str]:
                     # or if the new one is shorter (prefer simpler forms)
                     if key not in lookup or len(form) < len(lookup[key]):
                         lookup[key] = form
+
+    return lookup
+
+
+def _build_counterpart_plurals(jsonl_path: Path) -> dict[str, str]:
+    """Build a lookup of lemma words to their plural forms.
+
+    For nouns with counterpart markers (f: "+" or m: "+"), we need to look up
+    the counterpart entry's plural. E.g., "amico" has counterpart "amica",
+    and we need to know "amica" → "amiche".
+
+    Note: We do NOT skip form-of entries here because counterpart entries like
+    "amica" often have form_of senses (referencing "amico") but still have
+    valid plural forms we need to look up.
+
+    Args:
+        jsonl_path: Path to Wiktextract JSONL file
+
+    Returns:
+        Dict mapping lemma word to its plural form.
+        E.g., {"amica": "amiche", "amico": "amici"}
+    """
+    # Tags that indicate a less preferred plural form
+    deprioritize_tags = frozenset({"archaic", "dialectal", "obsolete", "poetic", "rare"})
+
+    lookup: dict[str, str] = {}
+
+    with jsonl_path.open(encoding="utf-8") as f:
+        for line in f:
+            entry = _parse_entry(line)
+            if entry is None or entry.get("pos") != "noun":
+                continue
+
+            # Note: We intentionally do NOT skip form-of entries here
+            # because counterpart entries (like "amica") have form_of senses
+            # but still have plural forms we need
+
+            word = entry.get("word", "")
+            if not word:
+                continue
+
+            # Find the best plural form:
+            # - Must have "plural" tag
+            # - Must NOT have diminutive/augmentative tags
+            # - Prefer forms without archaic/dialectal/obsolete/poetic tags
+            best_plural: str | None = None
+            best_has_deprioritized = True  # Start pessimistic
+
+            for form_data in entry.get("forms", []):
+                form = form_data.get("form", "")
+                tags = set(form_data.get("tags", []))
+
+                if "plural" not in tags:
+                    continue
+                if "diminutive" in tags or "augmentative" in tags:
+                    continue
+
+                has_deprioritized = bool(tags & deprioritize_tags)
+
+                # Take this form if:
+                # 1. We have nothing yet, OR
+                # 2. This form is better (not deprioritized, when current is)
+                if best_plural is None or (best_has_deprioritized and not has_deprioritized):
+                    best_plural = form
+                    best_has_deprioritized = has_deprioritized
+                    # If we found a non-deprioritized form, we're done
+                    if not has_deprioritized:
+                        break
+
+            if best_plural:
+                lookup[word] = best_plural
 
     return lookup
 
@@ -625,6 +699,29 @@ def _build_verb_form_row(
     }
 
 
+def _get_counterpart_form(entry: dict[str, Any], lemma_gender: str | None) -> str | None:
+    """Extract the counterpart form text from an entry.
+
+    For masculine lemma "amico", returns "amica" from {"form": "amica", "tags": ["feminine"]}.
+    For feminine lemma "nonna", returns "nonno" from {"form": "nonno", "tags": ["masculine"]}.
+
+    Args:
+        entry: The Wiktextract entry
+        lemma_gender: The lemma's gender ("m" or "f")
+
+    Returns:
+        The counterpart form text, or None if not found.
+    """
+    # Look for the opposite gender's singular form
+    target_tag = "feminine" if lemma_gender == "m" else "masculine"
+
+    for form_data in entry.get("forms", []):
+        tags = form_data.get("tags", [])
+        if target_tag in tags and "plural" not in tags:
+            return form_data.get("form")
+    return None
+
+
 def _build_noun_form_row(
     lemma_id: int, form_stressed: str, tags: list[str], lemma_gender: str | None = None
 ) -> dict[str, Any] | None:
@@ -808,6 +905,12 @@ def import_wiktextract(
     if pos_filter == "noun":
         stressed_alternatives = _build_stressed_alternatives(jsonl_path)
 
+    # Build lookup of counterpart plurals for nouns
+    # (fixes bug where "amico" gets "amici" for both genders instead of "amiche" for f)
+    counterpart_plurals: dict[str, str] | None = None
+    if pos_filter == "noun":
+        counterpart_plurals = _build_counterpart_plurals(jsonl_path)
+
     # Count lines for progress if callback provided
     total_lines = _count_lines(jsonl_path) if progress_callback else 0
     current_line = 0
@@ -880,9 +983,13 @@ def import_wiktextract(
                     # Set lemma_gender for form generation (fallback for forms without explicit gender)
                     if gender_class in ("m", "f"):
                         lemma_gender = gender_class
-                    elif gender_class in ("common_gender_fixed", "common_gender_variable"):
-                        # For common gender nouns, we don't have a default - each form needs explicit gender
+                    elif gender_class == "common_gender_fixed":
+                        # For fixed common gender (mfbysense), same form for both - no default needed
                         lemma_gender = None
+                    elif gender_class == "common_gender_variable":
+                        # For variable common gender (amico/amica), the lemma has a specific gender
+                        # that tells us which gender untagged forms belong to
+                        lemma_gender = _extract_gender(entry)
 
             elif pos_filter == "verb":
                 auxiliary = _extract_auxiliary(entry)
@@ -899,6 +1006,20 @@ def import_wiktextract(
             # Queue forms for batch insert (using POS-specific builder)
             # Track what number/gender combinations we've already added for nouns
             seen_noun_forms: set[tuple[str, str]] = set()  # (number, gender)
+
+            # Pre-scan: collect explicit gender-tagged plurals from this entry
+            # (used to avoid duplicating untagged plurals when explicit ones exist)
+            explicit_fem_plurals: set[str] = set()
+            explicit_masc_plurals: set[str] = set()
+            if pos_filter == "noun":
+                for form_data in entry.get("forms", []):
+                    form_text = form_data.get("form", "")
+                    form_tags = form_data.get("tags", [])
+                    if "plural" in form_tags:
+                        if "feminine" in form_tags:
+                            explicit_fem_plurals.add(form_text)
+                        if "masculine" in form_tags:
+                            explicit_masc_plurals.add(form_text)
 
             for form_stressed, tags in _iter_forms(entry, pos_filter, stressed_alternatives):
                 if pos_filter == "noun":
@@ -918,16 +1039,114 @@ def import_wiktextract(
                     )
 
                     if is_common_gender and not has_gender_tag:
-                        # Generate forms for both genders
-                        for gender in ("m", "f"):
-                            row = _build_noun_form_row(lemma_id, form_stressed, tags, gender)
-                            if row is None:
-                                stats["forms_filtered"] += 1
+                        # For common_gender nouns without explicit gender tags:
+                        # - common_gender_fixed/mfbysense: same form works for both genders
+                        # - common_gender_variable: different forms for m/f (need counterpart lookup)
+                        gender_class = noun_class.get("gender_class") if noun_class else None
+                        is_variable_gender = gender_class == "common_gender_variable"
+
+                        if is_variable_gender and "plural" in tags:
+                            # Smart handling for variable-gender nouns (e.g., amico/amica)
+                            # Guard: need lemma_gender to determine which gender this belongs to
+                            if not lemma_gender:
+                                logger.warning(
+                                    f"Noun '{word}' is common_gender_variable with untagged "
+                                    f"plural '{form_stressed}' but has no lemma gender. Skipping."
+                                )
                                 continue
-                            form_batch.append(row)
-                            # Track what we've added
-                            number = "plural" if "plural" in tags else "singular"
-                            seen_noun_forms.add((number, gender))
+
+                            # Determine which gender this untagged plural belongs to
+                            own_gender = lemma_gender  # "m" for amico, "f" for nonna
+                            other_gender = "f" if lemma_gender == "m" else "m"
+
+                            # Check if entry has explicit plural for the other gender
+                            has_explicit_other_plural = (
+                                explicit_fem_plurals
+                                if other_gender == "f"
+                                else explicit_masc_plurals
+                            )
+
+                            if has_explicit_other_plural:
+                                # Case A: Entry has explicit other-gender plural (e.g., "dio" has "dee")
+                                # Treat untagged plural as own-gender-only
+                                row = _build_noun_form_row(
+                                    lemma_id, form_stressed, tags, own_gender
+                                )
+                                if row:
+                                    form_batch.append(row)
+                                    number = "plural"
+                                    seen_noun_forms.add((number, own_gender))
+                                else:
+                                    stats["forms_filtered"] += 1
+                                continue
+
+                            # Case B: Try counterpart lookup (e.g., "amico" → "amica" → "amiche")
+                            counterpart = _get_counterpart_form(entry, lemma_gender)
+                            if counterpart and counterpart_plurals:
+                                if counterpart in counterpart_plurals:
+                                    # Generate own gender with this form
+                                    row = _build_noun_form_row(
+                                        lemma_id, form_stressed, tags, own_gender
+                                    )
+                                    if row:
+                                        form_batch.append(row)
+                                        seen_noun_forms.add(("plural", own_gender))
+                                    else:
+                                        stats["forms_filtered"] += 1
+
+                                    # Generate other gender with looked-up plural
+                                    other_plural = counterpart_plurals[counterpart]
+                                    row = _build_noun_form_row(
+                                        lemma_id, other_plural, tags, other_gender
+                                    )
+                                    if row:
+                                        form_batch.append(row)
+                                        seen_noun_forms.add(("plural", other_gender))
+                                    else:
+                                        stats["forms_filtered"] += 1
+                                    continue
+                                else:
+                                    # Case C: Counterpart exists but not in lookup
+                                    logger.warning(
+                                        f"Noun '{word}' ({own_gender}) has counterpart "
+                                        f"'{counterpart}' but no plural found in lookup. "
+                                        f"Skipping {other_gender} plural."
+                                    )
+                                    row = _build_noun_form_row(
+                                        lemma_id, form_stressed, tags, own_gender
+                                    )
+                                    if row:
+                                        form_batch.append(row)
+                                        seen_noun_forms.add(("plural", own_gender))
+                                    else:
+                                        stats["forms_filtered"] += 1
+                                    continue
+
+                            # Case D: Plural but no counterpart info - use own gender only
+                            logger.warning(
+                                f"Noun '{word}' ({own_gender}) is common_gender_variable but "
+                                f"plural '{form_stressed}' has no gender tag and no "
+                                f"counterpart to look up. Using {own_gender} only."
+                            )
+                            row = _build_noun_form_row(lemma_id, form_stressed, tags, own_gender)
+                            if row:
+                                form_batch.append(row)
+                                seen_noun_forms.add(("plural", own_gender))
+                            else:
+                                stats["forms_filtered"] += 1
+                            continue
+
+                        else:
+                            # For fixed-gender nouns (mfbysense) or non-plural forms:
+                            # duplicate for both genders with same form
+                            for gender in ("m", "f"):
+                                row = _build_noun_form_row(lemma_id, form_stressed, tags, gender)
+                                if row is None:
+                                    stats["forms_filtered"] += 1
+                                    continue
+                                form_batch.append(row)
+                                number = "plural" if "plural" in tags else "singular"
+                                seen_noun_forms.add((number, gender))
                     else:
                         row = _build_noun_form_row(lemma_id, form_stressed, tags, lemma_gender)
                         if row is None:

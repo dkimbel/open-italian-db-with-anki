@@ -1156,6 +1156,136 @@ class TestNounClassification:
             db_path.unlink()
             jsonl_path.unlink()
 
+    def test_counterpart_lookup_provides_other_gender_plural(self) -> None:
+        """Test that counterpart lookup correctly finds the other gender's plural.
+
+        This tests the real-world case where "amico" doesn't have "amiche" in its
+        forms array - it only has "amici" (untagged plural). The "amiche" form
+        lives in the separate "amica" entry, and we look it up from there.
+        """
+        # amico entry: NO amiche in forms (matches real Wiktextract data structure)
+        sample_amico = {
+            "pos": "noun",
+            "word": "amico",
+            "head_templates": [{"args": {"1": "m", "f": "+"}}],
+            "categories": ["Italian lemmas"],
+            "forms": [
+                {"form": "amici", "tags": ["plural"]},  # Untagged - belongs to masculine
+                {"form": "amica", "tags": ["feminine"]},  # Feminine counterpart
+            ],
+            "senses": [{"glosses": ["friend"], "tags": []}],
+        }
+
+        # amica entry: has "amiche" as its plural (this is what we look up)
+        sample_amica = {
+            "pos": "noun",
+            "word": "amica",
+            "head_templates": [{"args": {"1": "f", "m": "+"}}],
+            "categories": ["Italian lemmas"],
+            "forms": [
+                {"form": "amiche", "tags": ["plural"]},
+                {"form": "amico", "tags": ["masculine"]},
+            ],
+            "senses": [{"glosses": ["female friend"], "tags": []}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        # Both entries in the JSONL - order matters for counterpart lookup
+        jsonl_path = _create_test_jsonl([sample_amico, sample_amica])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            # Should import only 1 lemma (amico) - amica is the counterpart
+            # (both would be imported as separate lemmas, but we check amico's forms)
+            assert stats["lemmas"] == 2
+
+            with get_connection(db_path) as conn:
+                # Check amico's forms
+                amico = conn.execute(select(lemmas).where(lemmas.c.lemma == "amico")).fetchone()
+                assert amico is not None
+
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == amico.lemma_id)
+                ).fetchall()
+
+                # Check masculine plural (amici)
+                masc_plur = [f for f in forms if f.gender == "m" and f.number == "plural"]
+                assert len(masc_plur) == 1, f"Expected 1 masculine plural, got {len(masc_plur)}"
+                assert masc_plur[0].form_stressed == "amici"
+
+                # Check feminine plural (amiche) - from counterpart lookup!
+                fem_plur = [f for f in forms if f.gender == "f" and f.number == "plural"]
+                assert len(fem_plur) == 1, f"Expected 1 feminine plural, got {len(fem_plur)}"
+                assert fem_plur[0].form_stressed == "amiche"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_explicit_gender_plural_prevents_duplication(self) -> None:
+        """Test that entries with explicit gender plurals don't duplicate untagged ones.
+
+        For nouns like "dio" that have explicit feminine plural "dee", the untagged
+        plurals "dei/dii" should only be used for masculine, not duplicated.
+        """
+        sample_dio = {
+            "pos": "noun",
+            "word": "dio",
+            "head_templates": [{"args": {"1": "m", "f": "+"}}],
+            "categories": ["Italian lemmas"],
+            "forms": [
+                {"form": "dei", "tags": ["plural"]},  # Untagged - should be masc only
+                {"form": "dii", "tags": ["archaic", "dialectal", "plural"]},  # Also masc only
+                {"form": "dea", "tags": ["feminine"]},  # Feminine singular
+                {"form": "dee", "tags": ["feminine", "plural"]},  # Explicit feminine plural
+            ],
+            "senses": [{"glosses": ["god"], "tags": []}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([sample_dio])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            assert stats["lemmas"] == 1
+
+            with get_connection(db_path) as conn:
+                dio = conn.execute(select(lemmas).where(lemmas.c.lemma == "dio")).fetchone()
+                assert dio is not None
+
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == dio.lemma_id)
+                ).fetchall()
+
+                # Check masculine plurals - should have both dei and dii
+                masc_plur = [f for f in forms if f.gender == "m" and f.number == "plural"]
+                masc_forms = {f.form_stressed for f in masc_plur}
+                assert "dei" in masc_forms, f"Expected 'dei' in masculine plurals, got {masc_forms}"
+                assert "dii" in masc_forms, f"Expected 'dii' in masculine plurals, got {masc_forms}"
+
+                # Check feminine plural - should ONLY have dee, NOT dei/dii
+                fem_plur = [f for f in forms if f.gender == "f" and f.number == "plural"]
+                fem_forms = {f.form_stressed for f in fem_plur}
+                assert fem_forms == {"dee"}, f"Expected only 'dee' for feminine, got {fem_forms}"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
     def test_stressed_alternatives_enriches_forms(self) -> None:
         """Test that unaccented forms get enriched with accented alternatives."""
         # Main lemma entry: dio with unaccented "dei" plural
