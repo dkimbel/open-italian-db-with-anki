@@ -220,3 +220,5 @@ data/
 
 # Local SQLite databases
 *.db
+
+.claude/
