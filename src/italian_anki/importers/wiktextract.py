@@ -63,10 +63,157 @@ GENDER_PATTERNS: dict[str, str] = {
 # Italian accented vowels (used to detect stressed/accented forms)
 ACCENTED_CHARS = frozenset("àèéìòóùÀÈÉÌÒÓÙ")
 
+# Manual mapping of plural forms to definition matchers for nouns with meaning-dependent plurals.
+# Used to populate form_meaning_hint in definitions table (the "soft key").
+#
+# Structure: lemma -> {plural_form: {"topics": [...], "phrases": [...]}}
+# - topics: Match against raw_glosses topic markers like "(anatomy)"
+# - phrases: Match against gloss text (exact substring match)
+#
+# A definition matches a form if ANY topic or phrase matches.
+DEFINITION_FORM_LINKAGE: dict[str, dict[str, dict[str, list[str]]]] = {
+    "braccio": {
+        "braccia": {"topics": ["anatomy"], "phrases": ["fathom"]},
+        "bracci": {
+            "topics": ["mechanics", "geography", "figurative"],
+            "phrases": ["branch (of a river", "wing (of a building)"],
+        },
+    },
+    "grido": {
+        "grida": {"phrases": ["made by a human"]},
+        "gridi": {"phrases": ["made by an animal", "sound of an animal"]},
+    },
+    "osso": {
+        "ossa": {"topics": ["anatomy"]},
+        "ossi": {"topics": ["anatomy", "botany"]},
+    },
+    "labbro": {
+        "labbra": {"topics": ["anatomy"]},
+        "labbri": {"topics": ["by extension"]},
+    },
+    "corno": {
+        "corna": {"topics": ["zoology"]},
+        "corni": {"topics": ["music", "geography"]},
+    },
+    "orecchio": {
+        "orecchie": {"topics": ["anatomy"]},
+        "orecchi": {"phrases": ["hearing", "ear for music", "ear-shaped"]},
+    },
+    "dito": {
+        "dita": {"phrases": ["finger", "toe"]},  # collective
+        "diti": {"phrases": ["finger", "toe"]},  # individual (same meanings)
+    },
+    "ciglio": {
+        "ciglia": {"topics": ["anatomy"]},
+        "cigli": {"phrases": ["edge", "verge"]},
+    },
+    "muro": {
+        "mura": {"phrases": ["wall"]},  # collective city walls
+        "muri": {"phrases": ["wall"]},  # individual walls (same meaning)
+    },
+}
+
 
 def _has_accents(text: str) -> bool:
     """Check if text contains any accented characters."""
     return any(c in ACCENTED_CHARS for c in text)
+
+
+def _extract_plural_qualifiers(
+    entry: dict[str, Any],
+) -> dict[str, tuple[str | None, str | None]]:
+    """Extract plural forms and their qualifiers from head_templates.
+
+    Parses the head_templates arg["2"] field which contains plural info in format:
+        braccia<g:f><q:anatomical>,bracci<g:m><q:figurative>
+        ossa<g:f><l:collective>,+<g:m><q:individual>
+
+    Handles nested commas inside <q:...> tags by tracking bracket depth.
+    Note: The "+" placeholder (meaning "regular plural") is skipped - we only
+    use forms that wiktextract explicitly spelled out.
+
+    Args:
+        entry: Wiktextract entry dict
+
+    Returns:
+        Dict mapping form -> (gender, qualifier).
+        E.g., {"braccia": ("f", "anatomical"), "bracci": ("m", "figurative")}
+    """
+    import re
+
+    results: dict[str, tuple[str | None, str | None]] = {}
+
+    for template in entry.get("head_templates", []):
+        args = template.get("args", {})
+        arg2 = args.get("2", "")
+        if not arg2:
+            continue
+
+        # Split on comma only when outside angle brackets
+        # (commas inside <q:...> tags should not split)
+        entries: list[str] = []
+        depth = 0
+        current = ""
+        for char in arg2:
+            if char == "<":
+                depth += 1
+            elif char == ">":
+                depth -= 1
+            elif char == "," and depth == 0:
+                if current.strip():
+                    entries.append(current.strip())
+                current = ""
+                continue
+            current += char
+        if current.strip():
+            entries.append(current.strip())
+
+        # Parse each entry
+        for entry_str in entries:
+            # Extract form (everything before first <)
+            form_match = re.match(r"^([^<]+)", entry_str)
+            form = form_match.group(1).strip() if form_match else None
+
+            # Skip "+" placeholder - we only use explicitly spelled-out forms
+            if form == "+":
+                continue
+
+            # Extract gender from <g:X>
+            g_match = re.search(r"<g:([^>]+)>", entry_str)
+            gender = g_match.group(1) if g_match else None
+
+            # Extract qualifier from <q:...> or <l:...> (both serve as meaning hints)
+            q_match = re.search(r"<q:([^>]+)>", entry_str)
+            l_match = re.search(r"<l:([^>]+)>", entry_str)
+            qualifier = q_match.group(1) if q_match else (l_match.group(1) if l_match else None)
+
+            if form:
+                results[form] = (gender, qualifier)
+
+    return results
+
+
+def _sense_matches_form(sense: dict[str, Any], matchers: dict[str, list[str]]) -> bool:
+    """Check if a sense matches the matchers for a specific form.
+
+    Args:
+        sense: A sense dict from wiktextract with "glosses" and "raw_glosses"
+        matchers: Dict with optional "topics" and "phrases" lists
+
+    Returns:
+        True if any topic or phrase matches the sense.
+    """
+    raw_glosses = sense.get("raw_glosses", [])
+    raw = raw_glosses[0] if raw_glosses else ""
+    glosses = sense.get("glosses", [])
+    gloss = glosses[0] if glosses else ""
+
+    # Check topics (e.g., "(anatomy)" in raw_glosses)
+    if any(f"({topic})" in raw for topic in matchers.get("topics", [])):
+        return True
+
+    # Check phrases (exact substring in gloss)
+    return any(phrase in gloss for phrase in matchers.get("phrases", []))
 
 
 def _build_stressed_alternatives(jsonl_path: Path) -> dict[str, str]:
@@ -723,12 +870,29 @@ def _get_counterpart_form(entry: dict[str, Any], lemma_gender: str | None) -> st
 
 
 def _build_noun_form_row(
-    lemma_id: int, form_stressed: str, tags: list[str], lemma_gender: str | None = None
+    lemma_id: int,
+    form_stressed: str,
+    tags: list[str],
+    lemma_gender: str | None = None,
+    *,
+    meaning_hint: str | None = None,
+    form_source: str = "wiktionary",
 ) -> dict[str, Any] | None:
     """Build a noun_forms row dict from tags, or None if should filter.
 
     Gender is extracted per-form from tags. For forms without explicit gender tags,
     falls back to lemma_gender (typically for singular forms).
+
+    Args:
+        lemma_id: The lemma ID to link to
+        form_stressed: The stressed form text
+        tags: Wiktextract tags for this form
+        lemma_gender: Fallback gender if not in tags
+        meaning_hint: Optional semantic hint for meaning-dependent plurals
+            (e.g., "anatomical" vs "figurative" for braccio)
+        form_source: Source indicator - "wiktionary" for forms from wiktextract
+            forms array (default), "synthesized" for forms extracted from
+            head_templates only
     """
     if should_filter_form(tags):
         return None
@@ -757,12 +921,14 @@ def _build_noun_form_row(
     return {
         "lemma_id": lemma_id,
         "form": None,
+        "form_source": form_source,  # Always include to ensure consistent batch insert keys
         "form_stressed": form_stressed,
         "gender": gender,
         "number": features.number,
         "labels": features.labels,
         "is_diminutive": features.is_diminutive,
         "is_augmentative": features.is_augmentative,
+        "meaning_hint": meaning_hint,
         "def_article": def_article,
         "article_source": article_source,
     }
@@ -991,6 +1157,37 @@ def import_wiktextract(
                         # that tells us which gender untagged forms belong to
                         lemma_gender = _extract_gender(entry)
 
+            # For nouns: extract plural qualifiers and set up meaning_hint tracking
+            plural_qualifiers: dict[str, tuple[str | None, str | None]] = {}
+            form_meaning_hints: dict[str, str] = {}  # form_text -> meaning_hint
+            synthesize_plurals: list[tuple[str, str, str]] = []  # (form, gender, hint)
+
+            if pos_filter == "noun":
+                # Extract qualifiers from head_templates (e.g., braccia<g:f><q:anatomical>)
+                plural_qualifiers = _extract_plural_qualifiers(entry)
+
+                # Check if lemma is in DEFINITION_FORM_LINKAGE for meaning-dependent plurals
+                if word in DEFINITION_FORM_LINKAGE:
+                    linkage = DEFINITION_FORM_LINKAGE[word]
+                    # Create meaning_hint lookup from the linkage keys (plural forms)
+                    # Use the form text itself as the hint (simple, stable)
+                    form_meaning_hints = {form_text: form_text for form_text in linkage}
+
+                    # Check if we need to synthesize plurals (forms only in head_templates)
+                    # Only count forms that would actually be imported (not filtered)
+                    forms_in_array = {
+                        f.get("form", "")
+                        for f in entry.get("forms", [])
+                        if "plural" in f.get("tags", [])
+                        and not should_filter_form(f.get("tags", []))
+                    }
+                    for form_text, (gender, _qualifier) in plural_qualifiers.items():
+                        if form_text not in forms_in_array and form_text != "+" and gender:
+                            # This plural is only in head_templates, needs synthesis
+                            synthesize_plurals.append(
+                                (form_text, gender, form_meaning_hints.get(form_text, ""))
+                            )
+
             elif pos_filter == "verb":
                 auxiliary = _extract_auxiliary(entry)
                 transitivity = _extract_transitivity(entry)
@@ -1070,7 +1267,11 @@ def import_wiktextract(
                                 # Case A: Entry has explicit other-gender plural (e.g., "dio" has "dee")
                                 # Treat untagged plural as own-gender-only
                                 row = _build_noun_form_row(
-                                    lemma_id, form_stressed, tags, own_gender
+                                    lemma_id,
+                                    form_stressed,
+                                    tags,
+                                    own_gender,
+                                    meaning_hint=form_meaning_hints.get(form_stressed),
                                 )
                                 if row:
                                     form_batch.append(row)
@@ -1086,7 +1287,11 @@ def import_wiktextract(
                                 if counterpart in counterpart_plurals:
                                     # Generate own gender with this form
                                     row = _build_noun_form_row(
-                                        lemma_id, form_stressed, tags, own_gender
+                                        lemma_id,
+                                        form_stressed,
+                                        tags,
+                                        own_gender,
+                                        meaning_hint=form_meaning_hints.get(form_stressed),
                                     )
                                     if row:
                                         form_batch.append(row)
@@ -1097,7 +1302,11 @@ def import_wiktextract(
                                     # Generate other gender with looked-up plural
                                     other_plural = counterpart_plurals[counterpart]
                                     row = _build_noun_form_row(
-                                        lemma_id, other_plural, tags, other_gender
+                                        lemma_id,
+                                        other_plural,
+                                        tags,
+                                        other_gender,
+                                        meaning_hint=form_meaning_hints.get(other_plural),
                                     )
                                     if row:
                                         form_batch.append(row)
@@ -1113,7 +1322,11 @@ def import_wiktextract(
                                         f"Skipping {other_gender} plural."
                                     )
                                     row = _build_noun_form_row(
-                                        lemma_id, form_stressed, tags, own_gender
+                                        lemma_id,
+                                        form_stressed,
+                                        tags,
+                                        own_gender,
+                                        meaning_hint=form_meaning_hints.get(form_stressed),
                                     )
                                     if row:
                                         form_batch.append(row)
@@ -1128,7 +1341,13 @@ def import_wiktextract(
                                 f"plural '{form_stressed}' has no gender tag and no "
                                 f"counterpart to look up. Using {own_gender} only."
                             )
-                            row = _build_noun_form_row(lemma_id, form_stressed, tags, own_gender)
+                            row = _build_noun_form_row(
+                                lemma_id,
+                                form_stressed,
+                                tags,
+                                own_gender,
+                                meaning_hint=form_meaning_hints.get(form_stressed),
+                            )
                             if row:
                                 form_batch.append(row)
                                 seen_noun_forms.add(("plural", own_gender))
@@ -1140,7 +1359,13 @@ def import_wiktextract(
                             # For fixed-gender nouns (mfbysense) or non-plural forms:
                             # duplicate for both genders with same form
                             for gender in ("m", "f"):
-                                row = _build_noun_form_row(lemma_id, form_stressed, tags, gender)
+                                row = _build_noun_form_row(
+                                    lemma_id,
+                                    form_stressed,
+                                    tags,
+                                    gender,
+                                    meaning_hint=form_meaning_hints.get(form_stressed),
+                                )
                                 if row is None:
                                     stats["forms_filtered"] += 1
                                     continue
@@ -1148,7 +1373,13 @@ def import_wiktextract(
                                 number = "plural" if "plural" in tags else "singular"
                                 seen_noun_forms.add((number, gender))
                     else:
-                        row = _build_noun_form_row(lemma_id, form_stressed, tags, lemma_gender)
+                        row = _build_noun_form_row(
+                            lemma_id,
+                            form_stressed,
+                            tags,
+                            lemma_gender,
+                            meaning_hint=form_meaning_hints.get(form_stressed),
+                        )
                         if row is None:
                             stats["forms_filtered"] += 1
                             continue
@@ -1171,6 +1402,23 @@ def import_wiktextract(
 
                 if len(form_batch) >= batch_size:
                     flush_batches()
+
+            # For nouns: synthesize plurals from head_templates (braccio-type cases)
+            # These are forms that only exist in head_templates, not in the forms array
+            if pos_filter == "noun" and synthesize_plurals:
+                for form_text, gender, hint in synthesize_plurals:
+                    if ("plural", gender) not in seen_noun_forms:
+                        row = _build_noun_form_row(
+                            lemma_id,
+                            form_text,
+                            ["plural"],
+                            gender,
+                            meaning_hint=hint if hint else None,
+                            form_source="synthesized",
+                        )
+                        if row:
+                            form_batch.append(row)
+                            seen_noun_forms.add(("plural", gender))
 
             # For nouns: add base form from lemma word if not already present
             # The lemma word is always the base form (singular for regular, plural for pluralia tantum)
@@ -1203,15 +1451,66 @@ def import_wiktextract(
                     if row:
                         form_batch.append(row)
 
-            # Queue definitions
-            for gloss, def_tags in _iter_definitions(entry):
-                definition_batch.append(
-                    {
-                        "lemma_id": lemma_id,
-                        "gloss": gloss,
-                        "tags": json.dumps(def_tags) if def_tags else None,
-                    }
-                )
+            # Queue definitions with form_meaning_hint for soft key linkage
+            if pos_filter == "noun" and word in DEFINITION_FORM_LINKAGE:
+                # This lemma has meaning-dependent plurals - link definitions to forms
+                linkage = DEFINITION_FORM_LINKAGE[word]
+                for sense in entry.get("senses", []):
+                    # Skip form-of entries
+                    if "form_of" in sense:
+                        continue
+                    glosses = sense.get("glosses", [])
+                    if not glosses:
+                        continue
+                    gloss = "; ".join(glosses)
+
+                    # Filter out blocklisted tags
+                    raw_tags = sense.get("tags")
+                    if raw_tags:
+                        filtered = [t for t in raw_tags if t not in DEFINITION_TAG_BLOCKLIST]
+                        def_tags = filtered if filtered else None
+                    else:
+                        def_tags = None
+
+                    # Determine which form(s) this definition matches
+                    matched_forms = [
+                        form_text
+                        for form_text, matchers in linkage.items()
+                        if _sense_matches_form(sense, matchers)
+                    ]
+
+                    if matched_forms:
+                        # Create a definition entry for each matched form
+                        definition_batch.extend(
+                            {
+                                "lemma_id": lemma_id,
+                                "gloss": gloss,
+                                "tags": json.dumps(def_tags) if def_tags else None,
+                                "form_meaning_hint": form_text,
+                            }
+                            for form_text in matched_forms
+                        )
+                    else:
+                        # No match - applies to all forms (NULL form_meaning_hint)
+                        definition_batch.append(
+                            {
+                                "lemma_id": lemma_id,
+                                "gloss": gloss,
+                                "tags": json.dumps(def_tags) if def_tags else None,
+                                "form_meaning_hint": None,  # Consistent keys for batch insert
+                            }
+                        )
+            else:
+                # Standard case - no form_meaning_hint
+                for gloss, def_tags in _iter_definitions(entry):
+                    definition_batch.append(
+                        {
+                            "lemma_id": lemma_id,
+                            "gloss": gloss,
+                            "tags": json.dumps(def_tags) if def_tags else None,
+                            "form_meaning_hint": None,  # Consistent keys for batch insert
+                        }
+                    )
 
     # Final flush
     flush_batches()

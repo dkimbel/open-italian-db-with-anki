@@ -7,8 +7,9 @@ FILTER_TAGS = frozenset(
     {
         "misspelling",
         "proscribed",
-        "error-unknown-tag",
-        "error-unrecognized-form",
+        # Note: "error-unknown-tag" and "error-unrecognized-form" are NOT filtered -
+        # they just mean wiktextract couldn't parse some annotation, but the forms
+        # themselves are valid
     }
 )
 
