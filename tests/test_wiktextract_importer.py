@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from italian_anki.db import (
     adjective_forms,
+    adjective_metadata,
     definitions,
     form_lookup,
     get_connection,
@@ -161,6 +162,18 @@ SAMPLE_ADJECTIVE_TWO_FORM = {
         {"form": "facili", "tags": ["plural"]},  # No gender - should generate m.pl AND f.pl
     ],
     "senses": [{"glosses": ["easy"]}],
+}
+
+# Invariable adjective - same form for all gender/number combinations (blu, rosa)
+# The inv:1 flag in head_templates signals this
+SAMPLE_ADJECTIVE_INVARIABLE = {
+    "pos": "adj",
+    "word": "blu",
+    "head_templates": [
+        {"name": "it-adj", "args": {"inv": "1"}},  # inv:1 marks invariable
+    ],
+    "forms": [],  # No explicit forms - all 4 should be generated from lemma
+    "senses": [{"glosses": ["blue"]}],
 }
 
 # Sample noun entry without gender (should be filtered out)
@@ -561,6 +574,155 @@ class TestWiktextractImporter:
 
                 for f in facile_forms:
                     assert f.number == "singular"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_imports_adjective_invariable_generates_four_forms(self) -> None:
+        """Test that invariable adjectives (inv:1) generate all 4 gender/number forms."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_ADJECTIVE_INVARIABLE])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+
+            assert stats["lemmas"] == 1
+            # Should have exactly 4 forms for invariable adjective:
+            # blu m.sg, blu f.sg, blu m.pl, blu f.pl
+            assert stats["forms"] == 4
+
+            with get_connection(db_path) as conn:
+                blu = conn.execute(select(lemmas).where(lemmas.c.lemma == "blu")).fetchone()
+                assert blu is not None
+
+                form_rows = conn.execute(
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == blu.lemma_id)
+                ).fetchall()
+
+                assert len(form_rows) == 4
+
+                # All forms should be "blu"
+                for f in form_rows:
+                    assert f.form_stressed == "blu"
+
+                # Check all 4 gender/number combinations exist
+                combos = {(f.gender, f.number) for f in form_rows}
+                assert combos == {
+                    ("masculine", "singular"),
+                    ("masculine", "plural"),
+                    ("feminine", "singular"),
+                    ("feminine", "plural"),
+                }
+
+                # All forms should have form_origin = "inferred:invariable"
+                for f in form_rows:
+                    assert f.form_origin == "inferred:invariable"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_adjective_form_origin_tracking(self) -> None:
+        """Test that form_origin correctly tracks how each form was determined."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        # Test with both invariable and two-form adjectives
+        jsonl_path = _create_test_jsonl([SAMPLE_ADJECTIVE_INVARIABLE, SAMPLE_ADJECTIVE_TWO_FORM])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+
+            with get_connection(db_path) as conn:
+                # Check invariable adjective form_origin
+                blu = conn.execute(select(lemmas).where(lemmas.c.lemma == "blu")).fetchone()
+                assert blu is not None
+                blu_forms = conn.execute(
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == blu.lemma_id)
+                ).fetchall()
+                for f in blu_forms:
+                    assert f.form_origin == "inferred:invariable"
+
+                # Check two-form adjective form_origin
+                facile = conn.execute(select(lemmas).where(lemmas.c.lemma == "facile")).fetchone()
+                assert facile is not None
+                facile_forms = conn.execute(
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == facile.lemma_id)
+                ).fetchall()
+
+                # Plural forms from wiktextract should have "inferred:two_form"
+                plural_forms = [f for f in facile_forms if f.number == "plural"]
+                for f in plural_forms:
+                    assert f.form_origin == "inferred:two_form"
+
+                # Singular forms (base form) should have "inferred:base_form"
+                singular_forms = [f for f in facile_forms if f.number == "singular"]
+                for f in singular_forms:
+                    assert f.form_origin == "inferred:base_form"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_adjective_metadata_population(self) -> None:
+        """Test that adjective_metadata is populated with correct inflection_class."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        # Test with all three adjective types
+        jsonl_path = _create_test_jsonl(
+            [SAMPLE_ADJECTIVE, SAMPLE_ADJECTIVE_TWO_FORM, SAMPLE_ADJECTIVE_INVARIABLE]
+        )
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+
+            with get_connection(db_path) as conn:
+                # Check 4-form adjective (bello)
+                bello = conn.execute(select(lemmas).where(lemmas.c.lemma == "bello")).fetchone()
+                assert bello is not None
+                bello_meta = conn.execute(
+                    select(adjective_metadata).where(
+                        adjective_metadata.c.lemma_id == bello.lemma_id
+                    )
+                ).fetchone()
+                assert bello_meta is not None
+                assert bello_meta.inflection_class == "4-form"
+
+                # Check 2-form adjective (facile)
+                facile = conn.execute(select(lemmas).where(lemmas.c.lemma == "facile")).fetchone()
+                assert facile is not None
+                facile_meta = conn.execute(
+                    select(adjective_metadata).where(
+                        adjective_metadata.c.lemma_id == facile.lemma_id
+                    )
+                ).fetchone()
+                assert facile_meta is not None
+                assert facile_meta.inflection_class == "2-form"
+
+                # Check invariable adjective (blu)
+                blu = conn.execute(select(lemmas).where(lemmas.c.lemma == "blu")).fetchone()
+                assert blu is not None
+                blu_meta = conn.execute(
+                    select(adjective_metadata).where(adjective_metadata.c.lemma_id == blu.lemma_id)
+                ).fetchone()
+                assert blu_meta is not None
+                assert blu_meta.inflection_class == "invariable"
 
         finally:
             db_path.unlink()

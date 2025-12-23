@@ -3,6 +3,7 @@
 from italian_anki.db.connection import get_connection, get_engine
 from italian_anki.db.schema import (
     adjective_forms,
+    adjective_metadata,
     definitions,
     form_lookup,
     frequencies,
@@ -20,6 +21,7 @@ from italian_anki.db.schema import (
 
 __all__ = [
     "adjective_forms",
+    "adjective_metadata",
     "definitions",
     "form_lookup",
     "frequencies",

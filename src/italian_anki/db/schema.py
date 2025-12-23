@@ -85,6 +85,9 @@ noun_forms = Table(
 )
 
 # Adjective forms with grammatical features
+# Note: We store 4 rows per adjective (one per gender/number combination) even for
+# invariable adjectives like "blu". This enables article variation (il/la/i/le) and
+# allows queries like "show all feminine plural forms" for grammar drills.
 adjective_forms = Table(
     "adjective_forms",
     metadata,
@@ -100,6 +103,11 @@ adjective_forms = Table(
     # Article columns (computed from orthography)
     Column("def_article", Text),  # 'il', 'lo', 'la', "l'", 'i', 'gli', 'le'
     Column("article_source", Text),  # 'inferred' or 'exception:<reason>'
+    # Form origin tracking - how we determined this form exists
+    # Values: 'wiktextract' (direct), 'inferred:singular' (added missing tag),
+    # 'inferred:two_form' (generated both genders), 'inferred:base_form' (from lemma),
+    # 'inferred:invariable' (generated all 4 for inv:1), 'morphit' (fallback)
+    Column("form_origin", Text),
 )
 
 # Lookup table for matching forms in sentences (with POS awareness)
@@ -190,6 +198,22 @@ noun_metadata = Table(
     Column("derivation_type", Text),  # 'diminutive', 'augmentative', 'pejorative'
 )
 
+# Adjective-specific metadata (inflection class and links)
+adjective_metadata = Table(
+    "adjective_metadata",
+    metadata,
+    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), primary_key=True),
+    # Inflection class (mutually exclusive):
+    # '4-form' = standard (bello/bella/belli/belle)
+    # '2-form' = same form for m/f (facile/facile/facili/facili)
+    # 'invariable' = same form for all (blu)
+    Column("inflection_class", Text),
+    # Links to related lemmas
+    Column("apocopic_of", Integer, ForeignKey("lemmas.lemma_id")),  # buon→buono
+    Column("base_lemma_id", Integer, ForeignKey("lemmas.lemma_id")),  # migliore→buono
+    Column("degree_relationship", Text),  # 'comparative_of', 'superlative_of'
+)
+
 # Indexes (defined separately for clarity)
 Index("idx_lemmas_lemma_pos", lemmas.c.lemma, lemmas.c.pos)  # For lookups by word+POS
 Index("idx_verb_metadata_auxiliary", verb_metadata.c.auxiliary)
@@ -207,9 +231,13 @@ Index("idx_noun_forms_lemma", noun_forms.c.lemma_id)
 Index("idx_noun_forms_form", noun_forms.c.form)
 Index("idx_noun_forms_gender", noun_forms.c.gender)
 Index("idx_noun_forms_meaning_hint", noun_forms.c.meaning_hint)
-# New adjective_forms indexes
+# adjective_forms indexes
 Index("idx_adjective_forms_lemma", adjective_forms.c.lemma_id)
 Index("idx_adjective_forms_form", adjective_forms.c.form)
+Index("idx_adjective_forms_origin", adjective_forms.c.form_origin)
+# adjective_metadata indexes
+Index("idx_adjective_metadata_apocopic", adjective_metadata.c.apocopic_of)
+Index("idx_adjective_metadata_base", adjective_metadata.c.base_lemma_id)
 # New form_lookup indexes
 Index("idx_form_lookup_form_id", form_lookup.c.form_id)
 # Other indexes

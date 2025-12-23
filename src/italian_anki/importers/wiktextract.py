@@ -11,6 +11,7 @@ from sqlalchemy import Connection, func, select
 from italian_anki.articles import get_definite
 from italian_anki.db.schema import (
     adjective_forms,
+    adjective_metadata,
     definitions,
     form_lookup,
     frequencies,
@@ -62,6 +63,49 @@ GENDER_PATTERNS: dict[str, str] = {
 
 # Italian accented vowels (used to detect stressed/accented forms)
 ACCENTED_CHARS = frozenset("àèéìòóùÀÈÉÌÒÓÙ")
+
+
+def _is_invariable_adjective(entry: dict[str, Any]) -> bool:
+    """Check if adjective is marked invariable via inv:1 flag in head_templates.
+
+    Invariable adjectives (like "blu", "rosa") have the same form for all
+    gender/number combinations.
+    """
+    for template in entry.get("head_templates", []):
+        if template.get("args", {}).get("inv") == "1":
+            return True
+    return False
+
+
+def _is_two_form_adjective(entry: dict[str, Any]) -> bool:
+    """Check if adjective is 2-form (same form for masculine and feminine).
+
+    Wiktextract signals 2-form adjectives (like "facile") by using genderless
+    number tags (e.g., ["plural"] instead of ["masculine", "plural"]).
+    """
+    for form_data in entry.get("forms", []):
+        tags = set(form_data.get("tags", []))
+        has_gender = "masculine" in tags or "feminine" in tags
+        has_number = "singular" in tags or "plural" in tags
+        if has_number and not has_gender:
+            return True
+    return False
+
+
+def _get_adjective_inflection_class(entry: dict[str, Any]) -> str:
+    """Determine adjective inflection class from Wiktextract data.
+
+    Returns:
+        'invariable': Same form for all gender/number (blu, rosa)
+        '2-form': Same form for m/f, different for singular/plural (facile/facili)
+        '4-form': Different form for each gender/number (bello/bella/belli/belle)
+    """
+    if _is_invariable_adjective(entry):
+        return "invariable"
+    if _is_two_form_adjective(entry):
+        return "2-form"
+    return "4-form"
+
 
 # Manual mapping of plural forms to definition matchers for nouns with meaning-dependent plurals.
 # Used to populate form_meaning_hint in definitions table (the "soft key").
@@ -658,14 +702,22 @@ def _iter_forms(
     entry: dict[str, Any],
     pos: str,
     stressed_alternatives: dict[str, str] | None = None,
-) -> Iterator[tuple[str, list[str]]]:
-    """Yield (form_stressed, tags) for each inflected form.
+) -> Iterator[tuple[str, list[str], str]]:
+    """Yield (form_stressed, tags, form_origin) for each inflected form.
 
     Args:
         entry: Wiktextract entry dict
         pos: Part of speech (verb, noun, adjective)
         stressed_alternatives: Optional lookup for enriching unaccented forms with
             their proper accented spellings (e.g., "dei" → "dèi")
+
+    Yields:
+        Tuples of (form_stressed, tags, form_origin) where form_origin is:
+        - 'wiktextract': Direct from forms array
+        - 'inferred:singular': Added missing singular tag (for gender-only tagged forms)
+        - 'inferred:two_form': Generated both genders for 2-form adjective
+        - 'inferred:base_form': From lemma word field
+        - 'inferred:invariable': Generated all 4 forms for invariable adjective
     """
     seen: set[tuple[str, tuple[str, ...]]] = set()
     has_masc_singular = False
@@ -673,6 +725,8 @@ def _iter_forms(
     # 2-form adjectives (like "facile") have genderless number tags in Wiktextract
     # (e.g., ["plural"] instead of ["masculine", "plural"])
     is_two_form = False
+    # Check if this is an invariable adjective (like "blu", "rosa")
+    is_invariable = pos == "adjective" and _is_invariable_adjective(entry)
 
     for form_data in entry.get("forms", []):
         form_stressed = form_data.get("form", "")
@@ -701,6 +755,9 @@ def _iter_forms(
             if not meaningful_tags:
                 continue
 
+        # Track form_origin for this form
+        form_origin = "wiktextract"
+
         # For nouns: infer singular for forms with gender but no number
         # (e.g., {"form": "amica", "tags": ["feminine"]} → add "singular")
         if pos == "noun":
@@ -709,6 +766,7 @@ def _iter_forms(
             if has_gender and not has_number:
                 tags = [*tags, "singular"]  # Create new list, don't mutate original
                 tag_set = set(tags)
+                form_origin = "inferred:singular"
 
         # For adjectives: infer singular for forms with gender but no number
         # (e.g., {"form": "alta", "tags": ["feminine"]} → add "singular")
@@ -718,6 +776,7 @@ def _iter_forms(
             if has_gender and not has_number:
                 tags = [*tags, "singular"]
                 tag_set = set(tags)
+                form_origin = "inferred:singular"
 
         # For adjectives: forms with number but no gender (2-form adjectives)
         # Generate both masculine and feminine entries since these forms agree with both
@@ -736,7 +795,7 @@ def _iter_forms(
                     # Track if this is the masculine singular base form
                     if "singular" in tag_set:
                         has_masc_singular = True
-                    yield form_stressed, tags_m
+                    yield form_stressed, tags_m, "inferred:two_form"
                 # Yield feminine version
                 tags_f = [*tags, "feminine"]
                 key_f = (form_stressed, tuple(sorted(tags_f)))
@@ -745,7 +804,7 @@ def _iter_forms(
                     # Track if this is the feminine singular form
                     if "singular" in tag_set:
                         has_fem_singular = True
-                    yield form_stressed, tags_f
+                    yield form_stressed, tags_f, "inferred:two_form"
                 continue  # Skip the default yield
 
         # Skip auxiliary markers (they're metadata, not conjugated forms)
@@ -769,25 +828,42 @@ def _iter_forms(
             continue
         seen.add(key)
 
-        yield form_stressed, tags
+        yield form_stressed, tags, form_origin
 
     # Add base form if missing (Wiktextract stores it in 'word', not in 'forms')
     # For adjectives: add masculine singular form if not present
     # Note: noun base forms are handled in the main import loop with proper gender logic
     lemma_stressed = _extract_lemma_stressed(entry)
 
-    if pos == "adjective" and not has_masc_singular:
-        key = (lemma_stressed, ("masculine", "singular"))
-        if key not in seen:
-            seen.add(key)
-            yield lemma_stressed, ["masculine", "singular"]
+    if pos == "adjective":
+        # For invariable adjectives, generate all 4 gender/number combinations.
+        # Known limitation: Some wiktextract entries have contradictory data where
+        # inv:1 is set in head_templates but explicit gendered forms also exist
+        # (e.g., "culaperto" has inv:1 but also lists culaperta/culaperti/culaperte).
+        # In these rare cases (~1 in 1000), we generate both the invariable forms
+        # AND the explicit forms, resulting in >4 forms. This is acceptable noise
+        # from inconsistent source data.
+        if is_invariable:
+            for gender in ("masculine", "feminine"):
+                for number in ("singular", "plural"):
+                    key = (lemma_stressed, tuple(sorted([gender, number])))
+                    if key not in seen:
+                        seen.add(key)
+                        yield lemma_stressed, [gender, number], "inferred:invariable"
+        else:
+            # Standard handling: add base form if missing
+            if not has_masc_singular:
+                key = (lemma_stressed, ("masculine", "singular"))
+                if key not in seen:
+                    seen.add(key)
+                    yield lemma_stressed, ["masculine", "singular"], "inferred:base_form"
 
-    # For 2-form adjectives, add feminine singular too (same form as masculine)
-    # is_two_form is set when Wiktextract provides genderless number tags
-    if pos == "adjective" and not has_fem_singular and is_two_form:
-        key = (lemma_stressed, ("feminine", "singular"))
-        if key not in seen:
-            yield lemma_stressed, ["feminine", "singular"]
+            # For 2-form adjectives, add feminine singular too (same form as masculine)
+            # is_two_form is set when Wiktextract provides genderless number tags
+            if not has_fem_singular and is_two_form:
+                key = (lemma_stressed, ("feminine", "singular"))
+                if key not in seen:
+                    yield lemma_stressed, ["feminine", "singular"], "inferred:base_form"
 
 
 def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | None]]:
@@ -864,6 +940,10 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
         conn.execute(verb_metadata.delete().where(verb_metadata.c.lemma_id.in_(lemma_subq)))
     elif pos_filter == "noun":
         conn.execute(noun_metadata.delete().where(noun_metadata.c.lemma_id.in_(lemma_subq)))
+    elif pos_filter == "adjective":
+        conn.execute(
+            adjective_metadata.delete().where(adjective_metadata.c.lemma_id.in_(lemma_subq))
+        )
     # 6. sentence_lemmas (references lemmas)
     conn.execute(sentence_lemmas.delete().where(sentence_lemmas.c.lemma_id.in_(lemma_subq)))
     # 7. lemmas (direct filter, no subquery needed)
@@ -987,9 +1067,26 @@ def _build_noun_form_row(
 
 
 def _build_adjective_form_row(
-    lemma_id: int, form_stressed: str, tags: list[str]
+    lemma_id: int,
+    form_stressed: str,
+    tags: list[str],
+    *,
+    form_origin: str = "wiktextract",
 ) -> dict[str, Any] | None:
-    """Build an adjective_forms row dict from tags, or None if should filter."""
+    """Build an adjective_forms row dict from tags, or None if should filter.
+
+    Args:
+        lemma_id: The lemma ID to link to
+        form_stressed: The stressed form text
+        tags: Wiktextract tags for this form
+        form_origin: How we determined this form exists:
+            - 'wiktextract': Direct from forms array
+            - 'inferred:singular': Added missing singular tag
+            - 'inferred:two_form': Generated both genders for 2-form adjective
+            - 'inferred:base_form': From lemma word field
+            - 'inferred:invariable': Generated all 4 forms for invariable adjective
+            - 'morphit': From Morphit fallback
+    """
     if should_filter_form(tags):
         return None
 
@@ -1013,6 +1110,7 @@ def _build_adjective_form_row(
         "labels": features.labels,
         "def_article": def_article,
         "article_source": article_source,
+        "form_origin": form_origin,
     }
 
 
@@ -1252,6 +1350,18 @@ def import_wiktextract(
                         )
                     )
 
+            elif pos_filter == "adjective":
+                # Insert adjective metadata with inflection class
+                inflection_class = _get_adjective_inflection_class(entry)
+                conn.execute(
+                    adjective_metadata.insert().values(
+                        lemma_id=lemma_id,
+                        inflection_class=inflection_class,
+                        # apocopic_of, base_lemma_id, degree_relationship
+                        # are NULL for now (future work: link apocopic forms and comparatives)
+                    )
+                )
+
             # Queue forms for batch insert (using POS-specific builder)
             # Track what number/gender combinations we've already added for nouns
             seen_noun_forms: set[tuple[str, str]] = set()  # (number, gender)
@@ -1270,7 +1380,9 @@ def import_wiktextract(
                         if "masculine" in form_tags:
                             explicit_masc_plurals.add(form_text)
 
-            for form_stressed, tags in _iter_forms(entry, pos_filter, stressed_alternatives):
+            for form_stressed, tags, form_origin in _iter_forms(
+                entry, pos_filter, stressed_alternatives
+            ):
                 if pos_filter == "noun":
                     # Skip singular forms for pluralia tantum nouns
                     is_pluralia_tantum = (
@@ -1446,7 +1558,13 @@ def import_wiktextract(
                         if gender:
                             seen_noun_forms.add((number, gender))
                 else:
-                    row = build_form_row(lemma_id, form_stressed, tags)
+                    # For adjectives, pass form_origin; for verbs, use default builder
+                    if pos_filter == "adjective":
+                        row = _build_adjective_form_row(
+                            lemma_id, form_stressed, tags, form_origin=form_origin
+                        )
+                    else:
+                        row = build_form_row(lemma_id, form_stressed, tags)
                     if row is None:
                         stats["forms_filtered"] += 1
                         continue
