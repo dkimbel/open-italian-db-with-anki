@@ -40,6 +40,7 @@ from italian_anki.importers.morphit import (
 from italian_anki.importers.wiktextract import (
     enrich_form_spelling_from_form_of,
     enrich_from_form_of,
+    import_adjective_allomorphs,
 )
 
 DEFAULT_WIKTEXTRACT_PATH = Path("data/wiktextract/kaikki.org-dictionary-Italian.jsonl")
@@ -492,8 +493,8 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print("=" * 80)
         print()
 
-        # Determine step count: adjectives have 2 extra steps
-        total_steps = 7 if pos == "adjective" else 5
+        # Determine step count: adjectives have 3 extra steps (allomorphs, fill-missing, unstressed)
+        total_steps = 8 if pos == "adjective" else 5
 
         with get_connection(db_path) as conn:
             # Step 1: Wiktextract import
@@ -511,7 +512,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             _run_morphit_import(conn, morphit_path, pos, indent=indent)
             print()
 
-            # Step 3.5 (adjective only): Fill missing forms from Morphit
+            # Step 4 (adjective only): Fill missing forms from Morphit
             if pos == "adjective":
                 print(f"[4/{total_steps}] Filling missing adjective forms from Morphit...")
                 stats = fill_missing_adjective_forms(
@@ -522,24 +523,41 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Forms added:          {stats['forms_added']:,}")
                 print(f"{indent}Completed:            {stats['adjectives_completed']:,}")
                 print(f"{indent}Not in Morphit:       {stats['not_in_morphit']:,}")
+                print(f"{indent}Elided skipped:       {stats['elided_skipped']:,}")
                 print(f"{indent}Discrepancies logged: {stats['discrepancies_logged']:,}")
                 print()
 
-            # Step 4 (or 5 for adjectives): Form-of spelling fallback
-            step_formof = 5 if pos == "adjective" else 4
+            # Step 5 (adjective only): Import allomorphs from alt_of entries
+            # Must run AFTER fill_missing so allomorphs don't prevent grandi from being added
+            if pos == "adjective":
+                print(f"[5/{total_steps}] Importing allomorphs (apocopic/elided forms)...")
+                stats = import_adjective_allomorphs(
+                    conn, jsonl_path, progress_callback=_make_progress_callback()
+                )
+                print()
+                print(f"{indent}Entries scanned:      {stats['scanned']:,}")
+                print(f"{indent}Allomorphs found:     {stats['allomorphs_added']:,}")
+                print(f"{indent}Forms added:          {stats['forms_added']:,}")
+                print(f"{indent}Already in parent:    {stats['already_in_parent']:,}")
+                print(f"{indent}Duplicates skipped:   {stats['duplicates_skipped']:,}")
+                print(f"{indent}Parent not found:     {stats['parent_not_found']:,}")
+                print()
+
+            # Step 4 (or 6 for adjectives): Form-of spelling fallback
+            step_formof = 6 if pos == "adjective" else 4
             print(f"[{step_formof}/{total_steps}] Enriching form spelling from form-of entries...")
             _run_formof_spelling_enrichment(conn, jsonl_path, pos, indent=indent)
             print()
 
-            # Step 4.5 (adjective only): Unstressed fallback
+            # Step 7 (adjective only): Unstressed fallback
             if pos == "adjective":
-                print(f"[6/{total_steps}] Applying unstressed form fallback...")
+                print(f"[7/{total_steps}] Applying unstressed form fallback...")
                 stats = apply_unstressed_fallback(conn, pos_filter="adjective")
                 print(f"{indent}Forms updated: {stats['updated']:,}")
                 print()
 
-            # Step 5 (or 7 for adjectives): ItWaC frequency import
-            step_itwac = 7 if pos == "adjective" else 5
+            # Step 5 (or 8 for adjectives): ItWaC frequency import
+            step_itwac = 8 if pos == "adjective" else 5
             csv_filename = ITWAC_CSV_FILES.get(pos)
             if csv_filename:
                 csv_path = DEFAULT_ITWAC_DIR / csv_filename

@@ -140,34 +140,35 @@ def _get_adjective_inflection_class(entry: dict[str, Any]) -> str:
     return "4-form"
 
 
-def _is_apocopic_adjective(entry: dict[str, Any]) -> bool:
-    """Check if adjective is an apocopated (truncated) pre-nominal form.
+def _is_alt_form_entry(entry: dict[str, Any]) -> bool:
+    """Check if entry is an alt-of entry (apocopic, elided, etc.).
 
-    Apocopic forms like "buon" (from "buono"), "san" (from "santo"),
-    "gran" (from "grande") are marked with apoc:1 in head_templates.
-    """
-    for template in entry.get("head_templates", []):
-        if template.get("args", {}).get("apoc") == "1":
-            return True
-    return False
+    These entries (like "gran", "grand'", "bel", "bell'") are alternate
+    forms of another adjective. With Option A, their forms should be
+    stored under the parent lemma, not as separate lemmas.
 
-
-def _get_apocopic_parent(entry: dict[str, Any]) -> str | None:
-    """Extract parent lemma from apocopic form entry using structured fields only.
-
-    IMPORTANT: Only uses the structured alt_of field, never parses glosses.
-    This ensures reliable extraction without brittle text parsing.
+    Detection methods:
+    1. Has alt_of in any sense (e.g., gran -> grande)
+    2. Has head_templates with '2': 'adjective form' BUT no form_of (e.g., bel)
+       Note: Regular inflections like "bella" have form_of and should NOT match
 
     Returns:
-        Parent lemma word (e.g., "buono" for "buon") or None if not found.
+        True if entry is an adjective form, not a standalone lemma.
     """
-    for sense in entry.get("senses", []):
-        alt_of_list = sense.get("alt_of", [])
-        for alt_of in alt_of_list:
-            parent = alt_of.get("word")
-            if parent:
-                return parent
-    return None
+    senses = entry.get("senses", [])
+
+    # Method 1: Check for alt_of in senses
+    if any(sense.get("alt_of") for sense in senses):
+        return True
+
+    # Method 2: Check for "adjective form" WITHOUT form_of
+    # Regular inflections (bella, belli, belle) have form_of and should NOT be filtered
+    # Special forms (bel) lack form_of and SHOULD be filtered
+    has_adj_form_template = any(
+        t.get("args", {}).get("2") == "adjective form" for t in entry.get("head_templates", [])
+    )
+    has_form_of = any(sense.get("form_of") for sense in senses)
+    return has_adj_form_template and not has_form_of
 
 
 # Hardcoded mappings for irregular comparatives/superlatives
@@ -1313,12 +1314,12 @@ def import_wiktextract(
         "definitions": 0,
         "skipped": 0,
         "misspellings_skipped": 0,
+        "alt_forms_skipped": 0,
         "cleared": cleared,
     }
 
     # Collect adjective relationship data for post-processing
     # (relationships are resolved after all lemmas are inserted)
-    apocopic_links: list[tuple[int, str]] = []  # (lemma_id, parent_word)
     degree_links: list[
         tuple[int, str, str, str]
     ] = []  # (lemma_id, base_word, relationship, source)
@@ -1406,6 +1407,12 @@ def import_wiktextract(
             # Filter out misspellings (applies to all POS)
             if _is_misspelling(entry):
                 stats["misspellings_skipped"] += 1
+                continue
+
+            # Filter out alt-of entries for adjectives (gran, grand', bel, bell')
+            # These are imported as forms of their parent lemma via import_adjective_allomorphs()
+            if pos_filter == "adjective" and _is_alt_form_entry(entry):
+                stats["alt_forms_skipped"] += 1
                 continue
 
             # Only import lemmas, not form entries
@@ -1520,16 +1527,10 @@ def import_wiktextract(
                     adjective_metadata.insert().values(
                         lemma_id=lemma_id,
                         inflection_class=inflection_class,
-                        # apocopic_of, base_lemma_id, degree_relationship
-                        # are populated in post-processing after all lemmas are inserted
+                        # base_lemma_id, degree_relationship are populated
+                        # in post-processing after all lemmas are inserted
                     )
                 )
-
-                # Collect apocopic relationships for post-processing
-                if _is_apocopic_adjective(entry):
-                    parent_word = _get_apocopic_parent(entry)
-                    if parent_word:
-                        apocopic_links.append((lemma_id, parent_word))
 
                 # Collect comparative/superlative relationships for post-processing
                 degree_info = _extract_degree_relationship(entry)
@@ -1876,12 +1877,9 @@ def import_wiktextract(
     # Post-processing: Link adjective relationships
     # (must happen after all lemmas are inserted so we can resolve lemma IDs)
     if pos_filter == "adjective":
-        apocopic_stats = link_apocopic_adjectives(conn, apocopic_links)
         degree_stats = link_comparative_superlative(conn, degree_links)
 
         # Add linking stats to main stats dict
-        stats["apocopic_linked"] = apocopic_stats["linked"]
-        stats["apocopic_parent_not_found"] = apocopic_stats["parent_not_found"]
         stats["degree_linked"] = degree_stats["linked"]
         stats["degree_base_not_found"] = degree_stats["base_not_found"]
 
@@ -2173,53 +2171,6 @@ def enrich_form_spelling_from_form_of(
     return stats
 
 
-def link_apocopic_adjectives(
-    conn: Connection,
-    apocopic_links: list[tuple[int, str]],
-) -> dict[str, int]:
-    """Populate adjective_metadata.apocopic_of with parent lemma_ids.
-
-    Args:
-        conn: SQLAlchemy connection
-        apocopic_links: List of (child_lemma_id, parent_lemma_word) tuples
-            collected during import
-
-    Returns:
-        Statistics dict with 'linked' and 'parent_not_found' counts
-    """
-    stats = {"linked": 0, "parent_not_found": 0}
-
-    if not apocopic_links:
-        return stats
-
-    # Build lookup: normalized lemma -> lemma_id for adjectives
-    result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == "adjective")
-    )
-    lemma_lookup = {normalize(row.lemma): row.lemma_id for row in result}
-
-    for child_lemma_id, parent_word in apocopic_links:
-        parent_normalized = normalize(parent_word)
-        parent_lemma_id = lemma_lookup.get(parent_normalized)
-
-        if parent_lemma_id is None:
-            logger.warning(
-                "Parent lemma '%s' not found for apocopic adjective",
-                parent_word,
-            )
-            stats["parent_not_found"] += 1
-            continue
-
-        conn.execute(
-            update(adjective_metadata)
-            .where(adjective_metadata.c.lemma_id == child_lemma_id)
-            .values(apocopic_of=parent_lemma_id)
-        )
-        stats["linked"] += 1
-
-    return stats
-
-
 def link_comparative_superlative(
     conn: Connection,
     degree_links: list[tuple[int, str, str, str]],
@@ -2269,5 +2220,163 @@ def link_comparative_superlative(
             )
         )
         stats["linked"] += 1
+
+    return stats
+
+
+def import_adjective_allomorphs(
+    conn: Connection,
+    jsonl_path: Path,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
+    """Import allomorphs (apocopic/elided forms) as forms of their parent adjective.
+
+    Scans Wiktextract for entries with alt_of pointing to existing adjectives,
+    and adds their word as forms under the parent lemma.
+
+    This implements Option A for handling apocopic forms (gran, bel) and elided
+    forms (grand', bell'): they are stored as forms of their parent lemma
+    (grande, bello) rather than as separate lemmas.
+
+    Args:
+        conn: SQLAlchemy connection
+        jsonl_path: Path to Wiktextract JSONL file
+        progress_callback: Optional callback for progress reporting (current, total)
+
+    Returns:
+        Statistics dict with counts of processed entries
+    """
+    stats = {
+        "scanned": 0,
+        "allomorphs_added": 0,
+        "forms_added": 0,
+        "parent_not_found": 0,
+        "duplicates_skipped": 0,
+        "already_in_parent": 0,
+    }
+
+    # Build lookup: normalized lemma -> lemma_id for adjectives
+    result = conn.execute(
+        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == "adjective")
+    )
+    adj_lookup = {normalize(row.lemma): row.lemma_id for row in result}
+
+    # Count lines for progress
+    total_lines = _count_lines(jsonl_path) if progress_callback else 0
+    current_line = 0
+
+    with jsonl_path.open(encoding="utf-8") as f:
+        for line in f:
+            current_line += 1
+            if progress_callback and current_line % 10000 == 0:
+                progress_callback(current_line, total_lines)
+
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            # Only process adjective entries
+            if entry.get("pos") != "adj":
+                continue
+
+            stats["scanned"] += 1
+
+            # Find parent word and determine label
+            # Method 1: alt_of in senses (e.g., gran -> grande)
+            # Method 2: "adjective form" with links (e.g., bel -> bello)
+            parent_word = None
+            label = None
+            allomorph_word = entry["word"]
+
+            # Try Method 1: alt_of
+            for sense in entry.get("senses", []):
+                alt_of_list = sense.get("alt_of", [])
+                for alt_of in alt_of_list:
+                    parent_word = alt_of.get("word")
+                    if parent_word:
+                        # Determine label from tags
+                        tags = sense.get("tags", [])
+                        if allomorph_word.endswith("'"):
+                            label = "elided"
+                        elif "apocopic" in tags:
+                            label = "apocopic"
+                        break
+                if parent_word:
+                    break
+
+            # Try Method 2: "adjective form" WITHOUT form_of, using links
+            # This catches special forms like "bel" which:
+            # - Are marked as "adjective form" in head_templates
+            # - Do NOT have form_of (unlike regular inflections like "bella")
+            # - Have links pointing to the parent lemma
+            if not parent_word:
+                is_adj_form = any(
+                    t.get("args", {}).get("2") == "adjective form"
+                    for t in entry.get("head_templates", [])
+                )
+                # Check that NO sense has form_of (regular inflected forms have form_of)
+                has_form_of = any(sense.get("form_of") for sense in entry.get("senses", []))
+                if is_adj_form and not has_form_of:
+                    for sense in entry.get("senses", []):
+                        links = sense.get("links", [])
+                        if links and len(links) > 0:
+                            # links format: [['bello', 'bello#Italian'], ...]
+                            parent_word = links[0][0] if isinstance(links[0], list) else links[0]
+                            # For "adjective form" entries, label as apocopic (pre-nominal form)
+                            label = "apocopic"
+                            break
+
+            if not parent_word:
+                continue
+
+            parent_id = adj_lookup.get(normalize(parent_word))
+            if parent_id is None:
+                stats["parent_not_found"] += 1
+                continue
+
+            # Check if parent already has this form (with correct gender/number from forms array)
+            # If so, skip — the parent's Wiktextract forms already have proper tagging
+            existing_forms = conn.execute(
+                select(adjective_forms.c.form).where(adjective_forms.c.lemma_id == parent_id)
+            ).fetchall()
+            existing_form_texts = {row.form for row in existing_forms if row.form}
+
+            if allomorph_word in existing_form_texts:
+                stats["already_in_parent"] += 1
+                continue
+
+            # Add form for all 4 gender/number combinations
+            for gender in ("masculine", "feminine"):
+                for number in ("singular", "plural"):
+                    gender_abbr = "m" if gender == "masculine" else "f"
+                    def_article, article_source = get_definite(allomorph_word, gender_abbr, number)
+
+                    try:
+                        conn.execute(
+                            adjective_forms.insert().values(
+                                lemma_id=parent_id,
+                                form=allomorph_word,
+                                form_source="wiktionary",
+                                form_stressed=allomorph_word,
+                                gender=gender,
+                                number=number,
+                                degree="positive",
+                                labels=label,
+                                def_article=def_article,
+                                article_source=article_source,
+                                form_origin="alt_of",
+                            )
+                        )
+                        stats["forms_added"] += 1
+                    except Exception:
+                        # Duplicate form (unique constraint violation)
+                        stats["duplicates_skipped"] += 1
+
+            stats["allomorphs_added"] += 1
+
+    if progress_callback:
+        progress_callback(total_lines, total_lines)
 
     return stats

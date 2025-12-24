@@ -322,6 +322,7 @@ def fill_missing_adjective_forms(
         "adjectives_completed": 0,
         "not_in_morphit": 0,
         "discrepancies_logged": 0,
+        "elided_skipped": 0,
     }
 
     # Build Morphit lookup: normalized_lemma -> list of MorphitEntry
@@ -393,6 +394,11 @@ def fill_missing_adjective_forms(
         for entry in morphit_forms:
             if entry.degree != "positive":
                 continue  # Only fill base forms, not superlatives/comparatives
+
+            # Skip elided forms (ending with ') - they are added via import_adjective_allomorphs
+            if entry.form.endswith("'"):
+                stats["elided_skipped"] += 1
+                continue
 
             combo = (entry.gender, entry.number)
 

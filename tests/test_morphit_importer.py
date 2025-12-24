@@ -764,3 +764,122 @@ class TestUnstressedFallback:
             db_path.unlink()
             jsonl_path.unlink()
             morphit_path.unlink()
+
+
+class TestMorphitElidedFormSkipping:
+    """Tests for elided form skipping in fill_missing_adjective_forms."""
+
+    def test_elided_forms_skipped(self) -> None:
+        """Elided forms (ending with ') should be skipped by fill_missing_adjective_forms."""
+        # Adjective with only 2 forms (missing plural)
+        incomplete_adj = {
+            "pos": "adj",
+            "word": "grande",
+            "forms": [
+                {"form": "grànde", "tags": ["canonical"]},
+                {"form": "grànde", "tags": ["masculine", "singular"]},
+                {"form": "grànde", "tags": ["feminine", "singular"]},
+                # Missing plurals
+            ],
+            "senses": [{"glosses": ["big", "large"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([incomplete_adj])
+
+        # Morphit file with both regular and elided forms
+        morphit_path = _create_test_morphit(
+            [
+                # Regular forms
+                "grande\tgrande\tADJ:pos+m+s",
+                "grande\tgrande\tADJ:pos+f+s",
+                "grandi\tgrande\tADJ:pos+m+p",
+                "grandi\tgrande\tADJ:pos+f+p",
+                # Elided forms (should be skipped)
+                "grand'\tgrande\tADJ:pos+m+s",
+                "grand'\tgrande\tADJ:pos+f+s",
+                "grand'\tgrande\tADJ:pos+m+p",
+                "grand'\tgrande\tADJ:pos+f+p",
+            ]
+        )
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+
+            with get_connection(db_path) as conn:
+                stats = fill_missing_adjective_forms(conn, morphit_path)
+
+            # Elided forms should be skipped
+            assert stats["elided_skipped"] > 0
+
+            with get_connection(db_path) as conn:
+                forms = conn.execute(select(adjective_forms)).fetchall()
+
+                # Should NOT have any elided forms
+                elided_forms = [f for f in forms if f.form and f.form.endswith("'")]
+                assert len(elided_forms) == 0
+
+                # Should have regular grandi forms added
+                grandi_forms = [f for f in forms if f.form == "grandi"]
+                assert len(grandi_forms) == 2  # m.pl and f.pl
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+            morphit_path.unlink()
+
+    def test_elided_skipped_stat_tracked(self) -> None:
+        """Verify elided_skipped stat is correctly tracked."""
+        incomplete_adj = {
+            "pos": "adj",
+            "word": "bello",
+            "forms": [
+                {"form": "bèllo", "tags": ["canonical"]},
+                {"form": "bèllo", "tags": ["masculine", "singular"]},
+                # Missing other forms
+            ],
+            "senses": [{"glosses": ["beautiful"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([incomplete_adj])
+
+        # Morphit with only elided form for a slot we're missing
+        morphit_path = _create_test_morphit(
+            [
+                "bello\tbello\tADJ:pos+m+s",
+                "bella\tbello\tADJ:pos+f+s",
+                "belli\tbello\tADJ:pos+m+p",
+                "belle\tbello\tADJ:pos+f+p",
+                # Elided forms
+                "bell'\tbello\tADJ:pos+m+s",
+                "bell'\tbello\tADJ:pos+f+s",
+            ]
+        )
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+
+            with get_connection(db_path) as conn:
+                stats = fill_missing_adjective_forms(conn, morphit_path)
+
+            # Should track elided forms that were skipped
+            assert "elided_skipped" in stats
+            assert stats["elided_skipped"] == 2  # bell' m.s and f.s
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+            morphit_path.unlink()

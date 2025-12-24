@@ -24,8 +24,10 @@ from italian_anki.db import (
 )
 from italian_anki.importers.tatoeba import import_tatoeba
 from italian_anki.importers.wiktextract import (
+    _is_alt_form_entry,  # pyright: ignore[reportPrivateUsage]
     enrich_form_spelling_from_form_of,
     enrich_from_form_of,
+    import_adjective_allomorphs,
     import_wiktextract,
 )
 
@@ -1811,6 +1813,247 @@ class TestNounClassification:
                 # The plural should be the accented "dèi", not unaccented "dei"
                 plural_stressed = [f.form_stressed for f in plural_forms]
                 assert "dèi" in plural_stressed, f"Expected 'dèi' in {plural_stressed}"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+
+class TestAltFormFiltering:
+    """Tests for alt-of entry filtering (apocopic/elided forms)."""
+
+    def test_is_alt_form_entry_with_alt_of(self) -> None:
+        """Entry with alt_of should return True."""
+        entry = {
+            "pos": "adj",
+            "word": "gran",
+            "senses": [
+                {
+                    "tags": ["apocopic"],
+                    "alt_of": [{"word": "grande"}],
+                    "glosses": ["apocopic form of grande"],
+                }
+            ],
+        }
+        assert _is_alt_form_entry(entry) is True
+
+    def test_is_alt_form_entry_without_alt_of(self) -> None:
+        """Regular entry without alt_of should return False."""
+        entry = {
+            "pos": "adj",
+            "word": "grande",
+            "senses": [{"glosses": ["big", "large"]}],
+        }
+        assert _is_alt_form_entry(entry) is False
+
+    def test_is_alt_form_entry_empty_senses(self) -> None:
+        """Entry with no senses should return False."""
+        entry: dict[str, Any] = {"pos": "adj", "word": "test", "senses": []}
+        assert _is_alt_form_entry(entry) is False
+
+    def test_alt_form_entries_skipped_during_import(self) -> None:
+        """Alt-form entries should be skipped during adjective import."""
+        # Parent adjective entry
+        grande_entry = {
+            "pos": "adj",
+            "word": "grande",
+            "forms": [{"form": "grànde", "tags": ["canonical"]}],
+            "senses": [{"glosses": ["big", "large"]}],
+        }
+
+        # Alt-form entry (should be skipped)
+        gran_entry = {
+            "pos": "adj",
+            "word": "gran",
+            "senses": [
+                {
+                    "tags": ["apocopic"],
+                    "alt_of": [{"word": "grande"}],
+                    "glosses": ["apocopic form of grande"],
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([grande_entry, gran_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+
+            # Only grande should be imported, gran should be skipped
+            assert stats["lemmas"] == 1
+            assert stats["alt_forms_skipped"] == 1
+
+            with get_connection(db_path) as conn:
+                all_lemmas = conn.execute(
+                    select(lemmas).where(lemmas.c.pos == "adjective")
+                ).fetchall()
+                lemma_words = [lem.lemma for lem in all_lemmas]
+
+                assert "grande" in lemma_words
+                assert "gran" not in lemma_words
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+
+class TestImportAdjAllomorphs:
+    """Tests for import_adjective_allomorphs function."""
+
+    def test_allomorph_import_adds_forms_to_parent(self) -> None:
+        """Allomorph import should add forms under parent lemma."""
+        # Parent adjective entry
+        grande_entry = {
+            "pos": "adj",
+            "word": "grande",
+            "forms": [{"form": "grànde", "tags": ["canonical"]}],
+            "senses": [{"glosses": ["big", "large"]}],
+        }
+
+        # Alt-form entry (should be imported as allomorph)
+        gran_entry = {
+            "pos": "adj",
+            "word": "gran",
+            "senses": [
+                {
+                    "tags": ["apocopic"],
+                    "alt_of": [{"word": "grande"}],
+                    "glosses": ["apocopic form of grande"],
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([grande_entry, gran_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                # First import adjectives (grande only, gran skipped)
+                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+
+                # Then import allomorphs
+                stats = import_adjective_allomorphs(conn, jsonl_path)
+
+            assert stats["allomorphs_added"] == 1
+            assert stats["forms_added"] == 4  # All 4 gender/number combinations
+
+            with get_connection(db_path) as conn:
+                grande = conn.execute(select(lemmas).where(lemmas.c.lemma == "grande")).fetchone()
+                assert grande is not None
+
+                forms = conn.execute(
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == grande.lemma_id)
+                ).fetchall()
+
+                # Find allomorph forms (labeled apocopic)
+                allomorph_forms = [f for f in forms if f.labels == "apocopic"]
+                assert len(allomorph_forms) == 4
+
+                # All should have form="gran"
+                for f in allomorph_forms:
+                    assert f.form == "gran"
+                    assert f.form_origin == "alt_of"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_elided_form_gets_elided_label(self) -> None:
+        """Elided forms (ending with ') should get labels='elided'."""
+        grande_entry = {
+            "pos": "adj",
+            "word": "grande",
+            "forms": [{"form": "grànde", "tags": ["canonical"]}],
+            "senses": [{"glosses": ["big", "large"]}],
+        }
+
+        # Elided form
+        grand_prime_entry = {
+            "pos": "adj",
+            "word": "grand'",
+            "senses": [
+                {
+                    "alt_of": [{"word": "grande"}],
+                    "glosses": ["elided form of grande"],
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([grande_entry, grand_prime_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_adjective_allomorphs(conn, jsonl_path)
+
+            with get_connection(db_path) as conn:
+                grande = conn.execute(select(lemmas).where(lemmas.c.lemma == "grande")).fetchone()
+                assert grande is not None
+
+                forms = conn.execute(
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == grande.lemma_id)
+                ).fetchall()
+
+                elided_forms = [f for f in forms if f.labels == "elided"]
+                assert len(elided_forms) == 4
+
+                for f in elided_forms:
+                    assert f.form == "grand'"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_parent_not_found_tracked(self) -> None:
+        """If parent doesn't exist, should track as parent_not_found."""
+        # Only alt-form entry, no parent
+        gran_entry = {
+            "pos": "adj",
+            "word": "gran",
+            "senses": [
+                {
+                    "tags": ["apocopic"],
+                    "alt_of": [{"word": "grande"}],
+                    "glosses": ["apocopic form of grande"],
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([gran_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                # Import without parent
+                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                stats = import_adjective_allomorphs(conn, jsonl_path)
+
+            # Should track as parent_not_found
+            assert stats["parent_not_found"] == 1
+            assert stats["allomorphs_added"] == 0
 
         finally:
             db_path.unlink()

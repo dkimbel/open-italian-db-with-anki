@@ -233,8 +233,7 @@ adjective_metadata = Table(
     # '2-form' = same form for m/f (facile/facile/facili/facili)
     # 'invariable' = same form for all (blu)
     Column("inflection_class", Text),
-    # Links to related lemmas
-    Column("apocopic_of", Integer, ForeignKey("lemmas.lemma_id")),  # buon→buono
+    # Links to related lemmas (for comparative/superlative)
     Column("base_lemma_id", Integer, ForeignKey("lemmas.lemma_id")),  # migliore→buono
     Column("degree_relationship", Text),  # 'comparative_of', 'superlative_of'
     Column(
@@ -264,7 +263,6 @@ Index("idx_adjective_forms_lemma", adjective_forms.c.lemma_id)
 Index("idx_adjective_forms_form", adjective_forms.c.form)
 Index("idx_adjective_forms_origin", adjective_forms.c.form_origin)
 # adjective_metadata indexes
-Index("idx_adjective_metadata_apocopic", adjective_metadata.c.apocopic_of)
 Index("idx_adjective_metadata_base", adjective_metadata.c.base_lemma_id)
 # New form_lookup indexes
 Index("idx_form_lookup_form_id", form_lookup.c.form_id)
