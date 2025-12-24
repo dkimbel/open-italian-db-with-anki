@@ -176,6 +176,60 @@ SAMPLE_ADJECTIVE_INVARIABLE = {
     "senses": [{"glosses": ["blue"]}],
 }
 
+# Two-form adjective detected via "m or f by sense" in head_templates expansion
+# (e.g., ottimista, belga, pessimista - forms have gender tags but the adjective
+# is still 2-form because singular is shared for both genders)
+SAMPLE_ADJECTIVE_TWO_FORM_BY_SENSE: dict[str, Any] = {
+    "pos": "adj",
+    "word": "ottimista",
+    "head_templates": [
+        {
+            "name": "it-adj",
+            "expansion": "ottimista (m or f by sense, plural ottimisti or ottimiste)",
+            "args": {},
+        }
+    ],
+    "forms": [
+        # Note: gender-tagged plurals - the old logic would miss the 2-form detection
+        {"form": "ottimisti", "tags": ["masculine", "plural"]},
+        {"form": "ottimiste", "tags": ["feminine", "plural"]},
+    ],
+    "senses": [{"glosses": ["optimistic"]}],
+}
+
+# Sample misspelling entry (should be filtered out)
+SAMPLE_MISSPELLING_ADJ: dict[str, Any] = {
+    "pos": "adj",
+    "word": "metereologico",  # Common misspelling of "meteorologico"
+    "senses": [{"tags": ["misspelling"], "glosses": ["Misspelling of meteorologico."]}],
+}
+
+# Sample superlative adjective with hardcoded mapping (pessimo -> cattivo)
+SAMPLE_ADJECTIVE_SUPERLATIVE: dict[str, Any] = {
+    "pos": "adj",
+    "word": "pessimo",
+    "forms": [
+        {"form": "pessimo", "tags": ["masculine", "singular"]},
+        {"form": "pessima", "tags": ["feminine", "singular"]},
+        {"form": "pessimi", "tags": ["masculine", "plural"]},
+        {"form": "pessime", "tags": ["feminine", "plural"]},
+    ],
+    "senses": [{"glosses": ["worst"]}],
+}
+
+# Sample base adjective (cattivo) for superlative linking
+SAMPLE_ADJECTIVE_CATTIVO: dict[str, Any] = {
+    "pos": "adj",
+    "word": "cattivo",
+    "forms": [
+        {"form": "cattivo", "tags": ["masculine", "singular"]},
+        {"form": "cattiva", "tags": ["feminine", "singular"]},
+        {"form": "cattivi", "tags": ["masculine", "plural"]},
+        {"form": "cattive", "tags": ["feminine", "plural"]},
+    ],
+    "senses": [{"glosses": ["bad"]}],
+}
+
 # Sample noun entry without gender (should be filtered out)
 SAMPLE_NOUN_NO_GENDER = {
     "pos": "noun",
@@ -415,7 +469,7 @@ class TestWiktextractImporter:
                 ).fetchall()
                 assert len(libro_forms) >= 1
                 # Check that forms have gender
-                assert all(f.gender == "m" for f in libro_forms)
+                assert all(f.gender == "masculine" for f in libro_forms)
                 # Check that articles are computed
                 libro_sing = [f for f in libro_forms if f.number == "singular"]
                 assert len(libro_sing) >= 1
@@ -430,7 +484,7 @@ class TestWiktextractImporter:
                     select(noun_forms).where(noun_forms.c.lemma_id == casa.lemma_id)
                 ).fetchall()
                 assert len(casa_forms) >= 1
-                assert all(f.gender == "f" for f in casa_forms)
+                assert all(f.gender == "feminine" for f in casa_forms)
                 # Check feminine articles
                 casa_sing = [f for f in casa_forms if f.number == "singular"]
                 assert len(casa_sing) >= 1
@@ -723,6 +777,144 @@ class TestWiktextractImporter:
                 ).fetchone()
                 assert blu_meta is not None
                 assert blu_meta.inflection_class == "invariable"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_two_form_detection_m_or_f_by_sense(self) -> None:
+        """Test that 'ottimista' is detected as 2-form via head_templates expansion.
+
+        Adjectives like ottimista, belga, pessimista have gender-tagged plurals
+        in the forms array, but are still 2-form because the singular is shared
+        for both genders. The "m or f by sense" in head_templates.expansion signals this.
+        """
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_ADJECTIVE_TWO_FORM_BY_SENSE])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+
+            with get_connection(db_path) as conn:
+                # Check ottimista is detected as 2-form
+                ottimista = conn.execute(
+                    select(lemmas).where(lemmas.c.lemma == "ottimista")
+                ).fetchone()
+                assert ottimista is not None
+
+                meta = conn.execute(
+                    select(adjective_metadata).where(
+                        adjective_metadata.c.lemma_id == ottimista.lemma_id
+                    )
+                ).fetchone()
+                assert meta is not None
+                assert meta.inflection_class == "2-form"
+
+                # Check that feminine singular was generated from the shared singular
+                forms = conn.execute(
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == ottimista.lemma_id)
+                ).fetchall()
+
+                # Should have 4 forms: m.sg, f.sg (shared text), m.pl, f.pl
+                assert len(forms) == 4, f"Expected 4 forms, got {len(forms)}"
+
+                # Verify both singular genders have 'ottimista'
+                sing_forms = [f for f in forms if f.number == "singular"]
+                assert len(sing_forms) == 2
+                sing_genders = {f.gender for f in sing_forms}
+                assert sing_genders == {"masculine", "feminine"}
+                # Both singulars should have the same text
+                assert all(f.form_stressed == "ottimista" for f in sing_forms)
+
+                # Verify plurals have different forms
+                plur_forms = [f for f in forms if f.number == "plural"]
+                assert len(plur_forms) == 2
+                plur_texts = {f.form_stressed for f in plur_forms}
+                assert plur_texts == {"ottimisti", "ottimiste"}
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_misspelling_filtered(self) -> None:
+        """Test that entries marked as misspellings are filtered out during import."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        # Include both a valid adjective and a misspelling
+        jsonl_path = _create_test_jsonl([SAMPLE_ADJECTIVE, SAMPLE_MISSPELLING_ADJ])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+
+            # Only the valid adjective should be imported
+            assert stats["lemmas"] == 1
+            assert stats["misspellings_skipped"] == 1
+
+            with get_connection(db_path) as conn:
+                # Check that bello is imported
+                bello = conn.execute(select(lemmas).where(lemmas.c.lemma == "bello")).fetchone()
+                assert bello is not None
+
+                # Check that metereologico is NOT imported
+                misspelling = conn.execute(
+                    select(lemmas).where(lemmas.c.lemma == "metereologico")
+                ).fetchone()
+                assert misspelling is None
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_comparative_superlative_hardcoded_fallback(self) -> None:
+        """Test that hardcoded degree relationships are linked with source tracking.
+
+        When Wiktextract data doesn't contain explicit relationship tags,
+        we fall back to hardcoded mappings (e.g., pessimo -> cattivo).
+        """
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        # Both the superlative and base adjective
+        jsonl_path = _create_test_jsonl([SAMPLE_ADJECTIVE_SUPERLATIVE, SAMPLE_ADJECTIVE_CATTIVO])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+
+            # Both should be imported
+            assert stats["lemmas"] == 2
+
+            with get_connection(db_path) as conn:
+                # Check pessimo has degree relationship to cattivo
+                pessimo = conn.execute(select(lemmas).where(lemmas.c.lemma == "pessimo")).fetchone()
+                assert pessimo is not None
+
+                cattivo = conn.execute(select(lemmas).where(lemmas.c.lemma == "cattivo")).fetchone()
+                assert cattivo is not None
+
+                pessimo_meta = conn.execute(
+                    select(adjective_metadata).where(
+                        adjective_metadata.c.lemma_id == pessimo.lemma_id
+                    )
+                ).fetchone()
+                assert pessimo_meta is not None
+                assert pessimo_meta.base_lemma_id == cattivo.lemma_id
+                assert pessimo_meta.degree_relationship == "superlative_of"
+                assert pessimo_meta.degree_relationship_source == "hardcoded"
 
         finally:
             db_path.unlink()
@@ -1207,14 +1399,14 @@ class TestNounClassification:
                 # Check we have both genders for singular
                 sing_forms = [f for f in forms if f.number == "singular"]
                 sing_genders = {f.gender for f in sing_forms}
-                assert "m" in sing_genders
-                assert "f" in sing_genders
+                assert "masculine" in sing_genders
+                assert "feminine" in sing_genders
 
                 # Check plurals have explicit gender
                 plural_forms = [f for f in forms if f.number == "plural"]
                 plural_genders = {f.gender for f in plural_forms}
-                assert "m" in plural_genders
-                assert "f" in plural_genders
+                assert "masculine" in plural_genders
+                assert "feminine" in plural_genders
 
         finally:
             db_path.unlink()
@@ -1259,8 +1451,8 @@ class TestNounClassification:
                 # Check both genders exist for singular
                 sing_forms = [f for f in forms if f.number == "singular"]
                 sing_genders = {f.gender for f in sing_forms}
-                assert "m" in sing_genders
-                assert "f" in sing_genders
+                assert "masculine" in sing_genders
+                assert "feminine" in sing_genders
 
         finally:
             db_path.unlink()
@@ -1422,12 +1614,12 @@ class TestNounClassification:
                 ).fetchall()
 
                 # Check we have feminine singular form (amica)
-                fem_sing = [f for f in forms if f.gender == "f" and f.number == "singular"]
+                fem_sing = [f for f in forms if f.gender == "feminine" and f.number == "singular"]
                 assert len(fem_sing) == 1, f"Expected 1 feminine singular, got {len(fem_sing)}"
                 assert fem_sing[0].form_stressed == "amica"
 
                 # Check we have feminine plural form (amiche)
-                fem_plur = [f for f in forms if f.gender == "f" and f.number == "plural"]
+                fem_plur = [f for f in forms if f.gender == "feminine" and f.number == "plural"]
                 assert len(fem_plur) >= 1, f"Expected feminine plural, got {len(fem_plur)}"
 
         finally:
@@ -1494,12 +1686,12 @@ class TestNounClassification:
                 ).fetchall()
 
                 # Check masculine plural (amici)
-                masc_plur = [f for f in forms if f.gender == "m" and f.number == "plural"]
+                masc_plur = [f for f in forms if f.gender == "masculine" and f.number == "plural"]
                 assert len(masc_plur) == 1, f"Expected 1 masculine plural, got {len(masc_plur)}"
                 assert masc_plur[0].form_stressed == "amici"
 
                 # Check feminine plural (amiche) - from counterpart lookup!
-                fem_plur = [f for f in forms if f.gender == "f" and f.number == "plural"]
+                fem_plur = [f for f in forms if f.gender == "feminine" and f.number == "plural"]
                 assert len(fem_plur) == 1, f"Expected 1 feminine plural, got {len(fem_plur)}"
                 assert fem_plur[0].form_stressed == "amiche"
 
@@ -1550,13 +1742,13 @@ class TestNounClassification:
                 ).fetchall()
 
                 # Check masculine plurals - should have both dei and dii
-                masc_plur = [f for f in forms if f.gender == "m" and f.number == "plural"]
+                masc_plur = [f for f in forms if f.gender == "masculine" and f.number == "plural"]
                 masc_forms = {f.form_stressed for f in masc_plur}
                 assert "dei" in masc_forms, f"Expected 'dei' in masculine plurals, got {masc_forms}"
                 assert "dii" in masc_forms, f"Expected 'dii' in masculine plurals, got {masc_forms}"
 
                 # Check feminine plural - should ONLY have dee, NOT dei/dii
-                fem_plur = [f for f in forms if f.gender == "f" and f.number == "plural"]
+                fem_plur = [f for f in forms if f.gender == "feminine" and f.number == "plural"]
                 fem_forms = {f.form_stressed for f in fem_plur}
                 assert fem_forms == {"dee"}, f"Expected only 'dee' for feminine, got {fem_forms}"
 

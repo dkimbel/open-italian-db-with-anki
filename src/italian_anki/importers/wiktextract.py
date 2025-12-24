@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -77,18 +78,50 @@ def _is_invariable_adjective(entry: dict[str, Any]) -> bool:
     return False
 
 
+def _is_misspelling(entry: dict[str, Any]) -> bool:
+    """Check if entry is marked as a misspelling.
+
+    Wiktextract marks misspellings with:
+    - senses[*].tags containing "misspelling"
+    - head_templates[*].args with "misspelling" value
+
+    Examples: metereologico (misspelling of meteorologico)
+    """
+    # Check senses tags
+    for sense in entry.get("senses", []):
+        if "misspelling" in sense.get("tags", []):
+            return True
+
+    # Check head_templates args
+    for template in entry.get("head_templates", []):
+        args = template.get("args", {})
+        if "misspelling" in args.values():
+            return True
+
+    return False
+
+
 def _is_two_form_adjective(entry: dict[str, Any]) -> bool:
     """Check if adjective is 2-form (same form for masculine and feminine).
 
-    Wiktextract signals 2-form adjectives (like "facile") by using genderless
-    number tags (e.g., ["plural"] instead of ["masculine", "plural"]).
+    Detection methods:
+    1. Genderless number tags in forms array (e.g., ["plural"] for "facile")
+    2. "m or f by sense" in head_templates expansion (e.g., "ottimista")
     """
+    # Method 1: Genderless number tags in forms array
     for form_data in entry.get("forms", []):
         tags = set(form_data.get("tags", []))
         has_gender = "masculine" in tags or "feminine" in tags
         has_number = "singular" in tags or "plural" in tags
         if has_number and not has_gender:
             return True
+
+    # Method 2: Parse head_templates expansion for "m or f by sense"
+    for template in entry.get("head_templates", []):
+        expansion = template.get("expansion", "")
+        if "m or f by sense" in expansion:
+            return True
+
     return False
 
 
@@ -137,20 +170,34 @@ def _get_apocopic_parent(entry: dict[str, Any]) -> str | None:
     return None
 
 
-def _extract_degree_relationship(entry: dict[str, Any]) -> tuple[str, str] | None:
-    """Extract comparative/superlative relationship from forms array.
+# Hardcoded mappings for irregular comparatives/superlatives
+# These are used as fallback when Wiktextract data is missing or incomplete
+HARDCODED_DEGREE_RELATIONSHIPS: dict[str, tuple[str, str]] = {
+    "migliore": ("buono", "comparative_of"),
+    "ottimo": ("buono", "superlative_of"),
+    "peggiore": ("cattivo", "comparative_of"),
+    "pessimo": ("cattivo", "superlative_of"),
+    "maggiore": ("grande", "comparative_of"),
+    "massimo": ("grande", "superlative_of"),
+    "minore": ("piccolo", "comparative_of"),
+    "minimo": ("piccolo", "superlative_of"),
+}
 
-    Looks for structured form entries like:
-    - {"form": "of buono", "tags": ["comparative"]}
-    - {"form": "of buono", "tags": ["superlative"]}
 
-    IMPORTANT: Only extracts from structured forms array with explicit tags.
-    Does not parse glosses or other unstructured text.
+def _extract_degree_relationship(entry: dict[str, Any]) -> tuple[str, str, str] | None:
+    """Extract comparative/superlative relationship from Wiktextract data.
+
+    Detection methods (in priority order):
+    1. Structured form entries: {"form": "of buono", "tags": ["comparative"]}
+    2. Canonical text pattern: "ottimo superlative of buono"
+    3. Hardcoded fallback for irregular forms
 
     Returns:
-        Tuple of (base_lemma_word, degree_relationship) or None.
-        E.g., ("buono", "comparative_of") for migliore.
+        Tuple of (base_word, relationship, source) or None.
+        E.g., ("buono", "comparative_of", "wiktextract") for migliore.
+        Source is one of: 'wiktextract', 'wiktextract:canonical', 'hardcoded'
     """
+    # Method 1: Structured form entries
     for form_data in entry.get("forms", []):
         form = form_data.get("form", "")
         tags = form_data.get("tags", [])
@@ -158,12 +205,26 @@ def _extract_degree_relationship(entry: dict[str, Any]) -> tuple[str, str] | Non
         if "comparative" in tags and form.startswith("of "):
             base_word = form[3:].strip()
             if base_word:
-                return (base_word, "comparative_of")
+                return (base_word, "comparative_of", "wiktextract")
 
         if "superlative" in tags and form.startswith("of "):
             base_word = form[3:].strip()
             if base_word:
-                return (base_word, "superlative_of")
+                return (base_word, "superlative_of", "wiktextract")
+
+        # Method 2: Canonical text pattern like "ottimo superlative of buono"
+        if "canonical" in tags:
+            match = re.search(r"\b(superlative|comparative) of (\w+)\b", form, re.IGNORECASE)
+            if match:
+                degree_type = match.group(1).lower()
+                base_word = match.group(2)
+                return (base_word, f"{degree_type}_of", "wiktextract:canonical")
+
+    # Method 3: Hardcoded fallback
+    word = entry.get("word", "")
+    if word in HARDCODED_DEGREE_RELATIONSHIPS:
+        base_word, relationship = HARDCODED_DEGREE_RELATIONSHIPS[word]
+        return (base_word, relationship, "hardcoded")
 
     return None
 
@@ -783,9 +844,10 @@ def _iter_forms(
     seen: set[tuple[str, tuple[str, ...]]] = set()
     has_masc_singular = False
     has_fem_singular = False
-    # 2-form adjectives (like "facile") have genderless number tags in Wiktextract
-    # (e.g., ["plural"] instead of ["masculine", "plural"])
-    is_two_form = False
+    # 2-form adjectives (like "facile", "ottimista") may have either:
+    # - genderless number tags in forms array (["plural"] instead of ["masculine", "plural"])
+    # - "m or f by sense" in head_templates expansion
+    is_two_form = pos == "adjective" and _is_two_form_adjective(entry)
     # Check if this is an invariable adjective (like "blu", "rosa")
     is_invariable = pos == "adjective" and _is_invariable_adjective(entry)
 
@@ -1014,9 +1076,21 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
 
 
 def _build_verb_form_row(
-    lemma_id: int, form_stressed: str, tags: list[str]
+    lemma_id: int,
+    form_stressed: str,
+    tags: list[str],
+    *,
+    form_origin: str = "wiktextract",
 ) -> dict[str, Any] | None:
-    """Build a verb_forms row dict from tags, or None if should filter."""
+    """Build a verb_forms row dict from tags, or None if should filter.
+
+    Args:
+        lemma_id: The lemma ID to link to
+        form_stressed: The stressed form text
+        tags: Wiktextract tags for this form
+        form_origin: How we determined this form exists:
+            - 'wiktextract': Direct from forms array (default)
+    """
     if should_filter_form(tags):
         return None
 
@@ -1036,6 +1110,7 @@ def _build_verb_form_row(
         "is_formal": features.is_formal,
         "is_negative": features.is_negative,
         "labels": features.labels,
+        "form_origin": form_origin,
     }
 
 
@@ -1070,6 +1145,7 @@ def _build_noun_form_row(
     *,
     meaning_hint: str | None = None,
     form_source: str = "wiktionary",
+    form_origin: str = "wiktextract",
 ) -> dict[str, Any] | None:
     """Build a noun_forms row dict from tags, or None if should filter.
 
@@ -1086,6 +1162,9 @@ def _build_noun_form_row(
         form_source: Source indicator - "wiktionary" for forms from wiktextract
             forms array (default), "synthesized" for forms extracted from
             head_templates only
+        form_origin: How we determined this form exists:
+            - 'wiktextract': Direct from forms array (default)
+            - 'inferred:singular': Added missing singular tag
     """
     if should_filter_form(tags):
         return None
@@ -1097,19 +1176,28 @@ def _build_noun_form_row(
     # Extract gender from tags (for forms like "uova" with ["feminine", "plural"])
     gender: str | None = None
     if "masculine" in tags:
-        gender = "m"
+        gender = "masculine"
     elif "feminine" in tags:
-        gender = "f"
+        gender = "feminine"
     elif lemma_gender:
         # Fall back to lemma gender for forms without explicit gender tag
-        gender = lemma_gender
+        # Convert 'm'/'f' to full strings if needed
+        if lemma_gender == "m":
+            gender = "masculine"
+        elif lemma_gender == "f":
+            gender = "feminine"
+        else:
+            gender = lemma_gender
 
     # Filter out forms without gender (incomplete data)
     if gender is None:
         return None
 
+    # Convert to short form for article computation
+    gender_short = "m" if gender == "masculine" else "f"
+
     # Compute definite article from orthography
-    def_article, article_source = get_definite(form_stressed, gender, features.number)
+    def_article, article_source = get_definite(form_stressed, gender_short, features.number)
 
     return {
         "lemma_id": lemma_id,
@@ -1124,6 +1212,7 @@ def _build_noun_form_row(
         "meaning_hint": meaning_hint,
         "def_article": def_article,
         "article_source": article_source,
+        "form_origin": form_origin,
     }
 
 
@@ -1223,13 +1312,16 @@ def import_wiktextract(
         "nouns_without_gender": 0,
         "definitions": 0,
         "skipped": 0,
+        "misspellings_skipped": 0,
         "cleared": cleared,
     }
 
     # Collect adjective relationship data for post-processing
     # (relationships are resolved after all lemmas are inserted)
     apocopic_links: list[tuple[int, str]] = []  # (lemma_id, parent_word)
-    degree_links: list[tuple[int, str, str]] = []  # (lemma_id, base_word, relationship)
+    degree_links: list[
+        tuple[int, str, str, str]
+    ] = []  # (lemma_id, base_word, relationship, source)
 
     # Get POS-specific table and row builder
     pos_form_table = POS_FORM_TABLES.get(pos_filter)
@@ -1309,6 +1401,11 @@ def import_wiktextract(
 
             # Filter by POS (using Wiktextract's naming)
             if entry.get("pos") != wiktextract_pos:
+                continue
+
+            # Filter out misspellings (applies to all POS)
+            if _is_misspelling(entry):
+                stats["misspellings_skipped"] += 1
                 continue
 
             # Only import lemmas, not form entries
@@ -1437,8 +1534,8 @@ def import_wiktextract(
                 # Collect comparative/superlative relationships for post-processing
                 degree_info = _extract_degree_relationship(entry)
                 if degree_info:
-                    base_word, relationship = degree_info
-                    degree_links.append((lemma_id, base_word, relationship))
+                    base_word, relationship, source = degree_info
+                    degree_links.append((lemma_id, base_word, relationship, source))
 
             # Queue forms for batch insert (using POS-specific builder)
             # Track what number/gender combinations we've already added for nouns
@@ -1636,9 +1733,13 @@ def import_wiktextract(
                         if gender:
                             seen_noun_forms.add((number, gender))
                 else:
-                    # For adjectives, pass form_origin; for verbs, use default builder
+                    # Pass form_origin to all POS form builders
                     if pos_filter == "adjective":
                         row = _build_adjective_form_row(
+                            lemma_id, form_stressed, tags, form_origin=form_origin
+                        )
+                    elif pos_filter == "verb":
+                        row = _build_verb_form_row(
                             lemma_id, form_stressed, tags, form_origin=form_origin
                         )
                     else:
@@ -1663,6 +1764,7 @@ def import_wiktextract(
                             gender,
                             meaning_hint=hint if hint else None,
                             form_source="synthesized",
+                            form_origin="inferred:head_template",
                         )
                         if row:
                             form_batch.append(row)
@@ -1687,14 +1789,22 @@ def import_wiktextract(
                     for gender in ("m", "f"):
                         if (base_number, gender) not in seen_noun_forms:
                             row = _build_noun_form_row(
-                                lemma_id, lemma_stressed, [base_number], gender
+                                lemma_id,
+                                lemma_stressed,
+                                [base_number],
+                                gender,
+                                form_origin="inferred:base_form",
                             )
                             if row:
                                 form_batch.append(row)
                 elif lemma_gender and (base_number, lemma_gender) not in seen_noun_forms:
                     # Add base form for single gender if not already present
                     row = _build_noun_form_row(
-                        lemma_id, lemma_stressed, [base_number], lemma_gender
+                        lemma_id,
+                        lemma_stressed,
+                        [base_number],
+                        lemma_gender,
+                        form_origin="inferred:base_form",
                     )
                     if row:
                         form_batch.append(row)
@@ -2093,6 +2203,10 @@ def link_apocopic_adjectives(
         parent_lemma_id = lemma_lookup.get(parent_normalized)
 
         if parent_lemma_id is None:
+            logger.warning(
+                "Parent lemma '%s' not found for apocopic adjective",
+                parent_word,
+            )
             stats["parent_not_found"] += 1
             continue
 
@@ -2108,14 +2222,15 @@ def link_apocopic_adjectives(
 
 def link_comparative_superlative(
     conn: Connection,
-    degree_links: list[tuple[int, str, str]],
+    degree_links: list[tuple[int, str, str, str]],
 ) -> dict[str, int]:
-    """Populate adjective_metadata.base_lemma_id and degree_relationship.
+    """Populate adjective_metadata.base_lemma_id, degree_relationship, and source.
 
     Args:
         conn: SQLAlchemy connection
-        degree_links: List of (lemma_id, base_lemma_word, relationship) tuples
-            collected during import
+        degree_links: List of (lemma_id, base_lemma_word, relationship, source) tuples
+            collected during import. Source is one of: 'wiktextract',
+            'wiktextract:canonical', 'hardcoded'.
 
     Returns:
         Statistics dict with 'linked' and 'base_not_found' counts
@@ -2131,18 +2246,27 @@ def link_comparative_superlative(
     )
     lemma_lookup = {normalize(row.lemma): row.lemma_id for row in result}
 
-    for lemma_id, base_word, relationship in degree_links:
+    for lemma_id, base_word, relationship, source in degree_links:
         base_normalized = normalize(base_word)
         base_lemma_id = lemma_lookup.get(base_normalized)
 
         if base_lemma_id is None:
+            logger.warning(
+                "Base lemma '%s' not found for degree relationship (source: %s)",
+                base_word,
+                source,
+            )
             stats["base_not_found"] += 1
             continue
 
         conn.execute(
             update(adjective_metadata)
             .where(adjective_metadata.c.lemma_id == lemma_id)
-            .values(base_lemma_id=base_lemma_id, degree_relationship=relationship)
+            .values(
+                base_lemma_id=base_lemma_id,
+                degree_relationship=relationship,
+                degree_relationship_source=source,
+            )
         )
         stats["linked"] += 1
 

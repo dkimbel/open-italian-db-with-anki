@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.engine import Engine
 
@@ -62,6 +63,8 @@ verb_forms = Table(
     Column("is_negative", Boolean, default=False),  # negative imperative
     # Usage labels (comma-separated if multiple)
     Column("labels", Text),  # NULL=standard, or "archaic", "archaic,literary", etc.
+    # Form origin tracking - how we determined this form exists
+    Column("form_origin", Text),  # 'wiktextract', 'inferred:singular', etc.
 )
 
 # Noun forms with grammatical features
@@ -73,7 +76,9 @@ noun_forms = Table(
     Column("form", Text),  # real Italian spelling
     Column("form_source", Text),  # "morphit" or "wiktionary", NULL if not found
     Column("form_stressed", Text, nullable=False),  # with stress marks
-    Column("gender", String(1), nullable=False),  # 'm' or 'f' (per-form, for nouns like paio/paia)
+    Column(
+        "gender", Text, nullable=False
+    ),  # 'masculine' or 'feminine' (per-form, for nouns like paio/paia)
     Column("number", Text, nullable=False),  # singular, plural
     Column("labels", Text),  # NULL=standard, or comma-separated labels
     Column("is_diminutive", Boolean, default=False),
@@ -82,6 +87,8 @@ noun_forms = Table(
     # Article columns (computed from orthography)
     Column("def_article", Text),  # 'il', 'lo', 'la', "l'", 'i', 'gli', 'le'
     Column("article_source", Text),  # 'inferred' or 'exception:<reason>'
+    # Form origin tracking - how we determined this form exists
+    Column("form_origin", Text),  # 'wiktextract', 'inferred:singular', etc.
 )
 
 # Adjective forms with grammatical features
@@ -122,6 +129,10 @@ adjective_forms = Table(
     Column("article_source", Text),  # 'inferred' or 'exception:<reason>'
     # Form origin tracking - how we determined this form exists (see documentation above)
     Column("form_origin", Text),
+    # Unique constraint: allows allomorphs (bel/bello/bell') but prevents true duplicates
+    UniqueConstraint(
+        "lemma_id", "form_stressed", "gender", "number", "degree", name="uq_adjective_forms_entry"
+    ),
 )
 
 # Lookup table for matching forms in sentences (with POS awareness)
@@ -142,7 +153,7 @@ definitions = Table(
     Column("gloss", Text, nullable=False),
     Column("tags", Text),  # JSON array (e.g., ["transitive"])
     # Optional linkage to specific forms (for nouns with meaning-dependent gender/plurals)
-    Column("form_gender", String(1)),  # NULL (all), 'm', 'f'
+    Column("form_gender", Text),  # NULL (all), 'masculine', 'feminine'
     Column("form_number", Text),  # NULL (all), 'singular', 'plural'
     Column("form_meaning_hint", Text),  # matches noun_forms.meaning_hint
 )
@@ -226,6 +237,9 @@ adjective_metadata = Table(
     Column("apocopic_of", Integer, ForeignKey("lemmas.lemma_id")),  # buon→buono
     Column("base_lemma_id", Integer, ForeignKey("lemmas.lemma_id")),  # migliore→buono
     Column("degree_relationship", Text),  # 'comparative_of', 'superlative_of'
+    Column(
+        "degree_relationship_source", Text
+    ),  # 'wiktextract', 'wiktextract:canonical', 'hardcoded'
 )
 
 # Indexes (defined separately for clarity)
