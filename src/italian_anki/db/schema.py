@@ -85,9 +85,26 @@ noun_forms = Table(
 )
 
 # Adjective forms with grammatical features
-# Note: We store 4 rows per adjective (one per gender/number combination) even for
-# invariable adjectives like "blu". This enables article variation (il/la/i/le) and
-# allows queries like "show all feminine plural forms" for grammar drills.
+#
+# Note on adjective_forms storage:
+# ================================
+# We store one row per (lemma_id, form_stressed, gender, number, degree) combination.
+# Even when form text is identical across genders (invariable adjectives like "blu"),
+# we store 4 separate rows because:
+#
+# 1. Each combination requires a different definite article (il/la/i/le)
+# 2. This correctly models Italian's gender agreement grammar
+# 3. It enables efficient queries like "show all feminine plural forms"
+# 4. It supports substantivized adjectives ("il blu", "la bella")
+#
+# form_origin tracking values:
+# - 'wiktextract': Direct from Wiktextract forms array
+# - 'inferred:singular': Added missing singular tag (gender-only forms in Wiktextract)
+# - 'inferred:two_form': Generated both genders for 2-form adjective (e.g., facile)
+# - 'inferred:base_form': From lemma word field when forms array empty
+# - 'inferred:invariable': Generated all 4 forms for inv:1 flagged adjectives
+# - 'morphit': Fallback from Morphit for adjectives with missing forms
+#
 adjective_forms = Table(
     "adjective_forms",
     metadata,
@@ -103,10 +120,7 @@ adjective_forms = Table(
     # Article columns (computed from orthography)
     Column("def_article", Text),  # 'il', 'lo', 'la', "l'", 'i', 'gli', 'le'
     Column("article_source", Text),  # 'inferred' or 'exception:<reason>'
-    # Form origin tracking - how we determined this form exists
-    # Values: 'wiktextract' (direct), 'inferred:singular' (added missing tag),
-    # 'inferred:two_form' (generated both genders), 'inferred:base_form' (from lemma),
-    # 'inferred:invariable' (generated all 4 for inv:1), 'morphit' (fallback)
+    # Form origin tracking - how we determined this form exists (see documentation above)
     Column("form_origin", Text),
 )
 

@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Connection, func, select
+from sqlalchemy import Connection, func, select, update
 
 from italian_anki.articles import get_definite
 from italian_anki.db.schema import (
@@ -105,6 +105,67 @@ def _get_adjective_inflection_class(entry: dict[str, Any]) -> str:
     if _is_two_form_adjective(entry):
         return "2-form"
     return "4-form"
+
+
+def _is_apocopic_adjective(entry: dict[str, Any]) -> bool:
+    """Check if adjective is an apocopated (truncated) pre-nominal form.
+
+    Apocopic forms like "buon" (from "buono"), "san" (from "santo"),
+    "gran" (from "grande") are marked with apoc:1 in head_templates.
+    """
+    for template in entry.get("head_templates", []):
+        if template.get("args", {}).get("apoc") == "1":
+            return True
+    return False
+
+
+def _get_apocopic_parent(entry: dict[str, Any]) -> str | None:
+    """Extract parent lemma from apocopic form entry using structured fields only.
+
+    IMPORTANT: Only uses the structured alt_of field, never parses glosses.
+    This ensures reliable extraction without brittle text parsing.
+
+    Returns:
+        Parent lemma word (e.g., "buono" for "buon") or None if not found.
+    """
+    for sense in entry.get("senses", []):
+        alt_of_list = sense.get("alt_of", [])
+        for alt_of in alt_of_list:
+            parent = alt_of.get("word")
+            if parent:
+                return parent
+    return None
+
+
+def _extract_degree_relationship(entry: dict[str, Any]) -> tuple[str, str] | None:
+    """Extract comparative/superlative relationship from forms array.
+
+    Looks for structured form entries like:
+    - {"form": "of buono", "tags": ["comparative"]}
+    - {"form": "of buono", "tags": ["superlative"]}
+
+    IMPORTANT: Only extracts from structured forms array with explicit tags.
+    Does not parse glosses or other unstructured text.
+
+    Returns:
+        Tuple of (base_lemma_word, degree_relationship) or None.
+        E.g., ("buono", "comparative_of") for migliore.
+    """
+    for form_data in entry.get("forms", []):
+        form = form_data.get("form", "")
+        tags = form_data.get("tags", [])
+
+        if "comparative" in tags and form.startswith("of "):
+            base_word = form[3:].strip()
+            if base_word:
+                return (base_word, "comparative_of")
+
+        if "superlative" in tags and form.startswith("of "):
+            base_word = form[3:].strip()
+            if base_word:
+                return (base_word, "superlative_of")
+
+    return None
 
 
 # Manual mapping of plural forms to definition matchers for nouns with meaning-dependent plurals.
@@ -1165,6 +1226,11 @@ def import_wiktextract(
         "cleared": cleared,
     }
 
+    # Collect adjective relationship data for post-processing
+    # (relationships are resolved after all lemmas are inserted)
+    apocopic_links: list[tuple[int, str]] = []  # (lemma_id, parent_word)
+    degree_links: list[tuple[int, str, str]] = []  # (lemma_id, base_word, relationship)
+
     # Get POS-specific table and row builder
     pos_form_table = POS_FORM_TABLES.get(pos_filter)
     build_form_row = POS_FORM_BUILDERS.get(pos_filter)
@@ -1358,9 +1424,21 @@ def import_wiktextract(
                         lemma_id=lemma_id,
                         inflection_class=inflection_class,
                         # apocopic_of, base_lemma_id, degree_relationship
-                        # are NULL for now (future work: link apocopic forms and comparatives)
+                        # are populated in post-processing after all lemmas are inserted
                     )
                 )
+
+                # Collect apocopic relationships for post-processing
+                if _is_apocopic_adjective(entry):
+                    parent_word = _get_apocopic_parent(entry)
+                    if parent_word:
+                        apocopic_links.append((lemma_id, parent_word))
+
+                # Collect comparative/superlative relationships for post-processing
+                degree_info = _extract_degree_relationship(entry)
+                if degree_info:
+                    base_word, relationship = degree_info
+                    degree_links.append((lemma_id, base_word, relationship))
 
             # Queue forms for batch insert (using POS-specific builder)
             # Track what number/gender combinations we've already added for nouns
@@ -1685,6 +1763,18 @@ def import_wiktextract(
     # Final flush
     flush_batches()
 
+    # Post-processing: Link adjective relationships
+    # (must happen after all lemmas are inserted so we can resolve lemma IDs)
+    if pos_filter == "adjective":
+        apocopic_stats = link_apocopic_adjectives(conn, apocopic_links)
+        degree_stats = link_comparative_superlative(conn, degree_links)
+
+        # Add linking stats to main stats dict
+        stats["apocopic_linked"] = apocopic_stats["linked"]
+        stats["apocopic_parent_not_found"] = apocopic_stats["parent_not_found"]
+        stats["degree_linked"] = degree_stats["linked"]
+        stats["degree_base_not_found"] = degree_stats["base_not_found"]
+
     # Final progress callback
     if progress_callback:
         progress_callback(total_lines, total_lines)
@@ -1969,5 +2059,91 @@ def enrich_form_spelling_from_form_of(
     # Final progress callback
     if progress_callback:
         progress_callback(total_lines, total_lines)
+
+    return stats
+
+
+def link_apocopic_adjectives(
+    conn: Connection,
+    apocopic_links: list[tuple[int, str]],
+) -> dict[str, int]:
+    """Populate adjective_metadata.apocopic_of with parent lemma_ids.
+
+    Args:
+        conn: SQLAlchemy connection
+        apocopic_links: List of (child_lemma_id, parent_lemma_word) tuples
+            collected during import
+
+    Returns:
+        Statistics dict with 'linked' and 'parent_not_found' counts
+    """
+    stats = {"linked": 0, "parent_not_found": 0}
+
+    if not apocopic_links:
+        return stats
+
+    # Build lookup: normalized lemma -> lemma_id for adjectives
+    result = conn.execute(
+        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == "adjective")
+    )
+    lemma_lookup = {normalize(row.lemma): row.lemma_id for row in result}
+
+    for child_lemma_id, parent_word in apocopic_links:
+        parent_normalized = normalize(parent_word)
+        parent_lemma_id = lemma_lookup.get(parent_normalized)
+
+        if parent_lemma_id is None:
+            stats["parent_not_found"] += 1
+            continue
+
+        conn.execute(
+            update(adjective_metadata)
+            .where(adjective_metadata.c.lemma_id == child_lemma_id)
+            .values(apocopic_of=parent_lemma_id)
+        )
+        stats["linked"] += 1
+
+    return stats
+
+
+def link_comparative_superlative(
+    conn: Connection,
+    degree_links: list[tuple[int, str, str]],
+) -> dict[str, int]:
+    """Populate adjective_metadata.base_lemma_id and degree_relationship.
+
+    Args:
+        conn: SQLAlchemy connection
+        degree_links: List of (lemma_id, base_lemma_word, relationship) tuples
+            collected during import
+
+    Returns:
+        Statistics dict with 'linked' and 'base_not_found' counts
+    """
+    stats = {"linked": 0, "base_not_found": 0}
+
+    if not degree_links:
+        return stats
+
+    # Build lookup: normalized lemma -> lemma_id for adjectives
+    result = conn.execute(
+        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == "adjective")
+    )
+    lemma_lookup = {normalize(row.lemma): row.lemma_id for row in result}
+
+    for lemma_id, base_word, relationship in degree_links:
+        base_normalized = normalize(base_word)
+        base_lemma_id = lemma_lookup.get(base_normalized)
+
+        if base_lemma_id is None:
+            stats["base_not_found"] += 1
+            continue
+
+        conn.execute(
+            update(adjective_metadata)
+            .where(adjective_metadata.c.lemma_id == lemma_id)
+            .values(base_lemma_id=base_lemma_id, degree_relationship=relationship)
+        )
+        stats["linked"] += 1
 
     return stats
