@@ -524,7 +524,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Completed:            {stats['adjectives_completed']:,}")
                 print(f"{indent}Not in Morphit:       {stats['not_in_morphit']:,}")
                 print(f"{indent}Elided added:         {stats['elided_added']:,}")
-                print(f"{indent}Discrepancies logged: {stats['discrepancies_logged']:,}")
+                print(f"{indent}Combos skipped:       {stats['combos_skipped']:,}")
                 print()
 
             # Step 5 (adjective only): Import allomorphs from alt_of entries

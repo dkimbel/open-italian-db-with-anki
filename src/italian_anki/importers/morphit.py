@@ -313,15 +313,14 @@ def fill_missing_adjective_forms(
         - forms_added: Number of new forms inserted from Morphit
         - adjectives_completed: Adjectives that gained forms
         - not_in_morphit: Adjectives not found in Morphit
-        - discrepancies_logged: Conflicts between existing forms and Morphit
         - elided_added: Elided forms (ending with ') added
+        - combos_skipped: Forms skipped because they already exist
     """
     stats = {
         "adjectives_checked": 0,
         "forms_added": 0,
         "adjectives_completed": 0,
         "not_in_morphit": 0,
-        "discrepancies_logged": 0,
         "elided_added": 0,
         "combos_skipped": 0,
     }
@@ -365,8 +364,9 @@ def fill_missing_adjective_forms(
         )
         existing_rows = existing_result.fetchall()
 
-        existing_combos = {(row.gender, row.number) for row in existing_rows}
-        existing_by_combo = {(row.gender, row.number): row.form_stressed for row in existing_rows}
+        # Key matches DB constraint: UNIQUE (lemma_id, form_stressed, gender, number, degree)
+        # This allows multiple forms per (gender, number) as long as form_stressed differs
+        existing_combos = {(row.form_stressed, row.gender, row.number) for row in existing_rows}
 
         forms_added_for_lemma = 0
 
@@ -378,34 +378,20 @@ def fill_missing_adjective_forms(
             # Track elided forms (ending with ') - they get labels='elided'
             is_elided = entry.form.endswith("'")
 
-            combo = (entry.gender, entry.number)
+            # Key includes form to allow multiple forms per (gender, number)
+            combo = (entry.form, entry.gender, entry.number)
 
             if combo in existing_combos:
-                existing_form = existing_by_combo[combo]
+                # Exact duplicate - skip silently
                 stats["combos_skipped"] += 1
-
-                # Log when Morphit has a form we couldn't add
-                if normalize(existing_form) != normalize(entry.form):
-                    # Different form - this is a conflict worth noting
-                    logger.warning(
-                        "Skipped '%s' for '%s' (%s/%s): already has '%s'",
-                        entry.form,
-                        lemma_word,
-                        entry.gender,
-                        entry.number,
-                        existing_form,
-                    )
-                    stats["discrepancies_logged"] += 1
-                else:
-                    # Same form - just a debug note
-                    logger.debug(
-                        "Skipped duplicate '%s' for '%s' (%s/%s)",
-                        entry.form,
-                        lemma_word,
-                        entry.gender,
-                        entry.number,
-                    )
-                continue  # Don't overwrite existing forms
+                logger.debug(
+                    "Skipped duplicate '%s' for '%s' (%s/%s)",
+                    entry.form,
+                    lemma_word,
+                    entry.gender,
+                    entry.number,
+                )
+                continue
 
             # Compute definite article for this form
             gender_abbr = "m" if entry.gender == "masculine" else "f"
@@ -429,7 +415,6 @@ def fill_missing_adjective_forms(
             )
             # Mark this combo as filled to prevent duplicate insertions
             existing_combos.add(combo)
-            existing_by_combo[combo] = entry.form
             forms_added_for_lemma += 1
             stats["forms_added"] += 1
             if is_elided:

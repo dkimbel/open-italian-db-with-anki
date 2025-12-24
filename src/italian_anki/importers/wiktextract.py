@@ -187,11 +187,10 @@ HARDCODED_DEGREE_RELATIONSHIPS: dict[str, tuple[str, str]] = {
 # Hardcoded allomorph forms not captured by normal import
 # These are stored as forms under their parent lemma, not as separate lemmas
 # Format: (form, parent_lemma, gender, number, label)
+# Note: sant' is NOT hardcoded - it comes from Morphit via fill_missing_adjective_forms()
 HARDCODED_ALLOMORPH_FORMS: list[tuple[str, str, str, str, str]] = [
-    # Santo's allomorphs - san is apocopic (before consonants), sant' is elided (before vowels)
+    # san is apocopic (before consonants) - not in Morphit as adjective
     ("san", "santo", "masculine", "singular", "apocopic"),  # San Pietro, San Marco
-    ("sant'", "santo", "masculine", "singular", "elided"),  # Sant'Antonio, Sant'Andrea
-    ("sant'", "santo", "feminine", "singular", "elided"),  # Sant'Anna, Sant'Elena
 ]
 
 

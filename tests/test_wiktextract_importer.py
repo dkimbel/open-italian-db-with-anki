@@ -2060,7 +2060,10 @@ class TestImportAdjAllomorphs:
             jsonl_path.unlink()
 
     def test_hardcoded_allomorph_forms_added(self) -> None:
-        """Hardcoded allomorph forms (san, sant') should be added to santo."""
+        """Hardcoded allomorph forms (san) should be added to santo.
+
+        Note: sant' is NOT hardcoded - it comes from Morphit via fill_missing_adjective_forms().
+        """
         # Parent adjective with standard forms
         santo = {
             "pos": "adj",
@@ -2087,8 +2090,8 @@ class TestImportAdjAllomorphs:
                 import_wiktextract(conn, jsonl_path, pos_filter="adjective")
                 stats = import_adjective_allomorphs(conn, jsonl_path)
 
-            # Should have added 3 hardcoded forms: san, sant' (m.sg), sant' (f.sg)
-            assert stats["hardcoded_added"] == 3
+            # Should have added 1 hardcoded form: san (sant' comes from Morphit)
+            assert stats["hardcoded_added"] == 1
 
             with get_connection(db_path) as conn:
                 santo_lemma = conn.execute(
@@ -2109,15 +2112,6 @@ class TestImportAdjAllomorphs:
                 assert san_form.gender == "masculine"
                 assert san_form.number == "singular"
                 assert san_form.labels == "apocopic"
-
-                # Check that sant' was added for both genders
-                sant_forms = [f for f in forms if f.form == "sant'"]
-                assert len(sant_forms) == 2
-                sant_genders = {f.gender for f in sant_forms}
-                assert sant_genders == {"masculine", "feminine"}
-                for f in sant_forms:
-                    assert f.number == "singular"
-                    assert f.labels == "elided"
                 assert san_form.form_origin == "hardcoded"
 
         finally:

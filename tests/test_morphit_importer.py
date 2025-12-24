@@ -469,20 +469,20 @@ class TestMorphitAdjectiveFallback:
             jsonl_path.unlink()
             morphit_path.unlink()
 
-    def test_logs_discrepancies(self, caplog: Any) -> None:
-        """Conflicts between existing forms and Morphit forms are logged."""
+    def test_skips_exact_duplicates(self, caplog: Any) -> None:
+        """Exact duplicates (same form_stressed, gender, number) are skipped."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
-        # Adjective with a form
-        jsonl_path = _create_test_jsonl([SAMPLE_ADJECTIVE_INCOMPLETE])
-        # Morphit has DIFFERENT form for same position (hypothetical conflict)
+        # Adjective with complete forms from Wiktextract
+        jsonl_path = _create_test_jsonl([SAMPLE_ADJECTIVE_COMPLETE])
+        # Morphit has the same forms (exact duplicates)
         morphit_path = _create_test_morphit(
             [
-                "grandissimo\tgrande\tADJ:pos+m+s",  # Wrong - this would be a conflict
-                "grande\tgrande\tADJ:pos+f+s",
-                "grandi\tgrande\tADJ:pos+m+p",
-                "grandi\tgrande\tADJ:pos+f+p",
+                "bello\tbello\tADJ:pos+m+s",
+                "bella\tbello\tADJ:pos+f+s",
+                "belli\tbello\tADJ:pos+m+p",
+                "belle\tbello\tADJ:pos+f+p",
             ]
         )
 
@@ -494,13 +494,12 @@ class TestMorphitAdjectiveFallback:
                 import_wiktextract(conn, jsonl_path, pos_filter="adjective")
 
             # Run Morphit fallback with logging enabled
-            with caplog.at_level(logging.WARNING), get_connection(db_path) as conn:
+            with caplog.at_level(logging.DEBUG), get_connection(db_path) as conn:
                 stats = fill_missing_adjective_forms(conn, morphit_path)
 
-            # Should have logged a discrepancy (skipped form with different value)
-            assert stats["discrepancies_logged"] >= 1
-            assert "Skipped" in caplog.text
-            assert "already has" in caplog.text
+            # Should skip exact duplicates
+            assert stats["combos_skipped"] >= 4
+            assert "Skipped duplicate" in caplog.text
 
         finally:
             db_path.unlink()
@@ -790,15 +789,16 @@ class TestMorphitElidedFormHandling:
 
         jsonl_path = _create_test_jsonl([incomplete_adj])
 
-        # Morphit file with elided forms FIRST (so they get added for missing slots)
+        # Morphit file with both elided and regular forms
+        # With the new key (form_stressed, gender, number), BOTH get added
         morphit_path = _create_test_morphit(
             [
-                # Elided forms first (should be added with labels='elided' for missing plurals)
+                # Elided forms (all 4 get added with labels='elided')
                 "grand'\tgrande\tADJ:pos+m+s",
                 "grand'\tgrande\tADJ:pos+f+s",
                 "grand'\tgrande\tADJ:pos+m+p",
                 "grand'\tgrande\tADJ:pos+f+p",
-                # Regular forms after (singulars will be discrepancies, plurals will be skipped)
+                # Regular forms (grande singulars skipped as exact dups, grandi plurals added)
                 "grande\tgrande\tADJ:pos+m+s",
                 "grande\tgrande\tADJ:pos+f+s",
                 "grandi\tgrande\tADJ:pos+m+p",
@@ -816,24 +816,23 @@ class TestMorphitElidedFormHandling:
             with get_connection(db_path) as conn:
                 stats = fill_missing_adjective_forms(conn, morphit_path)
 
-            # Elided forms should be added
-            assert stats["elided_added"] > 0
+            # Elided forms should be added (all 4)
+            assert stats["elided_added"] == 4
 
             with get_connection(db_path) as conn:
                 forms = conn.execute(select(adjective_forms)).fetchall()
 
-                # Elided forms should be added for plural slots (processed first)
+                # All 4 grand' forms should be added (different form_stressed than grande)
                 elided_forms = [f for f in forms if f.form and f.form.endswith("'")]
-                assert len(elided_forms) == 2  # grand' m.pl and f.pl
+                assert len(elided_forms) == 4
 
                 for form in elided_forms:
                     assert form.labels == "elided"
                     assert form.form_origin == "morphit"
-                    assert form.number == "plural"  # Only plurals were missing
 
-                # Regular grandi forms should NOT be added (grand' took plural slots)
+                # Regular grandi forms SHOULD be added (different form_stressed than grand')
                 grandi_forms = [f for f in forms if f.form == "grandi"]
-                assert len(grandi_forms) == 0
+                assert len(grandi_forms) == 2  # m.pl and f.pl
 
         finally:
             db_path.unlink()
@@ -858,13 +857,14 @@ class TestMorphitElidedFormHandling:
 
         jsonl_path = _create_test_jsonl([incomplete_adj])
 
-        # Morphit with elided forms FIRST for slots we're missing
+        # Morphit with elided forms and regular forms
+        # With new key (form_stressed, gender, number), both elided AND regular get added
         morphit_path = _create_test_morphit(
             [
-                # Elided forms first (f.s will be added since it's missing)
+                # Elided forms (both m.s and f.s get added - different form_stressed than bello)
                 "bell'\tbello\tADJ:pos+m+s",
                 "bell'\tbello\tADJ:pos+f+s",
-                # Regular forms after (f.s will be skipped since bell' took it)
+                # Regular forms (bello m.s skipped as dup, bella/belli/belle added)
                 "bello\tbello\tADJ:pos+m+s",
                 "bella\tbello\tADJ:pos+f+s",
                 "belli\tbello\tADJ:pos+m+p",
@@ -884,9 +884,8 @@ class TestMorphitElidedFormHandling:
 
             # Should track elided forms that were added
             assert "elided_added" in stats
-            # Only f.s is missing, so only 1 elided form added (bell' f.s)
-            # m.s already exists from Wiktextract
-            assert stats["elided_added"] == 1
+            # Both bell' m.s and f.s get added (different form_stressed than existing bello)
+            assert stats["elided_added"] == 2
 
         finally:
             db_path.unlink()
