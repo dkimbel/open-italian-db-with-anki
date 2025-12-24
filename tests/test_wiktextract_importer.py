@@ -2058,3 +2058,68 @@ class TestImportAdjAllomorphs:
         finally:
             db_path.unlink()
             jsonl_path.unlink()
+
+    def test_hardcoded_allomorph_forms_added(self) -> None:
+        """Hardcoded allomorph forms (san, sant') should be added to santo."""
+        # Parent adjective with standard forms
+        santo = {
+            "pos": "adj",
+            "word": "santo",
+            "forms": [
+                {"form": "sànto", "tags": ["masculine", "singular"]},
+                {"form": "sànta", "tags": ["feminine", "singular"]},
+                {"form": "sànti", "tags": ["masculine", "plural"]},
+                {"form": "sànte", "tags": ["feminine", "plural"]},
+            ],
+            "senses": [{"glosses": ["holy"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([santo])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                stats = import_adjective_allomorphs(conn, jsonl_path)
+
+            # Should have added 3 hardcoded forms: san, sant' (m.sg), sant' (f.sg)
+            assert stats["hardcoded_added"] == 3
+
+            with get_connection(db_path) as conn:
+                santo_lemma = conn.execute(
+                    select(lemmas).where(lemmas.c.lemma == "santo")
+                ).fetchone()
+                assert santo_lemma is not None
+
+                forms = conn.execute(
+                    select(adjective_forms).where(
+                        adjective_forms.c.lemma_id == santo_lemma.lemma_id
+                    )
+                ).fetchall()
+
+                # Check that 'san' was added with correct attributes
+                san_forms = [f for f in forms if f.form == "san"]
+                assert len(san_forms) == 1
+                san_form = san_forms[0]
+                assert san_form.gender == "masculine"
+                assert san_form.number == "singular"
+                assert san_form.labels == "apocopic"
+
+                # Check that sant' was added for both genders
+                sant_forms = [f for f in forms if f.form == "sant'"]
+                assert len(sant_forms) == 2
+                sant_genders = {f.gender for f in sant_forms}
+                assert sant_genders == {"masculine", "feminine"}
+                for f in sant_forms:
+                    assert f.number == "singular"
+                    assert f.labels == "elided"
+                assert san_form.form_origin == "hardcoded"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()

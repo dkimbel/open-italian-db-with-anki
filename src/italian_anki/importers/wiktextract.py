@@ -184,6 +184,16 @@ HARDCODED_DEGREE_RELATIONSHIPS: dict[str, tuple[str, str]] = {
     "minimo": ("piccolo", "superlative_of"),
 }
 
+# Hardcoded allomorph forms not captured by normal import
+# These are stored as forms under their parent lemma, not as separate lemmas
+# Format: (form, parent_lemma, gender, number, label)
+HARDCODED_ALLOMORPH_FORMS: list[tuple[str, str, str, str, str]] = [
+    # Santo's allomorphs - san is apocopic (before consonants), sant' is elided (before vowels)
+    ("san", "santo", "masculine", "singular", "apocopic"),  # San Pietro, San Marco
+    ("sant'", "santo", "masculine", "singular", "elided"),  # Sant'Antonio, Sant'Andrea
+    ("sant'", "santo", "feminine", "singular", "elided"),  # Sant'Anna, Sant'Elena
+]
+
 
 def _extract_degree_relationship(entry: dict[str, Any]) -> tuple[str, str, str] | None:
     """Extract comparative/superlative relationship from Wiktextract data.
@@ -2254,6 +2264,7 @@ def import_adjective_allomorphs(
         "parent_not_found": 0,
         "duplicates_skipped": 0,
         "already_in_parent": 0,
+        "hardcoded_added": 0,
     }
 
     # Build lookup: normalized lemma -> lemma_id for adjectives
@@ -2378,5 +2389,49 @@ def import_adjective_allomorphs(
 
     if progress_callback:
         progress_callback(total_lines, total_lines)
+
+    # Import hardcoded allomorph forms (not in Wiktextract or Morphit adjective data)
+    for form, parent_lemma, gender, number, label in HARDCODED_ALLOMORPH_FORMS:
+        parent_id = adj_lookup.get(normalize(parent_lemma))
+        if parent_id is None:
+            continue
+
+        # Check if this specific form+gender+number combo already exists
+        existing = conn.execute(
+            select(
+                adjective_forms.c.form,
+                adjective_forms.c.gender,
+                adjective_forms.c.number,
+            ).where(adjective_forms.c.lemma_id == parent_id)
+        ).fetchall()
+        existing_combos = {(row.form, row.gender, row.number) for row in existing if row.form}
+
+        if (form, gender, number) in existing_combos:
+            continue
+
+        # Compute definite article
+        gender_abbr = "m" if gender == "masculine" else "f"
+        def_article, article_source = get_definite(form, gender_abbr, number)
+
+        try:
+            conn.execute(
+                adjective_forms.insert().values(
+                    lemma_id=parent_id,
+                    form=form,
+                    form_source="hardcoded",
+                    form_stressed=form,
+                    gender=gender,
+                    number=number,
+                    degree="positive",
+                    labels=label,
+                    def_article=def_article,
+                    article_source=article_source,
+                    form_origin="hardcoded",
+                )
+            )
+            stats["hardcoded_added"] += 1
+        except Exception:
+            # Duplicate (unique constraint violation) - already exists, skip silently
+            logger.debug("Hardcoded form '%s' already exists for '%s'", form, parent_lemma)
 
     return stats

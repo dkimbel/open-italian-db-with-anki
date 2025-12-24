@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Connection, Table, func, select, update
+from sqlalchemy import Connection, Table, select, update
 
 from italian_anki.articles import get_definite
 from italian_anki.db.schema import (
@@ -297,11 +297,10 @@ def fill_missing_adjective_forms(
 ) -> dict[str, int]:
     """Fill missing adjective forms using Morphit as authoritative source.
 
-    For adjectives with < 4 forms (positive degree only), looks up forms in
-    Morphit and inserts missing (gender, number) combinations.
-
-    This addresses the data gap where some adjectives (like "grande") have
-    empty forms arrays in Wiktextract and only receive an inferred base form.
+    For ALL adjectives, looks up forms in Morphit and inserts any missing
+    (gender, number) combinations. This includes:
+    - Standard forms (m/f x sg/pl) for adjectives with incomplete data
+    - Elided forms (ending with ') like grand', sant' for allomorphs
 
     Args:
         conn: SQLAlchemy connection
@@ -310,11 +309,12 @@ def fill_missing_adjective_forms(
 
     Returns:
         Statistics dict with counts:
-        - adjectives_checked: Number of incomplete adjectives found
+        - adjectives_checked: Number of adjectives processed
         - forms_added: Number of new forms inserted from Morphit
-        - adjectives_completed: Adjectives that now have 4 forms
+        - adjectives_completed: Adjectives that gained forms
         - not_in_morphit: Adjectives not found in Morphit
         - discrepancies_logged: Conflicts between existing forms and Morphit
+        - elided_added: Elided forms (ending with ') added
     """
     stats = {
         "adjectives_checked": 0,
@@ -322,47 +322,27 @@ def fill_missing_adjective_forms(
         "adjectives_completed": 0,
         "not_in_morphit": 0,
         "discrepancies_logged": 0,
-        "elided_skipped": 0,
+        "elided_added": 0,
+        "combos_skipped": 0,
     }
 
     # Build Morphit lookup: normalized_lemma -> list of MorphitEntry
     morphit_lookup = _build_adjective_lookup(morphit_path)
 
-    # Find adjectives with < 4 positive-degree forms
-    # Subquery: count forms per lemma (only positive degree)
-    form_count_subquery = (
-        select(
-            adjective_forms.c.lemma_id,
-            func.count(adjective_forms.c.id).label("form_count"),
-        )
-        .where(adjective_forms.c.degree == "positive")
-        .group_by(adjective_forms.c.lemma_id)
-        .subquery()
-    )
-
-    # Main query: get adjectives with incomplete forms
+    # Get ALL adjectives (not just incomplete ones)
+    # The existing_combos logic prevents duplicate insertions
     result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.lemma)
-        .select_from(
-            lemmas.outerjoin(
-                form_count_subquery,
-                lemmas.c.lemma_id == form_count_subquery.c.lemma_id,
-            )
-        )
-        .where(lemmas.c.pos == "adjective")
-        .where(
-            (form_count_subquery.c.form_count < 4) | (form_count_subquery.c.form_count.is_(None))
-        )
+        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == "adjective")
     )
-    incomplete_adjectives = result.fetchall()
-    stats["adjectives_checked"] = len(incomplete_adjectives)
+    all_adjectives = result.fetchall()
+    stats["adjectives_checked"] = len(all_adjectives)
 
     if progress_callback:
-        progress_callback(0, len(incomplete_adjectives))
+        progress_callback(0, len(all_adjectives))
 
-    for idx, (lemma_id, lemma_word) in enumerate(incomplete_adjectives, 1):
+    for idx, (lemma_id, lemma_word) in enumerate(all_adjectives, 1):
         if progress_callback and idx % 100 == 0:
-            progress_callback(idx, len(incomplete_adjectives))
+            progress_callback(idx, len(all_adjectives))
 
         # Look up in Morphit by normalized lemma
         normalized_lemma = normalize(lemma_word)
@@ -395,26 +375,36 @@ def fill_missing_adjective_forms(
             if entry.degree != "positive":
                 continue  # Only fill base forms, not superlatives/comparatives
 
-            # Skip elided forms (ending with ') - they are added via import_adjective_allomorphs
-            if entry.form.endswith("'"):
-                stats["elided_skipped"] += 1
-                continue
+            # Track elided forms (ending with ') - they get labels='elided'
+            is_elided = entry.form.endswith("'")
 
             combo = (entry.gender, entry.number)
 
             if combo in existing_combos:
-                # Cross-validate: check for discrepancies
                 existing_form = existing_by_combo[combo]
+                stats["combos_skipped"] += 1
+
+                # Log when Morphit has a form we couldn't add
                 if normalize(existing_form) != normalize(entry.form):
+                    # Different form - this is a conflict worth noting
                     logger.warning(
-                        "Discrepancy for '%s' %s/%s: existing='%s', morphit='%s'",
+                        "Skipped '%s' for '%s' (%s/%s): already has '%s'",
+                        entry.form,
                         lemma_word,
                         entry.gender,
                         entry.number,
                         existing_form,
-                        entry.form,
                     )
                     stats["discrepancies_logged"] += 1
+                else:
+                    # Same form - just a debug note
+                    logger.debug(
+                        "Skipped duplicate '%s' for '%s' (%s/%s)",
+                        entry.form,
+                        lemma_word,
+                        entry.gender,
+                        entry.number,
+                    )
                 continue  # Don't overwrite existing forms
 
             # Compute definite article for this form
@@ -431,22 +421,27 @@ def fill_missing_adjective_forms(
                     gender=entry.gender,
                     number=entry.number,
                     degree="positive",
+                    labels="elided" if is_elided else None,
                     def_article=def_article,
                     article_source=article_source,
                     form_origin="morphit",
                 )
             )
+            # Mark this combo as filled to prevent duplicate insertions
+            existing_combos.add(combo)
+            existing_by_combo[combo] = entry.form
             forms_added_for_lemma += 1
             stats["forms_added"] += 1
+            if is_elided:
+                stats["elided_added"] += 1
 
         # Check if now complete (4 positive-degree forms)
-        if forms_added_for_lemma > 0:
-            new_count = len(existing_combos) + forms_added_for_lemma
-            if new_count >= 4:
-                stats["adjectives_completed"] += 1
+        # existing_combos now includes forms we just added
+        if forms_added_for_lemma > 0 and len(existing_combos) >= 4:
+            stats["adjectives_completed"] += 1
 
     if progress_callback:
-        progress_callback(len(incomplete_adjectives), len(incomplete_adjectives))
+        progress_callback(len(all_adjectives), len(all_adjectives))
 
     return stats
 
