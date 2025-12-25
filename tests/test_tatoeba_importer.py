@@ -5,13 +5,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from italian_anki.db import (
     get_connection,
     get_engine,
     init_db,
-    sentence_lemmas,
     sentences,
     translations,
 )
@@ -162,16 +161,17 @@ class TestTatoebaImporter:
             eng_path.unlink()
             links_path.unlink()
 
-    def test_matches_verbs_in_sentences(self) -> None:
+    def test_fts5_search_works(self) -> None:
+        """FTS5 index should be populated and searchable."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
         jsonl_path = _create_test_jsonl([SAMPLE_VERB])
         ita_path = _create_test_sentences_tsv(
             [
-                "100\tita\tIo parlo italiano.",  # Contains "parlo"
-                "101\tita\tLui parla bene.",  # Contains "parla"
-                "102\tita\tBuongiorno!",  # No verb match
+                "100\tita\tIo parlo italiano.",
+                "101\tita\tLui parla bene.",
+                "102\tita\tBuongiorno!",
             ]
         )
         eng_path = _create_test_sentences_tsv([])
@@ -185,19 +185,23 @@ class TestTatoebaImporter:
                 import_wiktextract(conn, jsonl_path)
 
             with get_connection(db_path) as conn:
-                stats = import_tatoeba(conn, ita_path, eng_path, links_path)
+                import_tatoeba(conn, ita_path, eng_path, links_path)
 
-            # Should have matched "parlo" and "parla"
-            assert stats["sentence_lemmas"] >= 2
-
+            # Test FTS5 search
             with get_connection(db_path) as conn:
-                matches = conn.execute(select(sentence_lemmas)).fetchall()
-                assert len(matches) >= 2
+                # Search for "parlo"
+                results = conn.execute(
+                    text("SELECT text FROM sentences_fts WHERE text MATCH 'parlo'")
+                ).fetchall()
+                assert len(results) == 1
+                assert "parlo" in results[0][0].lower()
 
-                # Check the forms found
-                forms_found = {row.form_found for row in matches}
-                assert "parlo" in forms_found
-                assert "parla" in forms_found
+                # Search for "parla"
+                results = conn.execute(
+                    text("SELECT text FROM sentences_fts WHERE text MATCH 'parla'")
+                ).fetchall()
+                assert len(results) == 1
+                assert "parla" in results[0][0].lower()
 
         finally:
             db_path.unlink()
@@ -287,7 +291,6 @@ class TestTatoebaImporter:
             assert stats["ita_sentences"] == 0
             assert stats["eng_sentences"] == 0
             assert stats["translations"] == 0
-            assert stats["sentence_lemmas"] == 0
 
         finally:
             db_path.unlink()

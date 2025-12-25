@@ -15,7 +15,6 @@ from italian_anki.db import (
     init_db,
     lemmas,
     noun_forms,
-    sentence_lemmas,
     sentences,
     verb_forms,
 )
@@ -273,7 +272,6 @@ def cmd_stats(args: argparse.Namespace) -> int:
         eng_sentences = conn.execute(
             select(func.count()).select_from(sentences).where(sentences.c.lang == "eng")
         ).scalar()
-        lemma_links = conn.execute(select(func.count()).select_from(sentence_lemmas)).scalar()
 
     print(f"Database: {db_path}")
     print()
@@ -294,7 +292,6 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print("Sentences:")
     print(f"  Italian:     {ita_sentences:,}")
     print(f"  English:     {eng_sentences:,}")
-    print(f"  Lemma links: {lemma_links:,}")
 
     return 0
 
@@ -441,16 +438,13 @@ def _run_tatoeba_import(
     conn: Connection, ita_path: Path, eng_path: Path, links_path: Path, indent: str = "  "
 ) -> dict[str, Any]:
     """Run Tatoeba import and print stats."""
-    stats = import_tatoeba(
-        conn, ita_path, eng_path, links_path, progress_callback=_make_progress_callback()
-    )
+    stats = import_tatoeba(conn, ita_path, eng_path, links_path)
     print()
     if stats["cleared"] > 0:
         print(f"{indent}Cleared:          {stats['cleared']:,} existing sentences")
     print(f"{indent}Italian sentences: {stats['ita_sentences']:,}")
     print(f"{indent}English sentences: {stats['eng_sentences']:,}")
     print(f"{indent}Translations:      {stats['translations']:,}")
-    print(f"{indent}Sentence-lemma links: {stats['sentence_lemmas']:,}")
     return stats
 
 

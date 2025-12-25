@@ -175,21 +175,6 @@ translations = Table(
     Column("eng_sentence_id", Integer, primary_key=True),
 )
 
-# Sentence-to-lemma linking (for frequency + examples)
-sentence_lemmas = Table(
-    "sentence_lemmas",
-    metadata,
-    Column(
-        "sentence_id",
-        Integer,
-        ForeignKey("sentences.sentence_id"),
-        nullable=False,
-        primary_key=True,
-    ),
-    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False, primary_key=True),
-    Column("form_found", Text),  # the inflected form matched
-)
-
 # Verb-specific metadata (auxiliary and transitivity)
 verb_metadata = Table(
     "verb_metadata",
@@ -270,8 +255,6 @@ Index("idx_form_lookup_form_id", form_lookup.c.form_id)
 Index("idx_definitions_lemma", definitions.c.lemma_id)
 Index("idx_frequencies_lemma", frequencies.c.lemma_id)
 Index("idx_sentences_lang", sentences.c.lang)
-Index("idx_sentence_lemmas_lemma", sentence_lemmas.c.lemma_id)
-Index("idx_sentence_lemmas_sentence", sentence_lemmas.c.sentence_id)
 Index("idx_translations_ita", translations.c.ita_sentence_id)
 
 
@@ -281,4 +264,18 @@ def init_db(engine: Engine) -> None:
     Creates all tables and indexes if they don't exist.
     Safe to call multiple times (uses checkfirst=True by default).
     """
+    from sqlalchemy import text
+
     metadata.create_all(engine)
+
+    # Create FTS5 virtual table for sentence search (can't be done via SQLAlchemy Table)
+    # Note: We store a copy of the text in FTS5 (no content= option) for simpler management
+    with engine.connect() as conn:
+        conn.execute(
+            text("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS sentences_fts USING fts5(
+                    text
+                )
+            """)
+        )
+        conn.commit()

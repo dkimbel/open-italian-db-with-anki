@@ -1,27 +1,17 @@
-"""Import Tatoeba sentences and link to lemmas."""
+"""Import Tatoeba sentences with FTS5 search index."""
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Connection, select
+from sqlalchemy import Connection, select, text
 
-from italian_anki.db.schema import (
-    adjective_forms,
-    form_lookup,
-    noun_forms,
-    sentence_lemmas,
-    sentences,
-    translations,
-    verb_forms,
-)
-from italian_anki.normalize import normalize, tokenize
+from italian_anki.db.schema import sentences, translations
 
 
 def _clear_existing_data(conn: Connection) -> int:
     """Clear all existing Tatoeba data.
 
-    Deletes in FK-safe order: sentence_lemmas → translations → sentences.
+    Deletes in FK-safe order: sentences_fts → translations → sentences.
     Returns the number of sentences cleared.
     """
     # Count existing sentences
@@ -32,7 +22,7 @@ def _clear_existing_data(conn: Connection) -> int:
         return 0
 
     # Delete in FK-safe order
-    conn.execute(sentence_lemmas.delete())
+    conn.execute(text("DELETE FROM sentences_fts"))
     conn.execute(translations.delete())
     conn.execute(sentences.delete())
 
@@ -87,44 +77,6 @@ def _stream_links(path: Path, italian_ids: set[int]) -> tuple[set[int], list[tup
     return english_ids, pairs
 
 
-def _build_form_lookup_dict(conn: Connection) -> dict[str, list[int]]:
-    """Build a dict mapping normalized_form -> list of lemma_ids."""
-    # Build form_id -> lemma_id mappings for each POS table
-    pos_tables = {
-        "verb": verb_forms,
-        "noun": noun_forms,
-        "adjective": adjective_forms,
-    }
-
-    form_to_lemma: dict[str, dict[int, int]] = {}  # pos -> {form_id -> lemma_id}
-    for pos, table in pos_tables.items():
-        pos_result = conn.execute(select(table.c.id, table.c.lemma_id))
-        form_to_lemma[pos] = {row.id: row.lemma_id for row in pos_result}
-
-    # Get form_lookup entries
-    lookup_result = conn.execute(
-        select(form_lookup.c.form_normalized, form_lookup.c.pos, form_lookup.c.form_id)
-    )
-
-    # Build normalized -> lemma_ids dict
-    result: dict[str, list[int]] = {}
-    for row in lookup_result:
-        form_normalized = row.form_normalized
-        pos = row.pos
-        form_id = row.form_id
-
-        pos_mapping = form_to_lemma.get(pos, {})
-        lemma_id = pos_mapping.get(form_id)
-
-        if lemma_id is not None:
-            if form_normalized not in result:
-                result[form_normalized] = []
-            if lemma_id not in result[form_normalized]:
-                result[form_normalized].append(lemma_id)
-
-    return result
-
-
 def import_tatoeba(
     conn: Connection,
     ita_sentences_path: Path,
@@ -132,9 +84,8 @@ def import_tatoeba(
     links_path: Path,
     *,
     batch_size: int = 1000,
-    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
-    """Import Tatoeba sentences and link to verb lemmas.
+    """Import Tatoeba sentences and build FTS5 search index.
 
     This function is idempotent: it clears existing Tatoeba data before importing.
 
@@ -144,7 +95,6 @@ def import_tatoeba(
         eng_sentences_path: Path to English sentences TSV
         links_path: Path to Italian-English links TSV
         batch_size: Number of rows to insert per batch
-        progress_callback: Optional callback for progress reporting (current, total)
 
     Returns:
         Statistics dict with counts
@@ -157,7 +107,6 @@ def import_tatoeba(
         "ita_sentences": 0,
         "eng_sentences": 0,
         "translations": 0,
-        "sentence_lemmas": 0,
     }
 
     # Step 1: Parse Italian sentences
@@ -169,7 +118,9 @@ def import_tatoeba(
 
     # Step 3: Parse English sentences (only those we need)
     all_eng_sentences = _parse_sentences_tsv(eng_sentences_path)
-    eng_sentences = {sid: text for sid, text in all_eng_sentences.items() if sid in needed_eng_ids}
+    eng_sentences = {
+        sid: sent_text for sid, sent_text in all_eng_sentences.items() if sid in needed_eng_ids
+    }
 
     # Filter translation pairs to only include English sentences we have
     eng_ids_we_have = set(eng_sentences.keys())
@@ -177,8 +128,8 @@ def import_tatoeba(
 
     # Step 4: Insert Italian sentences
     ita_batch: list[dict[str, Any]] = []
-    for sentence_id, text in ita_sentences.items():
-        ita_batch.append({"sentence_id": sentence_id, "lang": "ita", "text": text})
+    for sentence_id, sent_text in ita_sentences.items():
+        ita_batch.append({"sentence_id": sentence_id, "lang": "ita", "text": sent_text})
         if len(ita_batch) >= batch_size:
             conn.execute(sentences.insert(), ita_batch)
             stats["ita_sentences"] += len(ita_batch)
@@ -189,8 +140,8 @@ def import_tatoeba(
 
     # Step 5: Insert English sentences
     eng_batch: list[dict[str, Any]] = []
-    for sentence_id, text in eng_sentences.items():
-        eng_batch.append({"sentence_id": sentence_id, "lang": "eng", "text": text})
+    for sentence_id, sent_text in eng_sentences.items():
+        eng_batch.append({"sentence_id": sentence_id, "lang": "eng", "text": sent_text})
         if len(eng_batch) >= batch_size:
             conn.execute(sentences.insert(), eng_batch)
             stats["eng_sentences"] += len(eng_batch)
@@ -211,43 +162,12 @@ def import_tatoeba(
         conn.execute(translations.insert().prefix_with("OR IGNORE"), trans_batch)
         stats["translations"] += len(trans_batch)
 
-    # Step 7: Match Italian sentences to verbs
-    form_lookup_dict = _build_form_lookup_dict(conn)
-
-    verb_batch: list[dict[str, Any]] = []
-    seen_pairs: set[tuple[int, int]] = set()  # (sentence_id, lemma_id)
-    total_sentences = len(ita_sentences)
-
-    for idx, (sentence_id, text) in enumerate(ita_sentences.items(), 1):
-        if progress_callback and idx % 50000 == 0:
-            progress_callback(idx, total_sentences)
-        tokens = tokenize(text)
-        for token in tokens:
-            normalized_token = normalize(token)
-            lemma_ids = form_lookup_dict.get(normalized_token, [])
-            for lemma_id in lemma_ids:
-                pair = (sentence_id, lemma_id)
-                if pair not in seen_pairs:
-                    seen_pairs.add(pair)
-                    verb_batch.append(
-                        {
-                            "sentence_id": sentence_id,
-                            "lemma_id": lemma_id,
-                            "form_found": token,
-                        }
-                    )
-
-        if len(verb_batch) >= batch_size:
-            conn.execute(sentence_lemmas.insert(), verb_batch)
-            stats["sentence_lemmas"] += len(verb_batch)
-            verb_batch = []
-
-    if verb_batch:
-        conn.execute(sentence_lemmas.insert(), verb_batch)
-        stats["sentence_lemmas"] += len(verb_batch)
-
-    # Final progress callback
-    if progress_callback:
-        progress_callback(total_sentences, total_sentences)
+    # Step 7: Populate FTS5 index for Italian sentences
+    conn.execute(
+        text("""
+            INSERT INTO sentences_fts(text)
+            SELECT text FROM sentences WHERE lang='ita'
+        """)
+    )
 
     return stats

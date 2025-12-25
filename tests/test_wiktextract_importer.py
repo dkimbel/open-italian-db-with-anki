@@ -18,7 +18,6 @@ from italian_anki.db import (
     lemmas,
     noun_forms,
     noun_metadata,
-    sentence_lemmas,
     verb_forms,
     verb_metadata,
 )
@@ -1061,7 +1060,7 @@ class TestWiktextractImporter:
             jsonl_path.unlink()
 
     def test_idempotent_after_tatoeba(self) -> None:
-        """Verify reimport works after tatoeba populates sentence_lemmas (FK constraint)."""
+        """Verify reimport works after tatoeba has populated sentences."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -1078,16 +1077,12 @@ class TestWiktextractImporter:
             with get_connection(db_path) as conn:
                 import_wiktextract(conn, jsonl_path)
 
-            # Then: import tatoeba (creates sentence_lemmas links)
+            # Then: import tatoeba (creates sentences and FTS5 index)
             with get_connection(db_path) as conn:
-                import_tatoeba(conn, ita_path, eng_path, links_path)
+                tatoeba_stats = import_tatoeba(conn, ita_path, eng_path, links_path)
+                assert tatoeba_stats["ita_sentences"] == 1
 
-            # Verify sentence_lemmas was populated
-            with get_connection(db_path) as conn:
-                sl_count = len(conn.execute(select(sentence_lemmas)).fetchall())
-                assert sl_count > 0, "Tatoeba should have created sentence_lemmas"
-
-            # Re-import wiktextract (must clear sentence_lemmas first - tests FK)
+            # Re-import wiktextract (should work fine)
             with get_connection(db_path) as conn:
                 stats = import_wiktextract(conn, jsonl_path)
 

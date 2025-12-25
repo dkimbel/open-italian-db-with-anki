@@ -78,8 +78,8 @@ class TestSchema:
                 "definitions",
                 "sentences",
                 "translations",
-                "sentence_lemmas",
                 "verb_metadata",
+                "sentences_fts",  # FTS5 virtual table
             }
             assert expected_tables.issubset(table_names)
         finally:

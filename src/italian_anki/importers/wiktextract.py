@@ -19,7 +19,6 @@ from italian_anki.db.schema import (
     lemmas,
     noun_forms,
     noun_metadata,
-    sentence_lemmas,
     verb_forms,
     verb_metadata,
 )
@@ -1082,7 +1081,7 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     """Clear all existing data for the given POS.
 
     Deletes in FK-safe order: form_lookup → POS form tables → definitions
-    → frequencies → verb_metadata → sentence_lemmas → lemmas.
+    → frequencies → verb_metadata → lemmas.
     Returns the number of lemmas cleared.
     """
     # Count existing lemmas for this POS (for return value)
@@ -1126,9 +1125,7 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
         conn.execute(
             adjective_metadata.delete().where(adjective_metadata.c.lemma_id.in_(lemma_subq))
         )
-    # 6. sentence_lemmas (references lemmas)
-    conn.execute(sentence_lemmas.delete().where(sentence_lemmas.c.lemma_id.in_(lemma_subq)))
-    # 7. lemmas (direct filter, no subquery needed)
+    # 6. lemmas (direct filter, no subquery needed)
     conn.execute(lemmas.delete().where(lemmas.c.pos == pos_filter))
 
     return count
