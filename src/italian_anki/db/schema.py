@@ -269,11 +269,12 @@ def init_db(engine: Engine) -> None:
     metadata.create_all(engine)
 
     # Create FTS5 virtual table for sentence search (can't be done via SQLAlchemy Table)
-    # Note: We store a copy of the text in FTS5 (no content= option) for simpler management
+    # sentence_id is UNINDEXED (stored but not searchable) for joining to translations
     with engine.connect() as conn:
         conn.execute(
             text("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS sentences_fts USING fts5(
+                    sentence_id UNINDEXED,
                     text
                 )
             """)

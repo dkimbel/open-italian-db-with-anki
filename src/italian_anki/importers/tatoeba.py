@@ -165,8 +165,8 @@ def import_tatoeba(
     # Step 7: Populate FTS5 index for Italian sentences
     conn.execute(
         text("""
-            INSERT INTO sentences_fts(text)
-            SELECT text FROM sentences WHERE lang='ita'
+            INSERT INTO sentences_fts(sentence_id, text)
+            SELECT sentence_id, text FROM sentences WHERE lang='ita'
         """)
     )
 

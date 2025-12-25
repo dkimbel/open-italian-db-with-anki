@@ -237,13 +237,13 @@ def cmd_stats(args: argparse.Namespace) -> int:
         # Forms with real spelling
         verb_with_spelling = (
             conn.execute(
-                select(func.count()).select_from(verb_forms).where(verb_forms.c.form.isnot(None))
+                select(func.count()).select_from(verb_forms).where(verb_forms.c.written.isnot(None))
             ).scalar()
             or 0
         )
         noun_with_spelling = (
             conn.execute(
-                select(func.count()).select_from(noun_forms).where(noun_forms.c.form.isnot(None))
+                select(func.count()).select_from(noun_forms).where(noun_forms.c.written.isnot(None))
             ).scalar()
             or 0
         )
@@ -251,7 +251,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
             conn.execute(
                 select(func.count())
                 .select_from(adjective_forms)
-                .where(adjective_forms.c.form.isnot(None))
+                .where(adjective_forms.c.written.isnot(None))
             ).scalar()
             or 0
         )
