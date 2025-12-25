@@ -114,17 +114,19 @@ class TestSchema:
                 ipa = "par\u02c8la\u02d0re"
                 conn.execute(
                     lemmas.insert().values(
-                        lemma="parlare",
-                        lemma_stressed="parlare",
+                        normalized="parlare",
+                        stressed="parlare",
                         pos="verb",
                         ipa=ipa,
                     )
                 )
 
-                row = conn.execute(select(lemmas).where(lemmas.c.lemma == "parlare")).fetchone()
+                row = conn.execute(
+                    select(lemmas).where(lemmas.c.normalized == "parlare")
+                ).fetchone()
                 assert row is not None
-                assert row.lemma == "parlare"
-                assert row.lemma_stressed == "parlare"
+                assert row.normalized == "parlare"
+                assert row.stressed == "parlare"
                 assert row.pos == "verb"
                 assert row.ipa == ipa
         finally:
@@ -141,7 +143,7 @@ class TestSchema:
             with get_connection(db_path) as conn:
                 # Insert a lemma first
                 result = conn.execute(
-                    lemmas.insert().values(lemma="parlare", lemma_stressed="parlare", pos="verb")
+                    lemmas.insert().values(normalized="parlare", stressed="parlare", pos="verb")
                 )
                 pk = result.inserted_primary_key
                 assert pk is not None
@@ -151,8 +153,8 @@ class TestSchema:
                 conn.execute(
                     verb_forms.insert().values(
                         lemma_id=lemma_id,
-                        form="parlo",
-                        form_stressed="parlo",
+                        written="parlo",
+                        stressed="parlo",
                         mood="indicative",
                         tense="present",
                         person=1,
@@ -164,8 +166,8 @@ class TestSchema:
                     select(verb_forms).where(verb_forms.c.lemma_id == lemma_id)
                 ).fetchone()
                 assert row is not None
-                assert row.form == "parlo"
-                assert row.form_stressed == "parlo"
+                assert row.written == "parlo"
+                assert row.stressed == "parlo"
                 assert row.mood == "indicative"
         finally:
             db_path.unlink()

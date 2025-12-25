@@ -1159,8 +1159,8 @@ def _build_verb_form_row(
 
     return {
         "lemma_id": lemma_id,
-        "form": None,  # Will be filled by Morph-it! importer
-        "form_stressed": form_stressed,
+        "written": None,  # Will be filled by Morph-it! importer
+        "stressed": form_stressed,
         "mood": features.mood,
         "tense": features.tense,
         "person": features.person,
@@ -1203,7 +1203,7 @@ def _build_noun_form_row(
     lemma_gender: str | None = None,
     *,
     meaning_hint: str | None = None,
-    form_source: str = "wiktionary",
+    written_source: str = "wiktionary",
     form_origin: str = "wiktextract",
 ) -> dict[str, Any] | None:
     """Build a noun_forms row dict from tags, or None if should filter.
@@ -1218,7 +1218,7 @@ def _build_noun_form_row(
         lemma_gender: Fallback gender if not in tags
         meaning_hint: Optional semantic hint for meaning-dependent plurals
             (e.g., "anatomical" vs "figurative" for braccio)
-        form_source: Source indicator - "wiktionary" for forms from wiktextract
+        written_source: Source indicator - "wiktionary" for forms from wiktextract
             forms array (default), "synthesized" for forms extracted from
             head_templates only
         form_origin: How we determined this form exists:
@@ -1260,9 +1260,9 @@ def _build_noun_form_row(
 
     return {
         "lemma_id": lemma_id,
-        "form": None,
-        "form_source": form_source,  # Always include to ensure consistent batch insert keys
-        "form_stressed": form_stressed,
+        "written": None,
+        "written_source": written_source,  # Always include to ensure consistent batch insert keys
+        "stressed": form_stressed,
         "gender": gender,
         "number": features.number,
         "labels": features.labels,
@@ -1311,8 +1311,8 @@ def _build_adjective_form_row(
 
     return {
         "lemma_id": lemma_id,
-        "form": None,
-        "form_stressed": form_stressed,
+        "written": None,
+        "stressed": form_stressed,
         "gender": features.gender,
         "number": features.number,
         "degree": features.degree,
@@ -1404,7 +1404,7 @@ def import_wiktextract(
 
             # Build lookup entries with the returned IDs
             for form_id, form_data in zip(form_ids, form_batch, strict=True):
-                form_normalized = normalize(form_data["form_stressed"])
+                form_normalized = normalize(form_data["stressed"])
                 lookup_batch.append(
                     {
                         "form_normalized": form_normalized,
@@ -1487,8 +1487,9 @@ def import_wiktextract(
             try:
                 result = conn.execute(
                     lemmas.insert().values(
-                        lemma=lemma_normalized,
-                        lemma_stressed=lemma_stressed,
+                        normalized=lemma_normalized,
+                        written=None,  # Will be filled by Morph-it! importer
+                        stressed=lemma_stressed,
                         pos=pos_filter,
                         ipa=_extract_ipa(entry),
                     )
@@ -1822,7 +1823,7 @@ def import_wiktextract(
                             ["plural"],
                             gender,
                             meaning_hint=hint if hint else None,
-                            form_source="synthesized",
+                            written_source="synthesized",
                             form_origin="inferred:head_template",
                         )
                         if row:
@@ -2024,17 +2025,17 @@ def enrich_from_form_of(
 
     # Build lemma lookup: normalized_lemma -> lemma_id
     lemma_result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == pos_filter)
+        select(lemmas.c.lemma_id, lemmas.c.normalized).where(lemmas.c.pos == pos_filter)
     )
-    lemma_lookup: dict[str, int] = {row.lemma: row.lemma_id for row in lemma_result}
+    lemma_lookup: dict[str, int] = {row.normalized: row.lemma_id for row in lemma_result}
 
     # Build form lookup: (lemma_id, normalized_form) -> list of form_ids
     form_result = conn.execute(
-        select(pos_form_table.c.id, pos_form_table.c.lemma_id, pos_form_table.c.form_stressed)
+        select(pos_form_table.c.id, pos_form_table.c.lemma_id, pos_form_table.c.stressed)
     )
     form_lookup: dict[tuple[int, str], list[int]] = {}
     for row in form_result:
-        normalized = normalize(row.form_stressed)
+        normalized = normalize(row.stressed)
         key = (row.lemma_id, normalized)
         if key not in form_lookup:
             form_lookup[key] = []
@@ -2136,20 +2137,20 @@ def enrich_form_spelling_from_form_of(
 
     # Build lemma lookup: normalized_lemma -> lemma_id
     lemma_result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == pos_filter)
+        select(lemmas.c.lemma_id, lemmas.c.normalized).where(lemmas.c.pos == pos_filter)
     )
-    lemma_lookup: dict[str, int] = {row.lemma: row.lemma_id for row in lemma_result}
+    lemma_lookup: dict[str, int] = {row.normalized: row.lemma_id for row in lemma_result}
 
     # Build form lookup: (lemma_id, normalized_form) -> list of form_ids
-    # Only include forms where form IS NULL (not already filled by Morph-it!)
+    # Only include forms where written IS NULL (not already filled by Morph-it!)
     form_result = conn.execute(
-        select(
-            pos_form_table.c.id, pos_form_table.c.lemma_id, pos_form_table.c.form_stressed
-        ).where(pos_form_table.c.form.is_(None))
+        select(pos_form_table.c.id, pos_form_table.c.lemma_id, pos_form_table.c.stressed).where(
+            pos_form_table.c.written.is_(None)
+        )
     )
     form_lookup: dict[tuple[int, str], list[int]] = {}
     for row in form_result:
-        normalized = normalize(row.form_stressed)
+        normalized = normalize(row.stressed)
         key = (row.lemma_id, normalized)
         if key not in form_lookup:
             form_lookup[key] = []
@@ -2210,12 +2211,12 @@ def enrich_form_spelling_from_form_of(
                         stats["already_filled"] += 1
                         continue
 
-                    # Update form and form_source for all matching forms
+                    # Update written and written_source for all matching forms
                     for form_id in form_ids:
                         conn.execute(
                             update(pos_form_table)
                             .where(pos_form_table.c.id == form_id)
-                            .values(form=form_word, form_source="wiktionary")
+                            .values(written=form_word, written_source="wiktionary")
                         )
                         stats["updated"] += 1
 
@@ -2251,9 +2252,9 @@ def link_comparative_superlative(
 
     # Build lookup: normalized lemma -> lemma_id for adjectives
     result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == "adjective")
+        select(lemmas.c.lemma_id, lemmas.c.normalized).where(lemmas.c.pos == "adjective")
     )
-    lemma_lookup = {normalize(row.lemma): row.lemma_id for row in result}
+    lemma_lookup = {row.normalized: row.lemma_id for row in result}
 
     for lemma_id, base_word, relationship, source in degree_links:
         base_normalized = normalize(base_word)
@@ -2317,9 +2318,9 @@ def import_adjective_allomorphs(
 
     # Build lookup: normalized lemma -> lemma_id for adjectives
     result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == "adjective")
+        select(lemmas.c.lemma_id, lemmas.c.normalized).where(lemmas.c.pos == "adjective")
     )
-    adj_lookup = {normalize(row.lemma): row.lemma_id for row in result}
+    adj_lookup = {row.normalized: row.lemma_id for row in result}
 
     # Count lines for progress
     total_lines = _count_lines(jsonl_path) if progress_callback else 0
@@ -2398,9 +2399,9 @@ def import_adjective_allomorphs(
             # Check if parent already has this form (with correct gender/number from forms array)
             # If so, skip — the parent's Wiktextract forms already have proper tagging
             existing_forms = conn.execute(
-                select(adjective_forms.c.form).where(adjective_forms.c.lemma_id == parent_id)
+                select(adjective_forms.c.written).where(adjective_forms.c.lemma_id == parent_id)
             ).fetchall()
-            existing_form_texts = {row.form for row in existing_forms if row.form}
+            existing_form_texts = {row.written for row in existing_forms if row.written}
 
             if allomorph_word in existing_form_texts:
                 stats["already_in_parent"] += 1
@@ -2416,9 +2417,9 @@ def import_adjective_allomorphs(
                         conn.execute(
                             adjective_forms.insert().values(
                                 lemma_id=parent_id,
-                                form=allomorph_word,
-                                form_source="wiktionary",
-                                form_stressed=allomorph_word,
+                                written=allomorph_word,
+                                written_source="wiktionary",
+                                stressed=allomorph_word,
                                 gender=gender,
                                 number=number,
                                 degree="positive",
@@ -2447,12 +2448,12 @@ def import_adjective_allomorphs(
         # Check if this specific form+gender+number combo already exists
         existing = conn.execute(
             select(
-                adjective_forms.c.form,
+                adjective_forms.c.written,
                 adjective_forms.c.gender,
                 adjective_forms.c.number,
             ).where(adjective_forms.c.lemma_id == parent_id)
         ).fetchall()
-        existing_combos = {(row.form, row.gender, row.number) for row in existing if row.form}
+        existing_combos = {(row.written, row.gender, row.number) for row in existing if row.written}
 
         if (form, gender, number) in existing_combos:
             continue
@@ -2465,9 +2466,9 @@ def import_adjective_allomorphs(
             conn.execute(
                 adjective_forms.insert().values(
                     lemma_id=parent_id,
-                    form=form,
-                    form_source="hardcoded",
-                    form_stressed=form,
+                    written=form,
+                    written_source="hardcoded",
+                    stressed=form,
                     gender=gender,
                     number=number,
                     degree="positive",

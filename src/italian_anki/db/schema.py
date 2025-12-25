@@ -22,10 +22,9 @@ lemmas = Table(
     "lemmas",
     metadata,
     Column("lemma_id", Integer, primary_key=True, autoincrement=True),
-    Column(
-        "lemma", Text, nullable=False
-    ),  # normalized (lowercase, no accents) - not unique for nouns
-    Column("lemma_stressed", Text, nullable=False),  # with stress mark (e.g., "parlàre")
+    Column("normalized", Text, nullable=False),  # accent-stripped for lookup (e.g., "citta")
+    Column("written", Text),  # actual written form from Morphit (e.g., "città"), NULL if unknown
+    Column("stressed", Text, nullable=False),  # with stress marks (e.g., "città", "parlàre")
     Column("pos", String(20), default="verb"),
     Column("ipa", Text),  # IPA pronunciation from Wiktextract
 )
@@ -47,9 +46,9 @@ verb_forms = Table(
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
-    Column("form", Text),  # real Italian spelling from Morph-it! (NULL if not found)
-    Column("form_source", Text),  # "morphit" or "wiktionary", NULL if not found
-    Column("form_stressed", Text, nullable=False),  # with stress marks
+    Column("written", Text),  # actual written form from Morphit (e.g., "parlò"), NULL if unknown
+    Column("written_source", Text),  # "morphit", NULL if not found
+    Column("stressed", Text, nullable=False),  # with stress marks (e.g., "parlò", "pàrlo")
     # Grammatical features
     Column(
         "mood", Text, nullable=False
@@ -73,9 +72,9 @@ noun_forms = Table(
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
-    Column("form", Text),  # real Italian spelling
-    Column("form_source", Text),  # "morphit" or "wiktionary", NULL if not found
-    Column("form_stressed", Text, nullable=False),  # with stress marks
+    Column("written", Text),  # actual written form from Morphit (e.g., "città"), NULL if unknown
+    Column("written_source", Text),  # "morphit", NULL if not found
+    Column("stressed", Text, nullable=False),  # with stress marks (e.g., "città", "càsa")
     Column(
         "gender", Text, nullable=False
     ),  # 'masculine' or 'feminine' (per-form, for nouns like paio/paia)
@@ -95,7 +94,7 @@ noun_forms = Table(
 #
 # Note on adjective_forms storage:
 # ================================
-# We store one row per (lemma_id, form_stressed, gender, number, degree) combination.
+# We store one row per (lemma_id, stressed, gender, number, degree) combination.
 # Even when form text is identical across genders (invariable adjectives like "blu"),
 # we store 4 separate rows because:
 #
@@ -117,9 +116,9 @@ adjective_forms = Table(
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
-    Column("form", Text),  # real Italian spelling
-    Column("form_source", Text),  # "morphit" or "wiktionary", NULL if not found
-    Column("form_stressed", Text, nullable=False),  # with stress marks
+    Column("written", Text),  # actual written form from Morphit (e.g., "bella"), NULL if unknown
+    Column("written_source", Text),  # "morphit", NULL if not found
+    Column("stressed", Text, nullable=False),  # with stress marks (e.g., "bèlla")
     Column("gender", Text, nullable=False),  # masculine, feminine
     Column("number", Text, nullable=False),  # singular, plural
     Column("degree", Text, default="positive"),  # positive, comparative, superlative
@@ -131,7 +130,7 @@ adjective_forms = Table(
     Column("form_origin", Text),
     # Unique constraint: allows allomorphs (bel/bello/bell') but prevents true duplicates
     UniqueConstraint(
-        "lemma_id", "form_stressed", "gender", "number", "degree", name="uq_adjective_forms_entry"
+        "lemma_id", "stressed", "gender", "number", "degree", name="uq_adjective_forms_entry"
     ),
 )
 
@@ -242,7 +241,7 @@ adjective_metadata = Table(
 )
 
 # Indexes (defined separately for clarity)
-Index("idx_lemmas_lemma_pos", lemmas.c.lemma, lemmas.c.pos)  # For lookups by word+POS
+Index("idx_lemmas_normalized_pos", lemmas.c.normalized, lemmas.c.pos)  # For lookups by word+POS
 Index("idx_verb_metadata_auxiliary", verb_metadata.c.auxiliary)
 # noun_metadata indexes
 Index("idx_noun_metadata_gender_class", noun_metadata.c.gender_class)
@@ -252,15 +251,15 @@ Index("idx_noun_metadata_base", noun_metadata.c.base_lemma_id)
 Index("idx_verb_forms_lemma", verb_forms.c.lemma_id)
 Index("idx_verb_forms_mood_tense", verb_forms.c.mood, verb_forms.c.tense)
 Index("idx_verb_forms_labels", verb_forms.c.labels)
-Index("idx_verb_forms_form", verb_forms.c.form)
+Index("idx_verb_forms_written", verb_forms.c.written)
 # noun_forms indexes
 Index("idx_noun_forms_lemma", noun_forms.c.lemma_id)
-Index("idx_noun_forms_form", noun_forms.c.form)
+Index("idx_noun_forms_written", noun_forms.c.written)
 Index("idx_noun_forms_gender", noun_forms.c.gender)
 Index("idx_noun_forms_meaning_hint", noun_forms.c.meaning_hint)
 # adjective_forms indexes
 Index("idx_adjective_forms_lemma", adjective_forms.c.lemma_id)
-Index("idx_adjective_forms_form", adjective_forms.c.form)
+Index("idx_adjective_forms_written", adjective_forms.c.written)
 Index("idx_adjective_forms_origin", adjective_forms.c.form_origin)
 # adjective_metadata indexes
 Index("idx_adjective_metadata_base", adjective_metadata.c.base_lemma_id)

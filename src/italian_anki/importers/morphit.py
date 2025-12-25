@@ -119,25 +119,38 @@ def _matches_pos(tags: str, pos_filter: str) -> bool:
     return tags.startswith(prefix)
 
 
-def _build_form_lookup(morphit_path: Path, pos_filter: str = "verb") -> dict[str, str]:
-    """Build a lookup dict: normalized_form -> real_form for the given POS.
+def _build_form_lookup(
+    morphit_path: Path, pos_filter: str = "verb"
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Build lookup dicts for Morphit forms.
 
-    When multiple entries exist for the same normalized form,
+    Returns two lookups:
+    1. exact_lookup: form (with accents) -> form (exact match)
+    2. normalized_lookup: normalized_form -> real_form (fallback)
+
+    The exact lookup is used first to preserve written accents (e.g., "parlò").
+    The normalized lookup is used as fallback for pronunciation-only stress marks
+    (e.g., "pàrlo" -> "parlo").
+
+    When multiple entries exist for the same normalized form in the fallback,
     the first occurrence is kept.
     """
-    lookup: dict[str, str] = {}
+    exact_lookup: dict[str, str] = {}
+    normalized_lookup: dict[str, str] = {}
 
     for form, _lemma, tags in _parse_morphit(morphit_path):
         if not _matches_pos(tags, pos_filter):
             continue
 
+        # Store exact form (with accents intact)
+        exact_lookup[form] = form
+
+        # Also store normalized for fallback
         normalized = normalize(form)
+        if normalized not in normalized_lookup:
+            normalized_lookup[normalized] = form
 
-        # Keep first occurrence (most entries share the same spelling)
-        if normalized not in lookup:
-            lookup[normalized] = form
-
-    return lookup
+    return exact_lookup, normalized_lookup
 
 
 def _build_adjective_lookup(morphit_path: Path) -> dict[str, list[MorphitEntry]]:
@@ -189,7 +202,7 @@ def import_morphit(
 
     This enrichment phase:
     1. Parses Morph-it! to build normalized_form -> real_form lookup
-    2. Updates form (currently NULL) with real spelling in verb_forms/noun_forms/adjective_forms
+    2. Updates written (currently NULL) with real spelling in verb_forms/noun_forms/adjective_forms
     3. Adds new entries to form_lookup for Morph-it! normalized forms
 
     Args:
@@ -202,7 +215,7 @@ def import_morphit(
     Returns:
         Statistics dict with counts
     """
-    stats = {"updated": 0, "not_found": 0, "lookup_added": 0}
+    stats = {"updated": 0, "not_found": 0, "lookup_added": 0, "exact_matched": 0}
 
     # Get POS-specific form table
     pos_form_table = POS_FORM_TABLES.get(pos_filter)
@@ -210,14 +223,16 @@ def import_morphit(
         msg = f"Unsupported POS: {pos_filter}"
         raise ValueError(msg)
 
-    # Build the lookup dictionary for the specified POS
-    morphit_lookup = _build_form_lookup(morphit_path, pos_filter)
+    # Build the lookup dictionaries for the specified POS
+    # exact_lookup: preserves accents (e.g., "parlò" -> "parlò")
+    # normalized_lookup: fallback for pronunciation-only marks (e.g., "parlo" -> "parlo")
+    exact_lookup, normalized_lookup = _build_form_lookup(morphit_path, pos_filter)
 
     # Get all forms that don't have real spelling yet from POS-specific table
     result = conn.execute(
-        select(pos_form_table.c.id, pos_form_table.c.form_stressed)
+        select(pos_form_table.c.id, pos_form_table.c.stressed)
         .select_from(pos_form_table.join(lemmas, pos_form_table.c.lemma_id == lemmas.c.lemma_id))
-        .where(pos_form_table.c.form.is_(None))
+        .where(pos_form_table.c.written.is_(None))
     )
     all_forms = result.fetchall()
     total_forms = len(all_forms)
@@ -230,12 +245,12 @@ def import_morphit(
         nonlocal update_batch, lookup_batch
 
         if update_batch:
-            # Update form column in POS-specific table
+            # Update written column in POS-specific table
             for item in update_batch:
                 conn.execute(
                     update(pos_form_table)
                     .where(pos_form_table.c.id == item["id"])
-                    .values(form=item["form"], form_source=item["form_source"])
+                    .values(written=item["written"], written_source=item["written_source"])
                 )
             stats["updated"] += len(update_batch)
             update_batch = []
@@ -253,18 +268,24 @@ def import_morphit(
             progress_callback(idx, total_forms)
 
         form_id = row.id
-        form_stressed = row.form_stressed
+        stressed_form = row.stressed
 
-        # Normalize the stressed form to look up in Morph-it!
-        normalized = normalize(form_stressed)
-        real_form = morphit_lookup.get(normalized)
+        # Try exact match first (preserves written accents like "parlò")
+        real_form = exact_lookup.get(stressed_form)
+        if real_form:
+            stats["exact_matched"] += 1
+        else:
+            # Fall back to normalized lookup (for pronunciation-only marks like "pàrlo")
+            normalized = normalize(stressed_form)
+            real_form = normalized_lookup.get(normalized)
 
         if real_form:
-            update_batch.append({"id": form_id, "form": real_form, "form_source": "morphit"})
+            update_batch.append({"id": form_id, "written": real_form, "written_source": "morphit"})
 
             # Also add the Morph-it! normalized form to lookup
             # (in case it differs from Wiktextract normalization)
             morphit_normalized = normalize(real_form)
+            normalized = normalize(stressed_form)
             if morphit_normalized != normalized:
                 lookup_batch.append(
                     {
@@ -331,7 +352,7 @@ def fill_missing_adjective_forms(
     # Get ALL adjectives (not just incomplete ones)
     # The existing_combos logic prevents duplicate insertions
     result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == "adjective")
+        select(lemmas.c.lemma_id, lemmas.c.normalized).where(lemmas.c.pos == "adjective")
     )
     all_adjectives = result.fetchall()
     stats["adjectives_checked"] = len(all_adjectives)
@@ -339,23 +360,22 @@ def fill_missing_adjective_forms(
     if progress_callback:
         progress_callback(0, len(all_adjectives))
 
-    for idx, (lemma_id, lemma_word) in enumerate(all_adjectives, 1):
+    for idx, (lemma_id, lemma_normalized) in enumerate(all_adjectives, 1):
         if progress_callback and idx % 100 == 0:
             progress_callback(idx, len(all_adjectives))
 
         # Look up in Morphit by normalized lemma
-        normalized_lemma = normalize(lemma_word)
-        morphit_forms = morphit_lookup.get(normalized_lemma, [])
+        morphit_forms = morphit_lookup.get(lemma_normalized, [])
 
         if not morphit_forms:
             stats["not_in_morphit"] += 1
-            logger.debug("Adjective '%s' not found in Morphit", lemma_word)
+            logger.debug("Adjective '%s' not found in Morphit", lemma_normalized)
             continue
 
         # Get existing forms for this lemma (positive degree only)
         existing_result = conn.execute(
             select(
-                adjective_forms.c.form_stressed,
+                adjective_forms.c.stressed,
                 adjective_forms.c.gender,
                 adjective_forms.c.number,
             )
@@ -364,9 +384,9 @@ def fill_missing_adjective_forms(
         )
         existing_rows = existing_result.fetchall()
 
-        # Key matches DB constraint: UNIQUE (lemma_id, form_stressed, gender, number, degree)
-        # This allows multiple forms per (gender, number) as long as form_stressed differs
-        existing_combos = {(row.form_stressed, row.gender, row.number) for row in existing_rows}
+        # Key matches DB constraint: UNIQUE (lemma_id, stressed, gender, number, degree)
+        # This allows multiple forms per (gender, number) as long as stressed differs
+        existing_combos = {(row.stressed, row.gender, row.number) for row in existing_rows}
 
         forms_added_for_lemma = 0
 
@@ -387,7 +407,7 @@ def fill_missing_adjective_forms(
                 logger.debug(
                     "Skipped duplicate '%s' for '%s' (%s/%s)",
                     entry.form,
-                    lemma_word,
+                    lemma_normalized,
                     entry.gender,
                     entry.number,
                 )
@@ -401,9 +421,9 @@ def fill_missing_adjective_forms(
             conn.execute(
                 adjective_forms.insert().values(
                     lemma_id=lemma_id,
-                    form=entry.form,  # Morphit provides real spelling directly
-                    form_source="morphit",
-                    form_stressed=entry.form,  # Morphit doesn't have stress; use form
+                    written=entry.form,  # Morphit provides real spelling directly
+                    written_source="morphit",
+                    stressed=entry.form,  # Morphit doesn't have stress; use form
                     gender=entry.gender,
                     number=entry.number,
                     degree="positive",
@@ -444,16 +464,16 @@ def apply_unstressed_fallback(
     conn: Connection,
     pos_filter: str = "adjective",
 ) -> dict[str, int]:
-    """Copy form_stressed to form where form is NULL and form_stressed has no accents.
+    """Copy stressed to written where written is NULL and stressed has no accents.
 
     When Morphit lookup fails for a form, and that form has no accent marks,
-    we can safely assume form_stressed IS the correct form spelling.
+    we can safely assume stressed IS the correct written spelling.
 
     This handles cases like:
-    - form_stressed="belli" (no accents) -> form="belli"
-    - form_stressed="bèlla" (has accent) -> form stays NULL
+    - stressed="belli" (no accents) -> written="belli"
+    - stressed="bèlla" (has accent) -> written stays NULL
 
-    Sets form_source='fallback:no_accent' to track provenance.
+    Sets written_source='fallback:no_accent' to track provenance.
 
     Args:
         conn: SQLAlchemy connection
@@ -468,21 +488,110 @@ def apply_unstressed_fallback(
     if pos_form_table is None:
         return stats
 
-    # Find forms with NULL form and check if form_stressed has accents
+    # Find forms with NULL written and check if stressed has accents
     result = conn.execute(
-        select(pos_form_table.c.id, pos_form_table.c.form_stressed).where(
-            pos_form_table.c.form.is_(None)
+        select(pos_form_table.c.id, pos_form_table.c.stressed).where(
+            pos_form_table.c.written.is_(None)
         )
     )
 
     for row in result:
-        form_stressed = row.form_stressed
-        if not _has_accents(form_stressed):
+        stressed_form = row.stressed
+        if not _has_accents(stressed_form):
             conn.execute(
                 update(pos_form_table)
                 .where(pos_form_table.c.id == row.id)
-                .values(form=form_stressed, form_source="fallback:no_accent")
+                .values(written=stressed_form, written_source="fallback:no_accent")
             )
             stats["updated"] += 1
+
+    return stats
+
+
+def _build_lemma_lookup(morphit_path: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """Build lookup dicts for Morphit lemmas.
+
+    Returns two lookups:
+    1. exact_lookup: lemma (with accents) -> lemma (exact match)
+    2. normalized_lookup: normalized_lemma -> real_lemma (fallback)
+
+    Similar to _build_form_lookup but for lemmas.
+    """
+    exact_lookup: dict[str, str] = {}
+    normalized_lookup: dict[str, str] = {}
+
+    for _form, lemma, _tags in _parse_morphit(morphit_path):
+        # Store exact lemma (with accents intact)
+        exact_lookup[lemma] = lemma
+
+        # Also store normalized for fallback
+        normalized = normalize(lemma)
+        if normalized not in normalized_lookup:
+            normalized_lookup[normalized] = lemma
+
+    return exact_lookup, normalized_lookup
+
+
+def enrich_lemma_written(
+    conn: Connection,
+    morphit_path: Path,
+    *,
+    pos_filter: str = "verb",
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
+    """Update lemmas.written with real Italian spelling from Morph-it!.
+
+    Uses exact matching first (to preserve written accents like "città"),
+    then falls back to normalized matching (for pronunciation-only marks).
+
+    Args:
+        conn: SQLAlchemy connection
+        morphit_path: Path to morph-it.txt file
+        pos_filter: Part of speech to enrich (default: "verb")
+        progress_callback: Optional callback for progress reporting (current, total)
+
+    Returns:
+        Statistics dict with counts
+    """
+    stats = {"updated": 0, "not_found": 0, "exact_matched": 0}
+
+    # Build the lookup dictionaries for lemmas
+    exact_lookup, normalized_lookup = _build_lemma_lookup(morphit_path)
+
+    # Get all lemmas that don't have written form yet
+    result = conn.execute(
+        select(lemmas.c.lemma_id, lemmas.c.stressed)
+        .where(lemmas.c.pos == pos_filter)
+        .where(lemmas.c.written.is_(None))
+    )
+    all_lemmas = result.fetchall()
+    total_lemmas = len(all_lemmas)
+
+    for idx, row in enumerate(all_lemmas, 1):
+        if progress_callback and idx % 5000 == 0:
+            progress_callback(idx, total_lemmas)
+
+        lemma_id = row.lemma_id
+        stressed_lemma = row.stressed
+
+        # Try exact match first (preserves written accents like "città")
+        real_lemma = exact_lookup.get(stressed_lemma)
+        if real_lemma:
+            stats["exact_matched"] += 1
+        else:
+            # Fall back to normalized lookup
+            normalized = normalize(stressed_lemma)
+            real_lemma = normalized_lookup.get(normalized)
+
+        if real_lemma:
+            conn.execute(
+                update(lemmas).where(lemmas.c.lemma_id == lemma_id).values(written=real_lemma)
+            )
+            stats["updated"] += 1
+        else:
+            stats["not_found"] += 1
+
+    if progress_callback:
+        progress_callback(total_lemmas, total_lemmas)
 
     return stats

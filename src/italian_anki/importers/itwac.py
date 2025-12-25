@@ -104,7 +104,7 @@ def import_itwac(
 
     # Get lemmas from database for the specified POS
     result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.lemma).where(lemmas.c.pos == pos_filter)
+        select(lemmas.c.lemma_id, lemmas.c.normalized).where(lemmas.c.pos == pos_filter)
     )
     all_lemmas = result.fetchall()
     total_lemmas = len(all_lemmas)
@@ -115,7 +115,7 @@ def import_itwac(
         if progress_callback and idx % 5000 == 0:
             progress_callback(idx, total_lemmas)
         lemma_id = row.lemma_id
-        normalized = row.lemma  # Already normalized in DB
+        normalized = row.normalized  # Already normalized in DB
 
         if normalized in freq_data:
             total_freq, zipf = freq_data[normalized]

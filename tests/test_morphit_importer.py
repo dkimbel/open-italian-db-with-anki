@@ -35,7 +35,7 @@ SAMPLE_VERB = {
         {"form": "pàrli", "tags": ["second-person", "indicative", "present", "singular"]},
         {"form": "pàrla", "tags": ["third-person", "indicative", "present", "singular"]},
         {
-            "form": "parliàmo",
+            "written": "parliàmo",
             "tags": ["first-person", "indicative", "present", "plural"],
         },
     ],
@@ -98,7 +98,7 @@ class TestMorphitImporter:
             # Check that forms now have real spelling
             with get_connection(db_path) as conn:
                 form_rows = conn.execute(
-                    select(verb_forms).where(verb_forms.c.form.isnot(None))
+                    select(verb_forms).where(verb_forms.c.written.isnot(None))
                 ).fetchall()
 
                 assert len(form_rows) > 0, "Should have forms with real spelling"
@@ -106,10 +106,10 @@ class TestMorphitImporter:
                 # Check specific forms
                 for row in form_rows:
                     # Real form should not have stress marks
-                    assert "à" not in row.form
-                    assert "ò" not in row.form
+                    assert "à" not in row.written
+                    assert "ò" not in row.written
                     # Stressed form should have marks
-                    assert row.form_stressed is not None
+                    assert row.stressed is not None
 
         finally:
             db_path.unlink()
@@ -145,7 +145,7 @@ class TestMorphitImporter:
             # Check that some forms still have NULL form
             with get_connection(db_path) as conn:
                 null_forms = conn.execute(
-                    select(verb_forms).where(verb_forms.c.form.is_(None))
+                    select(verb_forms).where(verb_forms.c.written.is_(None))
                 ).fetchall()
                 assert len(null_forms) > 0
 
@@ -282,8 +282,8 @@ class TestMorphitImporter:
             jsonl_path.unlink()
             morphit_path.unlink()
 
-    def test_sets_form_source_to_morphit(self) -> None:
-        """Verify that form_source is set to 'morphit' when updating forms."""
+    def test_sets_written_source_to_morphit(self) -> None:
+        """Verify that written_source is set to 'morphit' when updating forms."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -305,18 +305,18 @@ class TestMorphitImporter:
             with get_connection(db_path) as conn:
                 import_morphit(conn, morphit_path)
 
-            # Check that form_source is set to "morphit"
+            # Check that written_source is set to "morphit"
             with get_connection(db_path) as conn:
                 form_rows = conn.execute(
-                    select(verb_forms).where(verb_forms.c.form.isnot(None))
+                    select(verb_forms).where(verb_forms.c.written.isnot(None))
                 ).fetchall()
 
                 assert len(form_rows) > 0, "Should have forms with real spelling"
 
                 for row in form_rows:
                     assert (
-                        row.form_source == "morphit"
-                    ), f"Expected form_source='morphit', got '{row.form_source}'"
+                        row.written_source == "morphit"
+                    ), f"Expected written_source='morphit', got '{row.written_source}'"
 
         finally:
             db_path.unlink()
@@ -470,7 +470,7 @@ class TestMorphitAdjectiveFallback:
             morphit_path.unlink()
 
     def test_skips_exact_duplicates(self, caplog: Any) -> None:
-        """Exact duplicates (same form_stressed, gender, number) are skipped."""
+        """Exact duplicates (same stressed, gender, number) are skipped."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -613,7 +613,7 @@ class TestMorphitAdjectiveFallback:
                 if stats["forms_added"] > 0:
                     assert len(morphit_forms) > 0
                     for form in morphit_forms:
-                        assert form.form_source == "morphit"
+                        assert form.written_source == "morphit"
 
         finally:
             db_path.unlink()
@@ -625,7 +625,7 @@ class TestUnstressedFallback:
     """Tests for apply_unstressed_fallback function."""
 
     def test_copies_unaccented_form(self) -> None:
-        """form_stressed without accents is copied to form."""
+        """stressed without accents is copied to form."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -648,7 +648,7 @@ class TestUnstressedFallback:
             # Count NULL forms before fallback
             with get_connection(db_path) as conn:
                 null_before = conn.execute(
-                    select(adjective_forms).where(adjective_forms.c.form.is_(None))
+                    select(adjective_forms).where(adjective_forms.c.written.is_(None))
                 ).fetchall()
 
             # Apply unstressed fallback
@@ -658,10 +658,10 @@ class TestUnstressedFallback:
             # Check forms were updated
             with get_connection(db_path) as conn:
                 # Forms without accents (bello, bella, belli, belle)
-                # should now have form = form_stressed
+                # should now have form = stressed
                 form_rows = conn.execute(
                     select(adjective_forms).where(
-                        adjective_forms.c.form_source == "fallback:no_accent"
+                        adjective_forms.c.written_source == "fallback:no_accent"
                     )
                 ).fetchall()
 
@@ -671,8 +671,8 @@ class TestUnstressedFallback:
                     assert len(form_rows) > 0
 
                     for row in form_rows:
-                        # form should equal form_stressed
-                        assert row.form == row.form_stressed
+                        # form should equal stressed
+                        assert row.written == row.stressed
 
         finally:
             db_path.unlink()
@@ -680,7 +680,7 @@ class TestUnstressedFallback:
             morphit_path.unlink()
 
     def test_skips_accented_form(self) -> None:
-        """form_stressed with accents stays NULL in form column."""
+        """stressed with accents stays NULL in form column."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -714,14 +714,14 @@ class TestUnstressedFallback:
             # Check that accented forms still have NULL form
             with get_connection(db_path) as conn:
                 form_rows = conn.execute(
-                    select(adjective_forms).where(adjective_forms.c.form_stressed.contains("è"))
+                    select(adjective_forms).where(adjective_forms.c.stressed.contains("è"))
                 ).fetchall()
 
                 for row in form_rows:
                     # Accented forms should NOT have been updated
-                    # (fallback should skip forms with accents in form_stressed)
+                    # (fallback should skip forms with accents in stressed)
                     assert (
-                        row.form_source != "fallback:no_accent"
+                        row.written_source != "fallback:no_accent"
                     ), "Accented form should not get fallback"
 
         finally:
@@ -729,8 +729,8 @@ class TestUnstressedFallback:
             jsonl_path.unlink()
             morphit_path.unlink()
 
-    def test_sets_form_source_correctly(self) -> None:
-        """Verify form_source is set to 'fallback:no_accent'."""
+    def test_sets_written_source_correctly(self) -> None:
+        """Verify written_source is set to 'fallback:no_accent'."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -754,7 +754,7 @@ class TestUnstressedFallback:
                 with get_connection(db_path) as conn:
                     fallback_forms = conn.execute(
                         select(adjective_forms).where(
-                            adjective_forms.c.form_source == "fallback:no_accent"
+                            adjective_forms.c.written_source == "fallback:no_accent"
                         )
                     ).fetchall()
 
@@ -790,7 +790,7 @@ class TestMorphitElidedFormHandling:
         jsonl_path = _create_test_jsonl([incomplete_adj])
 
         # Morphit file with both elided and regular forms
-        # With the new key (form_stressed, gender, number), BOTH get added
+        # With the new key (stressed, gender, number), BOTH get added
         morphit_path = _create_test_morphit(
             [
                 # Elided forms (all 4 get added with labels='elided')
@@ -822,16 +822,16 @@ class TestMorphitElidedFormHandling:
             with get_connection(db_path) as conn:
                 forms = conn.execute(select(adjective_forms)).fetchall()
 
-                # All 4 grand' forms should be added (different form_stressed than grande)
-                elided_forms = [f for f in forms if f.form and f.form.endswith("'")]
+                # All 4 grand' forms should be added (different stressed than grande)
+                elided_forms = [f for f in forms if f.written and f.written.endswith("'")]
                 assert len(elided_forms) == 4
 
                 for form in elided_forms:
                     assert form.labels == "elided"
                     assert form.form_origin == "morphit"
 
-                # Regular grandi forms SHOULD be added (different form_stressed than grand')
-                grandi_forms = [f for f in forms if f.form == "grandi"]
+                # Regular grandi forms SHOULD be added (different stressed than grand')
+                grandi_forms = [f for f in forms if f.written == "grandi"]
                 assert len(grandi_forms) == 2  # m.pl and f.pl
 
         finally:
@@ -858,10 +858,10 @@ class TestMorphitElidedFormHandling:
         jsonl_path = _create_test_jsonl([incomplete_adj])
 
         # Morphit with elided forms and regular forms
-        # With new key (form_stressed, gender, number), both elided AND regular get added
+        # With new key (stressed, gender, number), both elided AND regular get added
         morphit_path = _create_test_morphit(
             [
-                # Elided forms (both m.s and f.s get added - different form_stressed than bello)
+                # Elided forms (both m.s and f.s get added - different stressed than bello)
                 "bell'\tbello\tADJ:pos+m+s",
                 "bell'\tbello\tADJ:pos+f+s",
                 # Regular forms (bello m.s skipped as dup, bella/belli/belle added)
@@ -884,7 +884,7 @@ class TestMorphitElidedFormHandling:
 
             # Should track elided forms that were added
             assert "elided_added" in stats
-            # Both bell' m.s and f.s get added (different form_stressed than existing bello)
+            # Both bell' m.s and f.s get added (different stressed than existing bello)
             assert stats["elided_added"] == 2
 
         finally:
