@@ -1869,6 +1869,35 @@ def import_wiktextract(
                     if row:
                         form_batch.append(row)
 
+                # For invariable nouns: also add plural form with same text
+                # (Similar to how invariable adjectives get all 4 gender/number forms)
+                is_invariable = number_class == "invariable"
+                if is_invariable:
+                    if is_common_gender:
+                        # Add plural for both genders
+                        for gender in ("m", "f"):
+                            if ("plural", gender) not in seen_noun_forms:
+                                row = _build_noun_form_row(
+                                    lemma_id,
+                                    lemma_stressed,
+                                    ["plural"],
+                                    gender,
+                                    form_origin="inferred:invariable",
+                                )
+                                if row:
+                                    form_batch.append(row)
+                    elif lemma_gender and ("plural", lemma_gender) not in seen_noun_forms:
+                        # Add plural for single gender
+                        row = _build_noun_form_row(
+                            lemma_id,
+                            lemma_stressed,
+                            ["plural"],
+                            lemma_gender,
+                            form_origin="inferred:invariable",
+                        )
+                        if row:
+                            form_batch.append(row)
+
             # Queue definitions with form_meaning_hint for soft key linkage
             if pos_filter == "noun" and word in DEFINITION_FORM_LINKAGE:
                 # This lemma has meaning-dependent plurals - link definitions to forms

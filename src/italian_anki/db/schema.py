@@ -87,7 +87,8 @@ noun_forms = Table(
     Column("def_article", Text),  # 'il', 'lo', 'la', "l'", 'i', 'gli', 'le'
     Column("article_source", Text),  # 'inferred' or 'exception:<reason>'
     # Form origin tracking - how we determined this form exists
-    Column("form_origin", Text),  # 'wiktextract', 'inferred:singular', etc.
+    # Values: 'wiktextract', 'inferred:base_form', 'inferred:head_template', 'inferred:invariable'
+    Column("form_origin", Text),
 )
 
 # Adjective forms with grammatical features
