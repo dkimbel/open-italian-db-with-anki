@@ -67,13 +67,45 @@ ACCENTED_CHARS = frozenset("àèéìòóùÀÈÉÌÒÓÙ")
 
 
 def _is_invariable_adjective(entry: dict[str, Any]) -> bool:
-    """Check if adjective is marked invariable via inv:1 flag in head_templates.
+    """Check if adjective is invariable (same form for all gender/number).
 
-    Invariable adjectives (like "blu", "rosa") have the same form for all
-    gender/number combinations.
+    Detection methods:
+    1. inv:1 flag in head_templates args (e.g., "rosa", "blu")
+    2. 'invariable' or 'invariant' as any arg value in head_templates
+       (e.g., kabuki has {'3': 'invariable'})
     """
     for template in entry.get("head_templates", []):
-        if template.get("args", {}).get("inv") == "1":
+        args = template.get("args", {})
+        # Method 1: Explicit inv:1 flag
+        if args.get("inv") == "1":
+            return True
+        # Method 2: 'invariable' or 'invariant' appears as any arg value
+        for value in args.values():
+            if value in ("invariable", "invariant"):
+                return True
+
+    return False
+
+
+def _is_feminine_only_adjective(entry: dict[str, Any]) -> bool:
+    """Check if adjective is feminine-only via fonly:1 flag in head_templates.
+
+    Feminine-only adjectives (like "incinta", "nullipara") only have feminine forms.
+    They describe inherently feminine concepts (pregnancy, giving birth, etc.).
+    """
+    for template in entry.get("head_templates", []):
+        if template.get("args", {}).get("fonly") == "1":
+            return True
+    return False
+
+
+def _is_masculine_only_adjective(entry: dict[str, Any]) -> bool:
+    """Check if adjective has no feminine forms via f:- flag in head_templates.
+
+    Some adjectives (like "ficaio") have no feminine counterpart.
+    """
+    for template in entry.get("head_templates", []):
+        if template.get("args", {}).get("f") == "-":
             return True
     return False
 
@@ -985,15 +1017,32 @@ def _iter_forms(
                         yield lemma_stressed, [gender, number], "inferred:invariable"
         else:
             # Standard handling: add base form if missing
-            if not has_masc_singular:
+            # First check for gender-restricted adjectives
+            is_feminine_only = _is_feminine_only_adjective(entry)
+            is_masculine_only = _is_masculine_only_adjective(entry)
+
+            if is_feminine_only:
+                # Feminine-only adjectives (incinta, nullipara): add feminine base form
+                if not has_fem_singular:
+                    key = (lemma_stressed, ("feminine", "singular"))
+                    if key not in seen:
+                        seen.add(key)
+                        yield lemma_stressed, ["feminine", "singular"], "inferred:base_form"
+            elif not has_masc_singular:
+                # Default: add masculine base form
                 key = (lemma_stressed, ("masculine", "singular"))
                 if key not in seen:
                     seen.add(key)
                     yield lemma_stressed, ["masculine", "singular"], "inferred:base_form"
 
             # For 2-form adjectives, add feminine singular too (same form as masculine)
-            # is_two_form is set when Wiktextract provides genderless number tags
-            if not has_fem_singular and is_two_form:
+            # But NOT for masculine-only adjectives (f: "-") or feminine-only adjectives
+            if (
+                not has_fem_singular
+                and is_two_form
+                and not is_masculine_only
+                and not is_feminine_only
+            ):
                 key = (lemma_stressed, ("feminine", "singular"))
                 if key not in seen:
                     yield lemma_stressed, ["feminine", "singular"], "inferred:base_form"
