@@ -35,6 +35,7 @@ from italian_anki.importers import (
 from italian_anki.importers.itwac import ITWAC_CSV_FILES
 from italian_anki.importers.morphit import (
     apply_unstressed_fallback,
+    enrich_lemma_written,
     fill_missing_adjective_forms,
 )
 from italian_anki.importers.wiktextract import (
@@ -493,8 +494,8 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print("=" * 80)
         print()
 
-        # Determine step count: adjectives have 3 extra steps (allomorphs, fill-missing, unstressed)
-        total_steps = 8 if pos == "adjective" else 5
+        # Determine step count: adjectives have 2 extra steps (allomorphs, fill-missing)
+        total_steps = 9 if pos == "adjective" else 7
 
         with get_connection(db_path) as conn:
             # Step 1: Wiktextract import
@@ -507,14 +508,25 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             _run_formof_enrichment(conn, jsonl_path, pos, indent=indent)
             print()
 
-            # Step 3: Morph-it! enrichment
-            print(f"[3/{total_steps}] Enriching with Morph-it! spelling...")
+            # Step 3: Morph-it! form enrichment
+            print(f"[3/{total_steps}] Enriching forms with Morph-it! spelling...")
             _run_morphit_import(conn, morphit_path, pos, indent=indent)
             print()
 
-            # Step 4 (adjective only): Fill missing forms from Morphit
+            # Step 4: Morph-it! lemma enrichment
+            print(f"[4/{total_steps}] Enriching lemmas with Morph-it! spelling...")
+            stats = enrich_lemma_written(
+                conn, morphit_path, pos_filter=pos, progress_callback=_make_progress_callback()
+            )
+            print()
+            print(f"{indent}Lemmas updated:   {stats['updated']:,}")
+            print(f"{indent}Exact matched:    {stats['exact_matched']:,}")
+            print(f"{indent}Not in Morphit:   {stats['not_found']:,}")
+            print()
+
+            # Step 5 (adjective only): Fill missing forms from Morphit
             if pos == "adjective":
-                print(f"[4/{total_steps}] Filling missing adjective forms from Morphit...")
+                print(f"[5/{total_steps}] Filling missing adjective forms from Morphit...")
                 stats = fill_missing_adjective_forms(
                     conn, morphit_path, progress_callback=_make_progress_callback()
                 )
@@ -527,10 +539,10 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Combos skipped:       {stats['combos_skipped']:,}")
                 print()
 
-            # Step 5 (adjective only): Import allomorphs from alt_of entries
+            # Step 6 (adjective only): Import allomorphs from alt_of entries
             # Must run AFTER fill_missing so allomorphs don't prevent grandi from being added
             if pos == "adjective":
-                print(f"[5/{total_steps}] Importing allomorphs (apocopic/elided forms)...")
+                print(f"[6/{total_steps}] Importing allomorphs (apocopic/elided forms)...")
                 stats = import_adjective_allomorphs(
                     conn, jsonl_path, progress_callback=_make_progress_callback()
                 )
@@ -544,21 +556,21 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Hardcoded added:      {stats['hardcoded_added']:,}")
                 print()
 
-            # Step 4 (or 6 for adjectives): Form-of spelling fallback
-            step_formof = 6 if pos == "adjective" else 4
+            # Step 5 (or 7 for adjectives): Form-of spelling fallback
+            step_formof = 7 if pos == "adjective" else 5
             print(f"[{step_formof}/{total_steps}] Enriching form spelling from form-of entries...")
             _run_formof_spelling_enrichment(conn, jsonl_path, pos, indent=indent)
             print()
 
-            # Step 7 (adjective only): Unstressed fallback
-            if pos == "adjective":
-                print(f"[7/{total_steps}] Applying unstressed form fallback...")
-                stats = apply_unstressed_fallback(conn, pos_filter="adjective")
-                print(f"{indent}Forms updated: {stats['updated']:,}")
-                print()
+            # Step 6 (or 8 for adjectives): Unstressed fallback (for all POS)
+            step_unstressed = 8 if pos == "adjective" else 6
+            print(f"[{step_unstressed}/{total_steps}] Applying unstressed form fallback...")
+            stats = apply_unstressed_fallback(conn, pos_filter=pos)
+            print(f"{indent}Forms updated: {stats['updated']:,}")
+            print()
 
-            # Step 5 (or 8 for adjectives): ItWaC frequency import
-            step_itwac = 8 if pos == "adjective" else 5
+            # Step 7 (or 9 for adjectives): ItWaC frequency import
+            step_itwac = 9 if pos == "adjective" else 7
             csv_filename = ITWAC_CSV_FILES.get(pos)
             if csv_filename:
                 csv_path = DEFAULT_ITWAC_DIR / csv_filename

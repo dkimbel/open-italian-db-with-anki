@@ -497,7 +497,8 @@ def apply_unstressed_fallback(
 
     for row in result:
         stressed_form = row.stressed
-        if not _has_accents(stressed_form):
+        # Skip "-" which represents missing forms for defective verbs
+        if stressed_form != "-" and not _has_accents(stressed_form):
             conn.execute(
                 update(pos_form_table)
                 .where(pos_form_table.c.id == row.id)
