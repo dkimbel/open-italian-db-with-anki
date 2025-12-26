@@ -1,6 +1,6 @@
 """Tests for text normalization utilities."""
 
-from italian_anki.normalize import normalize, tokenize
+from italian_anki.normalize import derive_written_from_stressed, normalize, tokenize
 
 
 class TestNormalize:
@@ -66,3 +66,48 @@ class TestTokenize:
     def test_strips_leading_trailing_apostrophes(self) -> None:
         assert tokenize("'ciao'") == ["ciao"]
         assert tokenize("'test") == ["test"]
+
+
+class TestDeriveWrittenFromStressed:
+    """Tests for derive_written_from_stressed function."""
+
+    def test_strips_non_final_accent(self) -> None:
+        assert derive_written_from_stressed("pàrlo") == "parlo"
+        assert derive_written_from_stressed("bèlla") == "bella"
+        assert derive_written_from_stressed("parlàre") == "parlare"
+
+    def test_keeps_final_accent_polysyllable(self) -> None:
+        assert derive_written_from_stressed("parlò") == "parlò"
+        assert derive_written_from_stressed("città") == "città"
+        assert derive_written_from_stressed("perché") == "perché"
+
+    def test_whitelist_monosyllables(self) -> None:
+        assert derive_written_from_stressed("dà") == "dà"
+        assert derive_written_from_stressed("è") == "è"
+        assert derive_written_from_stressed("più") == "più"
+        assert derive_written_from_stressed("sì") == "sì"
+
+    def test_strips_non_whitelist_monosyllables(self) -> None:
+        assert derive_written_from_stressed("fù") == "fu"
+        assert derive_written_from_stressed("blù") == "blu"
+
+    def test_blacklist_never_accented(self) -> None:
+        # qua/qui should never have accents even if source has them
+        assert derive_written_from_stressed("quà") == "qua"
+        assert derive_written_from_stressed("quì") == "qui"
+
+    def test_no_accent_returns_unchanged(self) -> None:
+        assert derive_written_from_stressed("parlo") == "parlo"
+        assert derive_written_from_stressed("casa") == "casa"
+
+    def test_empty_returns_none(self) -> None:
+        assert derive_written_from_stressed("") is None
+
+    def test_multi_word_phrase(self) -> None:
+        assert derive_written_from_stressed("volùto dìre") == "voluto dire"
+        assert derive_written_from_stressed("andàre giù") == "andare giù"
+        assert derive_written_from_stressed("èssere in sé") == "essere in sé"
+
+    def test_multi_word_with_unaccented_words(self) -> None:
+        assert derive_written_from_stressed("il bèllo") == "il bello"
+        assert derive_written_from_stressed("la càsa") == "la casa"

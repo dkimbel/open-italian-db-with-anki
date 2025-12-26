@@ -581,7 +581,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     print("Importing Tatoeba sentences")
     print("=" * 80)
     print()
-    print("Importing sentences and linking to lemmas...")
+    print("Importing sentences...")
 
     with get_connection(db_path) as conn:
         _run_tatoeba_import(conn, ita_path, eng_path, links_path, indent="  ")

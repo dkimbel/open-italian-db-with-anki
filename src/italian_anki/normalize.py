@@ -110,6 +110,56 @@ ACCENTED_FINAL = frozenset("àèéìòóù")
 VOWELS = frozenset("aeiouAEIOU")
 
 
+def _derive_single_word(word: str) -> str | None:
+    """Derive written form for a single word (no spaces).
+
+    Returns the written form, or None if derivation fails (e.g., multiple accents).
+    Logs a warning for single words with multiple accents.
+    """
+    if not word:
+        return None
+
+    # Count accent marks in this single word
+    accent_count = sum(1 for c in word if c in ACCENTED_CHARS)
+
+    if accent_count > 1:
+        # Multiple accents in a single word is unusual - log warning
+        logger.warning(f"Multiple accents in single word: {word!r}")
+        return None
+
+    if accent_count == 0:
+        # No accents - word IS the written form
+        return word
+
+    # Single accent - apply rules
+    last_char = word[-1]
+
+    # Non-final accent: always strip (pedagogical only)
+    if last_char not in ACCENTED_FINAL:
+        return normalize(word)
+
+    # Final accent - check specific rules
+    normalized = normalize(word)
+
+    # Blacklist: qui, qua never take accents in standard Italian
+    if normalized in ACCENT_BLACKLIST:
+        return normalized
+
+    # Whitelist: mandatory accented monosyllables
+    if word in ACCENT_WHITELIST:
+        return word
+
+    # Stem vowel test: does the stem (word minus final letter) contain vowels?
+    stem = word[:-1]
+    if any(c in VOWELS for c in stem):
+        # Polysyllable with final accent: keep the accent
+        return word
+    else:
+        # True monosyllable (stem has no vowels): strip the accent
+        # Examples: fù → fu, blù → blu, trè → tre
+        return normalized
+
+
 def derive_written_from_stressed(stressed: str) -> str | None:
     """Derive written form from stressed form using Italian orthography rules.
 
@@ -120,12 +170,15 @@ def derive_written_from_stressed(stressed: str) -> str | None:
     All other accents (e.g., pàrlo, bèlla) are pedagogical pronunciation guides
     and should be stripped for the written form.
 
+    For multi-word phrases, applies the rule to each word individually.
+
     Args:
-        stressed: Form with pedagogical stress marks (e.g., "pàrlo", "parlò")
+        stressed: Form with pedagogical stress marks (e.g., "pàrlo", "parlò",
+            or multi-word like "volùto dìre")
 
     Returns:
         The correct written form, or None if derivation is not confident
-        (e.g., multiple accents, empty input)
+        (e.g., a word has multiple accents, empty input)
 
     Examples:
         >>> derive_written_from_stressed("parlò")
@@ -138,46 +191,20 @@ def derive_written_from_stressed(stressed: str) -> str | None:
         'fu'
         >>> derive_written_from_stressed("città")
         'città'
+        >>> derive_written_from_stressed("volùto dìre")
+        'voluto dire'
     """
     if not stressed:
         return None
 
-    # Count accent marks
-    accent_count = sum(1 for c in stressed if c in ACCENTED_CHARS)
+    # Handle multi-word phrases by applying rule to each word
+    if " " in stressed:
+        words = stressed.split()
+        derived_words = [_derive_single_word(w) for w in words]
+        # If any word fails, the whole phrase fails
+        if any(w is None for w in derived_words):
+            return None
+        return " ".join(derived_words)  # type: ignore[arg-type]
 
-    if accent_count > 1:
-        # Multiple accents is unusual - log warning and don't derive
-        logger.warning(f"Multiple accents in form: {stressed!r}")
-        return None
-
-    if accent_count == 0:
-        # No accents - stressed IS the written form
-        return stressed
-
-    # Single accent - apply rules
-    last_char = stressed[-1]
-
-    # Non-final accent: always strip (pedagogical only)
-    if last_char not in ACCENTED_FINAL:
-        return normalize(stressed)
-
-    # Final accent - check specific rules
-    normalized = normalize(stressed)
-
-    # Blacklist: qui, qua never take accents in standard Italian
-    if normalized in ACCENT_BLACKLIST:
-        return normalized
-
-    # Whitelist: mandatory accented monosyllables
-    if stressed in ACCENT_WHITELIST:
-        return stressed
-
-    # Stem vowel test: does the stem (word minus final letter) contain vowels?
-    stem = stressed[:-1]
-    if any(c in VOWELS for c in stem):
-        # Polysyllable with final accent: keep the accent
-        return stressed
-    else:
-        # True monosyllable (stem has no vowels): strip the accent
-        # Examples: fù → fu, blù → blu, trè → tre
-        return normalized
+    # Single word
+    return _derive_single_word(stressed)
