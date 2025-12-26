@@ -22,6 +22,7 @@ from italian_anki.db.schema import (
     verb_forms,
     verb_metadata,
 )
+from italian_anki.derivation import derive_participle_forms
 from italian_anki.normalize import derive_written_from_stressed, normalize
 from italian_anki.tags import (
     LABEL_CANONICAL,
@@ -1158,6 +1159,20 @@ def _build_verb_form_row(
     if features.should_filter or features.mood is None:
         return None
 
+    # For past participles: Wiktextract doesn't provide gender/number tags.
+    # All past participles ending in -o are masculine singular citation forms.
+    # (Clitic forms like 'creatosi' don't end in -o, so we leave them as NULL.)
+    gender = features.gender
+    number = features.number
+    if (
+        features.mood == "participle"
+        and gender is None
+        and number is None
+        and form_stressed.endswith("o")
+    ):
+        gender = "masculine"
+        number = "singular"
+
     # Derive written form using Italian orthography rules
     written = derive_written_from_stressed(form_stressed)
     written_source = "derived:orthography_rule" if written is not None else None
@@ -1170,8 +1185,8 @@ def _build_verb_form_row(
         "mood": features.mood,
         "tense": features.tense,
         "person": features.person,
-        "number": features.number,
-        "gender": features.gender,
+        "number": number,
+        "gender": gender,
         "is_formal": features.is_formal,
         "is_negative": features.is_negative,
         "labels": features.labels,
@@ -2549,5 +2564,103 @@ def import_adjective_allomorphs(
         except Exception:
             # Duplicate (unique constraint violation) - already exists, skip silently
             logger.debug("Hardcoded form '%s' already exists for '%s'", form, parent_lemma)
+
+    return stats
+
+
+def generate_gendered_participles(
+    conn: Connection,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
+    """Generate feminine/plural forms for all past participles.
+
+    For each masculine singular past participle, this function derives the
+    3 other gender/number forms using the regular -o/-a/-i/-e pattern:
+    - parlàto (m.s.) → parlàta (f.s.), parlàti (m.p.), parlàte (f.p.)
+    - fàtto (m.s.) → fàtta (f.s.), fàtti (m.p.), fàtte (f.p.)
+
+    This is NOT inference - it's deterministic orthographic transformation.
+    Italian past participles have 100% regular gender/number agreement.
+
+    Args:
+        conn: Database connection
+        progress_callback: Optional callback for progress updates (current, total)
+
+    Returns:
+        Dict with stats:
+        - participles_found: Number of masculine singular participles found
+        - forms_generated: Number of new forms generated (3 per participle)
+        - duplicates_skipped: Number of forms skipped due to existing entries
+    """
+    stats = {
+        "participles_found": 0,
+        "forms_generated": 0,
+        "duplicates_skipped": 0,
+    }
+
+    # Get all masculine singular past participles
+    participles = conn.execute(
+        select(
+            verb_forms.c.lemma_id,
+            verb_forms.c.stressed,
+            verb_forms.c.written,
+            verb_forms.c.labels,
+        ).where(
+            verb_forms.c.mood == "participle",
+            verb_forms.c.tense == "past",
+            verb_forms.c.gender == "masculine",
+            verb_forms.c.number == "singular",
+        )
+    ).fetchall()
+
+    total = len(participles)
+    stats["participles_found"] = total
+
+    for idx, row in enumerate(participles):
+        if progress_callback and idx % 1000 == 0:
+            progress_callback(idx, total)
+
+        lemma_id = row.lemma_id
+        stressed = row.stressed
+        written = row.written
+        labels = row.labels
+
+        # Derive the 3 other forms
+        derived = derive_participle_forms(stressed)
+        if not derived:
+            # Can't derive (e.g., clitic form that doesn't end in -o)
+            continue
+
+        for new_stressed, new_gender, new_number in derived:
+            # Derive written form using same orthography rules
+            new_written = derive_written_from_stressed(new_stressed) if written else None
+            new_written_source = "derived:orthography_rule" if new_written is not None else None
+
+            try:
+                conn.execute(
+                    verb_forms.insert().values(
+                        lemma_id=lemma_id,
+                        written=new_written,
+                        written_source=new_written_source,
+                        stressed=new_stressed,
+                        mood="participle",
+                        tense="past",
+                        person=None,
+                        number=new_number,
+                        gender=new_gender,
+                        is_formal=False,
+                        is_negative=False,
+                        labels=labels,
+                        form_origin="derived:gender_rule",
+                    )
+                )
+                stats["forms_generated"] += 1
+            except Exception:
+                # Duplicate form (unique constraint violation)
+                stats["duplicates_skipped"] += 1
+
+    if progress_callback:
+        progress_callback(total, total)
 
     return stats

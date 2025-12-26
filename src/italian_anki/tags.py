@@ -163,9 +163,9 @@ def _extract_tense(tags: set[str], mood: str | None) -> str | None:
         return "remote"  # passato remoto
 
     if "past" in tags:
-        # For participles, past is part of the mood, not a tense
-        if mood == "participle":
-            return None
+        # Linguistically, "past" in participles refers to aspect (perfective/completed)
+        # rather than time. But we store it as tense='past' for consistency with
+        # present participles (tense='present') and queryability.
         return "past"
 
     for tag in ("present", "imperfect", "future"):
@@ -202,6 +202,14 @@ def parse_verb_tags(tags: list[str]) -> VerbFormFeatures:
         if tag in MOOD_TAGS:
             result.mood = tag
             break
+
+    # Filter participles with person tags - these are Wiktextract data bugs.
+    # Participles don't have person (they're non-finite). The 2 known cases are
+    # empiùto and riempiùto from empiere/riempiere's malformed head section entries
+    # with tags like ['first-person', 'participle', 'past', 'present', 'singular'].
+    if result.mood == "participle" and tag_set & set(PERSON_MAP.keys()):
+        result.should_filter = True
+        return result
 
     # Extract tense
     result.tense = _extract_tense(tag_set, result.mood)

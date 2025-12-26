@@ -41,6 +41,7 @@ from italian_anki.importers.morphit import (
 from italian_anki.importers.wiktextract import (
     enrich_form_spelling_from_form_of,
     enrich_from_form_of,
+    generate_gendered_participles,
     import_adjective_allomorphs,
 )
 
@@ -489,10 +490,13 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print("=" * 80)
         print()
 
-        # Determine step count: adjectives have 2 extra steps (allomorphs, fill-missing)
+        # Determine step count:
+        # - adjectives: 10 steps (extra: fill-missing, allomorphs)
+        # - verbs: 9 steps (extra: gendered participles)
+        # - nouns: 8 steps (base)
         # All POS have: wiktextract, form-of, morphit forms, morphit lemmas, form-of spelling,
         #               unstressed fallback, orthography fallback, itwac
-        total_steps = 10 if pos == "adjective" else 8
+        total_steps = 10 if pos == "adjective" else (9 if pos == "verb" else 8)
 
         with get_connection(db_path) as conn:
             # Step 1: Wiktextract import
@@ -500,18 +504,35 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             _run_wiktextract_import(conn, jsonl_path, pos, indent=indent)
             print()
 
-            # Step 2: Form-of enrichment
-            print(f"[2/{total_steps}] Enriching from form-of entries...")
+            # Step 2 (verb only): Generate gendered participles
+            if pos == "verb":
+                print(f"[2/{total_steps}] Generating gendered participle forms...")
+                stats = generate_gendered_participles(
+                    conn, progress_callback=_make_progress_callback()
+                )
+                print()
+                print(f"{indent}Participles found:     {stats['participles_found']:,}")
+                print(f"{indent}Forms generated:       {stats['forms_generated']:,}")
+                print(f"{indent}Duplicates skipped:    {stats['duplicates_skipped']:,}")
+                print()
+
+            # Step 2 (or 3 for verbs): Form-of enrichment
+            step_formof_enrich = 3 if pos == "verb" else 2
+            print(f"[{step_formof_enrich}/{total_steps}] Enriching from form-of entries...")
             _run_formof_enrichment(conn, jsonl_path, pos, indent=indent)
             print()
 
-            # Step 3: Morph-it! form enrichment
-            print(f"[3/{total_steps}] Enriching forms with Morph-it! spelling...")
+            # Step 3 (or 4 for verbs): Morph-it! form enrichment
+            step_morphit = 4 if pos == "verb" else 3
+            print(f"[{step_morphit}/{total_steps}] Enriching forms with Morph-it! spelling...")
             _run_morphit_import(conn, morphit_path, pos, indent=indent)
             print()
 
-            # Step 4: Morph-it! lemma enrichment
-            print(f"[4/{total_steps}] Enriching lemmas with Morph-it! spelling...")
+            # Step 4 (or 5 for verbs): Morph-it! lemma enrichment
+            step_morphit_lemma = 5 if pos == "verb" else 4
+            print(
+                f"[{step_morphit_lemma}/{total_steps}] Enriching lemmas with Morph-it! spelling..."
+            )
             stats = enrich_lemma_written(
                 conn, morphit_path, pos_filter=pos, progress_callback=_make_progress_callback()
             )
@@ -553,21 +574,21 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Hardcoded added:      {stats['hardcoded_added']:,}")
                 print()
 
-            # Step 5 (or 7 for adjectives): Form-of spelling fallback
-            step_formof = 7 if pos == "adjective" else 5
+            # Step 5 (verb: 6, adjective: 7): Form-of spelling fallback
+            step_formof = 7 if pos == "adjective" else (6 if pos == "verb" else 5)
             print(f"[{step_formof}/{total_steps}] Enriching form spelling from form-of entries...")
             _run_formof_spelling_enrichment(conn, jsonl_path, pos, indent=indent)
             print()
 
-            # Step 6 (or 8 for adjectives): Unstressed fallback (for all POS)
-            step_unstressed = 8 if pos == "adjective" else 6
+            # Step 6 (verb: 7, adjective: 8): Unstressed fallback (for all POS)
+            step_unstressed = 8 if pos == "adjective" else (7 if pos == "verb" else 6)
             print(f"[{step_unstressed}/{total_steps}] Applying unstressed form fallback...")
             stats = apply_unstressed_fallback(conn, pos_filter=pos)
             print(f"{indent}Forms updated: {stats['updated']:,}")
             print()
 
-            # Step 7 (or 9 for adjectives): Orthography-based written derivation
-            step_ortho = 9 if pos == "adjective" else 7
+            # Step 7 (verb: 8, adjective: 9): Orthography-based written derivation
+            step_ortho = 9 if pos == "adjective" else (8 if pos == "verb" else 7)
             print(f"[{step_ortho}/{total_steps}] Applying orthography-based written derivation...")
             stats = apply_orthography_fallback(conn, pos_filter=pos)
             print(f"{indent}Forms updated: {stats['updated']:,}")
@@ -576,8 +597,8 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Failed:        {stats['failed']:,}")
             print()
 
-            # Step 8 (or 10 for adjectives): ItWaC frequency import
-            step_itwac = 10 if pos == "adjective" else 8
+            # Step 8 (verb: 9, adjective: 10): ItWaC frequency import
+            step_itwac = 10 if pos == "adjective" else (9 if pos == "verb" else 8)
             csv_filename = ITWAC_CSV_FILES.get(pos)
             if csv_filename:
                 csv_path = DEFAULT_ITWAC_DIR / csv_filename
