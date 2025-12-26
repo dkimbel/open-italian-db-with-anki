@@ -203,6 +203,17 @@ verb_metadata = Table(
 )
 
 # Noun-specific metadata (gender classification, number behavior, and links)
+#
+# Nouns have two distinct lemma relationship types:
+#
+# - counterpart_lemma_id: Gender counterpart pairs (professore↔professoressa).
+#   These are semantically equivalent roles with separate lemmas per gender.
+#   The two words refer to the same concept but are grammatically distinct nouns.
+#
+# - base_lemma_id: Morphological derivations (tavolino→tavola).
+#   These are distinct words derived from a base with size/affect modification.
+#   A tavolino is not "tavola but masculine" — it's a small table, a different thing.
+#
 noun_metadata = Table(
     "noun_metadata",
     metadata,
@@ -227,6 +238,17 @@ noun_metadata = Table(
 )
 
 # Adjective-specific metadata (inflection class and links)
+#
+# Adjectives have only one lemma relationship type:
+#
+# - base_lemma_id: Degree relationships (migliore→buono, ottimo→buono).
+#   Links comparative/superlative forms to their positive base when they are
+#   separate lemmas rather than regular inflections (più buono vs migliore).
+#
+# Unlike nouns, adjectives don't need counterpart_lemma_id because Italian
+# adjectives inflect for gender within a single lemma (bello/bella/belli/belle)
+# rather than having separate masculine and feminine lemmas.
+#
 adjective_metadata = Table(
     "adjective_metadata",
     metadata,
