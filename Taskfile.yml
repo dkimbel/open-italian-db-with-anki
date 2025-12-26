@@ -67,27 +67,27 @@ tasks:
   import-wiktextract:
     desc: Import Wiktextract data into database
     cmds:
-      - uv run italian-anki import-wiktextract {{.CLI_ARGS}}
+      - uv run italian-anki import-wiktextract {{if .POS}}--pos {{.POS}}{{end}}
 
   enrich-formof:
     desc: Enrich forms with register labels from form-of entries
     cmds:
-      - uv run italian-anki enrich-formof {{.CLI_ARGS}}
+      - uv run italian-anki enrich-formof {{if .POS}}--pos {{.POS}}{{end}}
 
   import-morphit:
     desc: Enrich forms with real Italian spelling from Morph-it!
     cmds:
-      - uv run italian-anki import-morphit {{.CLI_ARGS}}
+      - uv run italian-anki import-morphit {{if .POS}}--pos {{.POS}}{{end}}
 
   import-itwac:
     desc: Import frequency data from ItWaC corpus
     cmds:
-      - uv run italian-anki import-itwac {{.CLI_ARGS}}
+      - uv run italian-anki import-itwac {{if .POS}}--pos {{.POS}}{{end}}
 
   import-tatoeba:
     desc: Import Tatoeba sentences and link to verbs
     cmds:
-      - uv run italian-anki import-tatoeba {{.CLI_ARGS}}
+      - uv run italian-anki import-tatoeba
 
   import-all:
     desc: Run full import pipeline
