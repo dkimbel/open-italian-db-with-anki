@@ -927,6 +927,9 @@ class TestMorphitElidedFormHandling:
 SAMPLE_NOUN_WITH_ACCENT = {
     "pos": "noun",
     "word": "canina",
+    "head_templates": [
+        {"name": "it-noun", "args": {"1": "f"}, "expansion": "canina f (plural canine)"}
+    ],
     "forms": [
         {"form": "canìna", "tags": ["feminine", "singular"]},
         {"form": "canìne", "tags": ["feminine", "plural"]},
@@ -937,6 +940,9 @@ SAMPLE_NOUN_WITH_ACCENT = {
 SAMPLE_NOUN_FRENCH_LOANWORD = {
     "pos": "noun",
     "word": "décolleté",
+    "head_templates": [
+        {"name": "it-noun", "args": {"1": "m", "2": "#"}, "expansion": "décolleté m (invariable)"}
+    ],
     "forms": [
         {"form": "décolleté", "tags": ["masculine", "singular"]},
         {"form": "décolleté", "tags": ["masculine", "plural"]},

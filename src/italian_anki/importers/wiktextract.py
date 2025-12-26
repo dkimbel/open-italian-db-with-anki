@@ -1389,7 +1389,7 @@ def import_wiktextract(
         "lemmas": 0,
         "forms": 0,
         "forms_filtered": 0,
-        "nouns_without_gender": 0,
+        "nouns_skipped_no_gender": 0,
         "definitions": 0,
         "skipped": 0,
         "misspellings_skipped": 0,
@@ -1536,6 +1536,17 @@ def import_wiktextract(
             lemma_normalized = normalize(word)
             lemma_stressed = _extract_lemma_stressed(entry)
 
+            # For nouns: pre-check gender info before inserting lemma
+            # Skip entries that would result in zero forms (incomplete Wiktionary entries)
+            noun_class: dict[str, Any] | None = None
+            if pos_filter == "noun":
+                noun_class = _extract_noun_classification(entry)
+                gender_class = noun_class.get("gender_class")
+                # If no gender from classification, try fallback extraction
+                if gender_class is None and _extract_gender(entry) is None:
+                    stats["nouns_skipped_no_gender"] += 1
+                    continue
+
             # Insert lemma
             try:
                 result = conn.execute(
@@ -1559,15 +1570,15 @@ def import_wiktextract(
 
             # Insert POS-specific metadata
             lemma_gender: str | None = None
-            noun_class: dict[str, Any] | None = None
             if pos_filter == "noun":
-                noun_class = _extract_noun_classification(entry)
+                # noun_class was already extracted in the pre-check above
+                assert noun_class is not None
                 gender_class = noun_class.get("gender_class")
                 number_class = noun_class.get("number_class", "standard")
 
                 if gender_class is None:
-                    stats["nouns_without_gender"] += 1
-                    # Fall back to simple gender for backward compatibility
+                    # No structured classification, but we have gender from fallback extraction
+                    # (otherwise we would have skipped this entry in the pre-check)
                     lemma_gender = _extract_gender(entry)
                 else:
                     # Insert noun_metadata

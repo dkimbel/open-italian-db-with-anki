@@ -1113,21 +1113,16 @@ class TestWiktextractImporter:
             with get_connection(db_path) as conn:
                 stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
 
-            # Two nouns with gender should be imported
-            assert stats["lemmas"] == 3  # All 3 lemmas are created
-            assert stats["nouns_without_gender"] == 1  # One noun lacks gender
+            # Only nouns with gender should be imported (noun without gender is skipped)
+            assert stats["lemmas"] == 2
+            assert stats["nouns_skipped_no_gender"] == 1
 
             with get_connection(db_path) as conn:
-                # The noun without gender should have no forms
+                # The noun without gender should NOT exist (skipped entirely)
                 acronimo = conn.execute(
                     select(lemmas).where(lemmas.c.normalized == "acronimo")
                 ).fetchone()
-                assert acronimo is not None  # Lemma exists
-
-                acronimo_forms = conn.execute(
-                    select(noun_forms).where(noun_forms.c.lemma_id == acronimo.lemma_id)
-                ).fetchall()
-                assert len(acronimo_forms) == 0  # But no forms (filtered out)
+                assert acronimo is None  # Lemma was not created
 
                 # Nouns with gender should have forms
                 libro_forms = conn.execute(

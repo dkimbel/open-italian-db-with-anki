@@ -372,8 +372,8 @@ def _run_wiktextract_import(
     print(f"{indent}Forms:       {stats['forms']:,}")
     print(f"{indent}Definitions: {stats['definitions']:,}")
     print(f"{indent}Skipped:     {stats['skipped']:,}")
-    if stats.get("nouns_without_gender", 0) > 0:
-        print(f"{indent}  No gender: {stats['nouns_without_gender']:,}")
+    if stats.get("nouns_skipped_no_gender", 0) > 0:
+        print(f"{indent}  No gender: {stats['nouns_skipped_no_gender']:,}")
     return stats
 
 
