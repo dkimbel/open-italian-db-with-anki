@@ -22,7 +22,7 @@ from italian_anki.db.schema import (
     verb_forms,
     verb_metadata,
 )
-from italian_anki.normalize import normalize
+from italian_anki.normalize import derive_written_from_stressed, normalize
 from italian_anki.tags import (
     LABEL_CANONICAL,
     SKIP_TAGS,
@@ -1147,6 +1147,10 @@ def _build_verb_form_row(
         form_origin: How we determined this form exists:
             - 'wiktextract': Direct from forms array (default)
     """
+    # Skip defective verb forms (marked as "-" in Wiktionary)
+    if form_stressed == "-":
+        return None
+
     if should_filter_form(tags):
         return None
 
@@ -1154,9 +1158,14 @@ def _build_verb_form_row(
     if features.should_filter or features.mood is None:
         return None
 
+    # Derive written form using Italian orthography rules
+    written = derive_written_from_stressed(form_stressed)
+    written_source = "derived:orthography_rule" if written is not None else None
+
     return {
         "lemma_id": lemma_id,
-        "written": None,  # Will be filled by Morph-it! importer
+        "written": written,
+        "written_source": written_source,
         "stressed": form_stressed,
         "mood": features.mood,
         "tense": features.tense,
@@ -1390,6 +1399,38 @@ def import_wiktextract(
     form_batch: list[dict[str, Any]] = []
     lookup_batch: list[dict[str, Any]] = []
     definition_batch: list[dict[str, Any]] = []
+
+    # Track unique verb forms to avoid duplicates (Wiktextract source sometimes has duplicates)
+    seen_verb_forms: set[tuple[Any, ...]] = set()
+
+    def _verb_form_key(row: dict[str, Any]) -> tuple[Any, ...]:
+        """Create a key tuple for deduplication matching the unique constraint columns."""
+        return (
+            row["lemma_id"],
+            row["stressed"],
+            row["mood"],
+            row.get("tense"),
+            row.get("person"),
+            row.get("number"),
+            row.get("gender"),
+            row.get("is_formal", False),
+            row.get("is_negative", False),
+            row.get("labels"),
+        )
+
+    def add_form(row: dict[str, Any]) -> bool:
+        """Add a form to the batch, with deduplication for verbs.
+
+        Returns True if the form was added, False if it was a duplicate.
+        """
+        if pos_filter == "verb":
+            key = _verb_form_key(row)
+            if key in seen_verb_forms:
+                # Duplicate found - skip (source data has some duplicates)
+                return False
+            seen_verb_forms.add(key)
+        form_batch.append(row)
+        return True
 
     def flush_batches() -> None:
         nonlocal form_batch, lookup_batch, definition_batch
@@ -1670,7 +1711,7 @@ def import_wiktextract(
                                     meaning_hint=form_meaning_hints.get(form_stressed),
                                 )
                                 if row:
-                                    form_batch.append(row)
+                                    add_form(row)
                                     number = "plural"
                                     seen_noun_forms.add((number, own_gender))
                                 else:
@@ -1690,7 +1731,7 @@ def import_wiktextract(
                                         meaning_hint=form_meaning_hints.get(form_stressed),
                                     )
                                     if row:
-                                        form_batch.append(row)
+                                        add_form(row)
                                         seen_noun_forms.add(("plural", own_gender))
                                     else:
                                         stats["forms_filtered"] += 1
@@ -1705,7 +1746,7 @@ def import_wiktextract(
                                         meaning_hint=form_meaning_hints.get(other_plural),
                                     )
                                     if row:
-                                        form_batch.append(row)
+                                        add_form(row)
                                         seen_noun_forms.add(("plural", other_gender))
                                     else:
                                         stats["forms_filtered"] += 1
@@ -1725,7 +1766,7 @@ def import_wiktextract(
                                         meaning_hint=form_meaning_hints.get(form_stressed),
                                     )
                                     if row:
-                                        form_batch.append(row)
+                                        add_form(row)
                                         seen_noun_forms.add(("plural", own_gender))
                                     else:
                                         stats["forms_filtered"] += 1
@@ -1745,7 +1786,7 @@ def import_wiktextract(
                                 meaning_hint=form_meaning_hints.get(form_stressed),
                             )
                             if row:
-                                form_batch.append(row)
+                                add_form(row)
                                 seen_noun_forms.add(("plural", own_gender))
                             else:
                                 stats["forms_filtered"] += 1
@@ -1765,7 +1806,7 @@ def import_wiktextract(
                                 if row is None:
                                     stats["forms_filtered"] += 1
                                     continue
-                                form_batch.append(row)
+                                add_form(row)
                                 number = "plural" if "plural" in tags else "singular"
                                 seen_noun_forms.add((number, gender))
                     else:
@@ -1779,7 +1820,7 @@ def import_wiktextract(
                         if row is None:
                             stats["forms_filtered"] += 1
                             continue
-                        form_batch.append(row)
+                        add_form(row)
                         # Track what we've added
                         number = "plural" if "plural" in tags else "singular"
                         gender = (
@@ -1804,7 +1845,7 @@ def import_wiktextract(
                     if row is None:
                         stats["forms_filtered"] += 1
                         continue
-                    form_batch.append(row)
+                    add_form(row)
 
                 if len(form_batch) >= batch_size:
                     flush_batches()
@@ -1824,7 +1865,7 @@ def import_wiktextract(
                             form_origin="inferred:head_template",
                         )
                         if row:
-                            form_batch.append(row)
+                            add_form(row)
                             seen_noun_forms.add(("plural", gender))
 
             # For nouns: add base form from lemma word if not already present
@@ -1853,7 +1894,7 @@ def import_wiktextract(
                                 form_origin="inferred:base_form",
                             )
                             if row:
-                                form_batch.append(row)
+                                add_form(row)
                 elif lemma_gender and (base_number, lemma_gender) not in seen_noun_forms:
                     # Add base form for single gender if not already present
                     row = _build_noun_form_row(
@@ -1864,7 +1905,7 @@ def import_wiktextract(
                         form_origin="inferred:base_form",
                     )
                     if row:
-                        form_batch.append(row)
+                        add_form(row)
 
                 # For invariable nouns: also add plural form with same text
                 # (Similar to how invariable adjectives get all 4 gender/number forms)
@@ -1882,7 +1923,7 @@ def import_wiktextract(
                                     form_origin="inferred:invariable",
                                 )
                                 if row:
-                                    form_batch.append(row)
+                                    add_form(row)
                     elif lemma_gender and ("plural", lemma_gender) not in seen_noun_forms:
                         # Add plural for single gender
                         row = _build_noun_form_row(
@@ -1893,7 +1934,7 @@ def import_wiktextract(
                             form_origin="inferred:invariable",
                         )
                         if row:
-                            form_batch.append(row)
+                            add_form(row)
 
             # Queue definitions with form_meaning_hint for soft key linkage
             if pos_filter == "noun" and word in DEFINITION_FORM_LINKAGE:

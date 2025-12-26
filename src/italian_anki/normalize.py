@@ -1,6 +1,9 @@
 """Text normalization utilities for matching Italian words across sources."""
 
+import logging
 import unicodedata
+
+logger = logging.getLogger(__name__)
 
 
 def normalize(text: str) -> str:
@@ -62,3 +65,119 @@ def tokenize(text: str) -> list[str]:
             result.append(word)
 
     return result
+
+
+# ============================================================================
+# Italian Orthography Rule for Written Forms
+# ============================================================================
+
+# Monosyllables that REQUIRE an accent to distinguish from unaccented homographs
+# These must keep their accent in written Italian
+ACCENT_WHITELIST = frozenset(
+    {
+        "ciò",  # that (demonstrative)
+        "ché",  # because (archaic/literary)
+        "dà",  # gives (verb dare)
+        "dì",  # day (noun, archaic)
+        "è",  # is (verb essere)
+        "fé",  # faith (archaic), or made (archaic verb fare)
+        "già",  # already
+        "giù",  # down
+        "là",  # there
+        "lì",  # there
+        "né",  # neither/nor
+        "piè",  # foot (archaic)
+        "più",  # more
+        "può",  # can (verb potere)
+        "scià",  # shah
+        "sé",  # oneself (reflexive pronoun)
+        "sì",  # yes
+        "tè",  # tea
+    }
+)
+
+# Words that should NEVER have an accent, even when spelled with one in sources
+# (These are single-syllable due to the 'qu' digraph being a single consonant unit)
+ACCENT_BLACKLIST = frozenset({"qua", "qui"})
+
+# All accented characters (both uppercase and lowercase)
+ACCENTED_CHARS = frozenset("àèéìòóùÀÈÉÌÒÓÙ")
+
+# Accented characters that can appear at end of word (lowercase only)
+ACCENTED_FINAL = frozenset("àèéìòóù")
+
+# Vowels for stem analysis
+VOWELS = frozenset("aeiouAEIOU")
+
+
+def derive_written_from_stressed(stressed: str) -> str | None:
+    """Derive written form from stressed form using Italian orthography rules.
+
+    Italian orthography only requires accents in specific cases:
+    1. Final syllable stress (polysyllables): città, perché, parlò
+    2. Monosyllable disambiguation: è (is) vs e (and), dà (gives) vs da (from)
+
+    All other accents (e.g., pàrlo, bèlla) are pedagogical pronunciation guides
+    and should be stripped for the written form.
+
+    Args:
+        stressed: Form with pedagogical stress marks (e.g., "pàrlo", "parlò")
+
+    Returns:
+        The correct written form, or None if derivation is not confident
+        (e.g., multiple accents, empty input)
+
+    Examples:
+        >>> derive_written_from_stressed("parlò")
+        'parlò'
+        >>> derive_written_from_stressed("pàrlo")
+        'parlo'
+        >>> derive_written_from_stressed("dà")
+        'dà'
+        >>> derive_written_from_stressed("fù")
+        'fu'
+        >>> derive_written_from_stressed("città")
+        'città'
+    """
+    if not stressed:
+        return None
+
+    # Count accent marks
+    accent_count = sum(1 for c in stressed if c in ACCENTED_CHARS)
+
+    if accent_count > 1:
+        # Multiple accents is unusual - log warning and don't derive
+        logger.warning(f"Multiple accents in form: {stressed!r}")
+        return None
+
+    if accent_count == 0:
+        # No accents - stressed IS the written form
+        return stressed
+
+    # Single accent - apply rules
+    last_char = stressed[-1]
+
+    # Non-final accent: always strip (pedagogical only)
+    if last_char not in ACCENTED_FINAL:
+        return normalize(stressed)
+
+    # Final accent - check specific rules
+    normalized = normalize(stressed)
+
+    # Blacklist: qui, qua never take accents in standard Italian
+    if normalized in ACCENT_BLACKLIST:
+        return normalized
+
+    # Whitelist: mandatory accented monosyllables
+    if stressed in ACCENT_WHITELIST:
+        return stressed
+
+    # Stem vowel test: does the stem (word minus final letter) contain vowels?
+    stem = stressed[:-1]
+    if any(c in VOWELS for c in stem):
+        # Polysyllable with final accent: keep the accent
+        return stressed
+    else:
+        # True monosyllable (stem has no vowels): strip the accent
+        # Examples: fù → fu, blù → blu, trè → tre
+        return normalized

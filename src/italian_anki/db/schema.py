@@ -64,6 +64,20 @@ verb_forms = Table(
     Column("labels", Text),  # NULL=standard, or "archaic", "archaic,literary", etc.
     # Form origin tracking - how we determined this form exists
     Column("form_origin", Text),  # 'wiktextract', 'inferred:singular', etc.
+    # Unique constraint to prevent duplicate forms
+    UniqueConstraint(
+        "lemma_id",
+        "stressed",
+        "mood",
+        "tense",
+        "person",
+        "number",
+        "gender",
+        "is_formal",
+        "is_negative",
+        "labels",
+        name="uq_verb_forms_entry",
+    ),
 )
 
 # Noun forms with grammatical features

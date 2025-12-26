@@ -1142,10 +1142,17 @@ class TestWiktextractImporter:
 
 
 class TestEnrichFormSpellingFromFormOf:
-    """Tests for the form-of spelling fallback enrichment."""
+    """Tests for the form-of spelling fallback enrichment.
 
-    def test_fills_form_from_formof_entry(self) -> None:
-        """Test that form column is filled from form-of entry when form is NULL."""
+    Note: Verb forms now get their `written` values from the orthography rule
+    during wiktextract import. The form-of enrichment is now only used as a
+    fallback for cases where the orthography rule couldn't derive a written
+    form (e.g., forms with multiple accents). For verbs with simple accent
+    patterns, the orthography rule handles the written derivation.
+    """
+
+    def test_verb_written_already_filled_by_orthography_rule(self) -> None:
+        """Verb forms get written from orthography rule, form-of enrichment skips them."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -1180,39 +1187,41 @@ class TestEnrichFormSpellingFromFormOf:
             engine = get_engine(db_path)
             init_db(engine)
 
-            # Import Wiktextract (form column will be NULL)
+            # Import Wiktextract - verb forms now get written from orthography rule
             with get_connection(db_path) as conn:
                 import_wiktextract(conn, jsonl_path)
 
-            # Verify form is NULL before enrichment
-            with get_connection(db_path) as conn:
-                form_row = conn.execute(
-                    select(verb_forms).where(verb_forms.c.stressed == "pàrlo")
-                ).fetchone()
-                assert form_row is not None
-                assert form_row.written is None
-
-            # Run form-of spelling enrichment
-            with get_connection(db_path) as conn:
-                stats = enrich_form_spelling_from_form_of(conn, jsonl_path)
-
-            assert stats["updated"] > 0
-
-            # Verify form is now filled
+            # Verify form is already filled by orthography rule
             with get_connection(db_path) as conn:
                 form_row = conn.execute(
                     select(verb_forms).where(verb_forms.c.stressed == "pàrlo")
                 ).fetchone()
                 assert form_row is not None
                 assert form_row.written == "parlo"
-                assert form_row.written_source == "wiktionary"
+                assert form_row.written_source == "derived:orthography_rule"
+
+            # Run form-of spelling enrichment - should skip since already filled
+            with get_connection(db_path) as conn:
+                stats = enrich_form_spelling_from_form_of(conn, jsonl_path)
+
+            # Should not update anything since orthography rule already filled it
+            assert stats["updated"] == 0
+            assert stats["already_filled"] > 0
+
+            # Verify written_source is still from orthography rule
+            with get_connection(db_path) as conn:
+                form_row = conn.execute(
+                    select(verb_forms).where(verb_forms.c.stressed == "pàrlo")
+                ).fetchone()
+                assert form_row is not None
+                assert form_row.written_source == "derived:orthography_rule"
 
         finally:
             db_path.unlink()
             jsonl_path.unlink()
 
-    def test_does_not_overwrite_morphit_spelling(self) -> None:
-        """Test that form-of doesn't overwrite forms already filled by Morph-it!."""
+    def test_does_not_overwrite_existing_written_source(self) -> None:
+        """Form-of enrichment doesn't overwrite forms already filled (orthography rule or morphit)."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -1246,32 +1255,30 @@ class TestEnrichFormSpellingFromFormOf:
             with get_connection(db_path) as conn:
                 import_wiktextract(conn, jsonl_path)
 
-            # Simulate Morph-it! having already filled the form
-            with get_connection(db_path) as conn:
-                from sqlalchemy import update
-
-                conn.execute(
-                    update(verb_forms)
-                    .where(verb_forms.c.stressed == "pàrlo")
-                    .values(written="parlo", written_source="morphit")
-                )
-                conn.commit()
-
-            # Run form-of enrichment
-            with get_connection(db_path) as conn:
-                stats = enrich_form_spelling_from_form_of(conn, jsonl_path)
-
-            # Should not have updated anything (already filled)
-            assert stats["updated"] == 0
-            assert stats["already_filled"] > 0
-
-            # Verify written_source is still "morphit"
+            # Verify it was filled by orthography rule
             with get_connection(db_path) as conn:
                 form_row = conn.execute(
                     select(verb_forms).where(verb_forms.c.stressed == "pàrlo")
                 ).fetchone()
                 assert form_row is not None
-                assert form_row.written_source == "morphit"
+                assert form_row.written == "parlo"
+                assert form_row.written_source == "derived:orthography_rule"
+
+            # Run form-of enrichment
+            with get_connection(db_path) as conn:
+                stats = enrich_form_spelling_from_form_of(conn, jsonl_path)
+
+            # Should not have updated anything (already filled by orthography rule)
+            assert stats["updated"] == 0
+            assert stats["already_filled"] > 0
+
+            # Verify written_source is still from orthography rule
+            with get_connection(db_path) as conn:
+                form_row = conn.execute(
+                    select(verb_forms).where(verb_forms.c.stressed == "pàrlo")
+                ).fetchone()
+                assert form_row is not None
+                assert form_row.written_source == "derived:orthography_rule"
 
         finally:
             db_path.unlink()

@@ -62,9 +62,53 @@ def _create_test_morphit(lines: list[str]) -> Path:
 
 
 class TestMorphitImporter:
-    """Tests for the Morph-it! importer."""
+    """Tests for the Morph-it! importer.
 
-    def test_updates_forms_with_real_spelling(self) -> None:
+    Note: Verb forms now get their `written` values from the orthography rule
+    during wiktextract import, not from Morphit. Morphit enrichment for verbs
+    will show updated=0 since verb forms already have written values.
+    These tests verify that behavior.
+    """
+
+    def test_verb_written_populated_during_wiktextract(self) -> None:
+        """Verb forms get written values from orthography rule during wiktextract import."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_VERB])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            # Import Wiktextract data - verbs should already have written values
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+
+            # Check that verb forms already have real spelling from orthography rule
+            with get_connection(db_path) as conn:
+                form_rows = conn.execute(
+                    select(verb_forms).where(verb_forms.c.written.isnot(None))
+                ).fetchall()
+
+                assert len(form_rows) > 0, "Should have forms with real spelling"
+
+                # Check specific forms
+                for row in form_rows:
+                    # Real form should not have non-final stress marks
+                    # (final accents like parlò are kept)
+                    assert row.written is not None
+                    # Stressed form should have marks
+                    assert row.stressed is not None
+                    # written_source should be from orthography rule
+                    assert row.written_source == "derived:orthography_rule"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_morphit_does_not_update_verbs(self) -> None:
+        """Morphit import for verbs shows updated=0 since they already have written values."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -83,51 +127,37 @@ class TestMorphitImporter:
             engine = get_engine(db_path)
             init_db(engine)
 
-            # First import Wiktextract data
+            # First import Wiktextract data (verbs get written from orthography rule)
             with get_connection(db_path) as conn:
                 import_wiktextract(conn, jsonl_path)
 
-            # Then enrich with Morph-it!
+            # Then enrich with Morph-it! - should update 0 verb forms
             with get_connection(db_path) as conn:
                 stats = import_morphit(conn, morphit_path)
 
-            # Check stats
-            assert stats["updated"] > 0, "Should have updated some forms"
-            assert stats["not_found"] >= 0
+            # Verbs already have written values, so morphit updates 0
+            assert stats["updated"] == 0, "Verbs already have written from orthography rule"
 
-            # Check that forms now have real spelling
+            # written_source should still be from orthography rule, not morphit
             with get_connection(db_path) as conn:
                 form_rows = conn.execute(
                     select(verb_forms).where(verb_forms.c.written.isnot(None))
                 ).fetchall()
 
-                assert len(form_rows) > 0, "Should have forms with real spelling"
-
-                # Check specific forms
                 for row in form_rows:
-                    # Real form should not have stress marks
-                    assert "à" not in row.written
-                    assert "ò" not in row.written
-                    # Stressed form should have marks
-                    assert row.stressed is not None
+                    assert row.written_source == "derived:orthography_rule"
 
         finally:
             db_path.unlink()
             jsonl_path.unlink()
             morphit_path.unlink()
 
-    def test_forms_not_in_morphit_remain_null(self) -> None:
+    def test_all_verb_forms_have_written(self) -> None:
+        """All verb forms should have written values after wiktextract import."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
         jsonl_path = _create_test_jsonl([SAMPLE_VERB])
-        # Morph-it! with only some forms
-        morphit_path = _create_test_morphit(
-            [
-                "parlo\tparlare\tVER:ind+pres+1+s",
-                # Missing: parli, parla, parliamo
-            ]
-        )
 
         try:
             engine = get_engine(db_path)
@@ -136,35 +166,29 @@ class TestMorphitImporter:
             with get_connection(db_path) as conn:
                 import_wiktextract(conn, jsonl_path)
 
-            with get_connection(db_path) as conn:
-                stats = import_morphit(conn, morphit_path)
-
-            # Should have some not found
-            assert stats["not_found"] > 0
-
-            # Check that some forms still have NULL form
+            # Check that NO verb forms have NULL written
             with get_connection(db_path) as conn:
                 null_forms = conn.execute(
                     select(verb_forms).where(verb_forms.c.written.is_(None))
                 ).fetchall()
-                assert len(null_forms) > 0
+                assert len(null_forms) == 0, "All verb forms should have written values"
 
         finally:
             db_path.unlink()
             jsonl_path.unlink()
-            morphit_path.unlink()
 
     def test_skips_non_verbs_in_morphit(self) -> None:
+        """Morphit skips non-verb entries when importing verbs."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
         jsonl_path = _create_test_jsonl([SAMPLE_VERB])
-        # Morph-it! with nouns (should be ignored)
+        # Morph-it! with nouns (should be ignored for verb import)
         morphit_path = _create_test_morphit(
             [
                 "casa\tcasa\tNOUN-F:s",
                 "case\tcasa\tNOUN-F:p",
-                "parlo\tparlare\tVER:ind+pres+1+s",  # Only verb entry
+                "parlo\tparlare\tVER:ind+pres+1+s",  # Verb entry
             ]
         )
 
@@ -178,8 +202,9 @@ class TestMorphitImporter:
             with get_connection(db_path) as conn:
                 stats = import_morphit(conn, morphit_path)
 
-            # Should have updated at least one form
-            assert stats["updated"] >= 1
+            # Verbs already have written, so updated=0
+            # The point is it shouldn't crash on non-verb entries
+            assert stats["updated"] == 0
 
         finally:
             db_path.unlink()
@@ -222,6 +247,7 @@ class TestMorphitImporter:
             morphit_path.unlink()
 
     def test_handles_empty_morphit_file(self) -> None:
+        """Empty morphit file doesn't cause errors - verbs already have written."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -238,16 +264,16 @@ class TestMorphitImporter:
             with get_connection(db_path) as conn:
                 stats = import_morphit(conn, morphit_path)
 
-            # All forms should be not found
+            # Verbs already have written from orthography rule
             assert stats["updated"] == 0
-            assert stats["not_found"] > 0
 
         finally:
             db_path.unlink()
             jsonl_path.unlink()
             morphit_path.unlink()
 
-    def test_idempotent_when_run_twice(self) -> None:
+    def test_morphit_idempotent_for_verbs(self) -> None:
+        """Morphit is idempotent for verbs - both runs show updated=0."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -266,24 +292,25 @@ class TestMorphitImporter:
             with get_connection(db_path) as conn:
                 import_wiktextract(conn, jsonl_path)
 
-            # First enrichment
+            # First enrichment - verbs already have written
             with get_connection(db_path) as conn:
                 stats1 = import_morphit(conn, morphit_path)
 
-            # Second enrichment should update 0 (forms already have values)
+            # Second enrichment - still updated=0
             with get_connection(db_path) as conn:
                 stats2 = import_morphit(conn, morphit_path)
 
-            assert stats1["updated"] > 0
-            assert stats2["updated"] == 0  # No more NULL forms to update
+            # Both runs should update 0 since verbs get written from orthography rule
+            assert stats1["updated"] == 0
+            assert stats2["updated"] == 0
 
         finally:
             db_path.unlink()
             jsonl_path.unlink()
             morphit_path.unlink()
 
-    def test_sets_written_source_to_morphit(self) -> None:
-        """Verify that written_source is set to 'morphit' when updating forms."""
+    def test_verb_written_source_is_orthography_rule(self) -> None:
+        """Verify that verb written_source is 'derived:orthography_rule'."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -305,7 +332,7 @@ class TestMorphitImporter:
             with get_connection(db_path) as conn:
                 import_morphit(conn, morphit_path)
 
-            # Check that written_source is set to "morphit"
+            # Check that written_source is set to orthography rule (not morphit)
             with get_connection(db_path) as conn:
                 form_rows = conn.execute(
                     select(verb_forms).where(verb_forms.c.written.isnot(None))
@@ -314,9 +341,10 @@ class TestMorphitImporter:
                 assert len(form_rows) > 0, "Should have forms with real spelling"
 
                 for row in form_rows:
-                    assert (
-                        row.written_source == "morphit"
-                    ), f"Expected written_source='morphit', got '{row.written_source}'"
+                    assert row.written_source == "derived:orthography_rule", (
+                        f"Expected written_source='derived:orthography_rule', "
+                        f"got '{row.written_source}'"
+                    )
 
         finally:
             db_path.unlink()
