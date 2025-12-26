@@ -132,6 +132,19 @@ def _is_misspelling(entry: dict[str, Any]) -> bool:
     return False
 
 
+def _is_blocklisted_lemma(entry: dict[str, Any]) -> bool:
+    """Check if lemma is in blocklist due to malformed source data.
+
+    Some Wiktextract entries have data issues that cause incorrect inferences:
+    - Invariable adjectives not marked with inv:1
+    - Plural variants without gender tags (misinterpreted as 2-form adjectives)
+
+    These are filtered out entirely during import.
+    """
+    word = entry.get("word", "")
+    return word in LEMMA_BLOCKLIST
+
+
 def _is_two_form_adjective(entry: dict[str, Any]) -> bool:
     """Check if adjective is 2-form (same form for masculine and feminine).
 
@@ -580,6 +593,18 @@ DEFINITION_TAG_BLOCKLIST = frozenset(
         # Form relationship noise
         "alt-of",
         "alternative",
+    }
+)
+
+# Lemmas with malformed Wiktextract data that cause incorrect inferences.
+# These are filtered out entirely during import.
+# NOTE: Use the exact Wiktextract word spelling (entry["word"]), not normalized form.
+LEMMA_BLOCKLIST: frozenset[str] = frozenset(
+    {
+        "arbëresh",  # Invariable adjective not marked inv:1, causes duplicate singular/plural
+        "antiterremoto",  # Plural variants lack gender tags, causes m/f duplication
+        "eslege",  # Plural variants lack gender tags, causes m/f duplication
+        "reggifiaccola",  # Plural variants lack gender tags, causes m/f duplication
     }
 )
 
@@ -1234,7 +1259,8 @@ def _build_noun_form_row(
             forms array (default), "synthesized" for forms extracted from
             head_templates only
         form_origin: How we determined this form exists:
-            - 'wiktextract': Direct from forms array (default)
+            - 'wiktextract': Direct from forms array with explicit gender tags (default)
+            - 'wiktextract:gender_fallback': From forms array but gender came from lemma
             - 'inferred:singular': Added missing singular tag
     """
     if should_filter_form(tags):
@@ -1245,13 +1271,16 @@ def _build_noun_form_row(
         return None
 
     # Extract gender from tags (for forms like "uova" with ["feminine", "plural"])
+    # Track if we used fallback so we can mark form_origin appropriately
     gender: str | None = None
+    gender_from_fallback = False
     if "masculine" in tags:
         gender = "masculine"
     elif "feminine" in tags:
         gender = "feminine"
     elif lemma_gender:
         # Fall back to lemma gender for forms without explicit gender tag
+        gender_from_fallback = True
         # Convert 'm'/'f' to full strings if needed
         if lemma_gender == "m":
             gender = "masculine"
@@ -1263,6 +1292,11 @@ def _build_noun_form_row(
     # Filter out forms without gender (incomplete data)
     if gender is None:
         return None
+
+    # Track when gender came from fallback (not explicit tags)
+    effective_origin = form_origin
+    if gender_from_fallback and form_origin == "wiktextract":
+        effective_origin = "wiktextract:gender_fallback"
 
     # Convert to short form for article computation
     gender_short = "m" if gender == "masculine" else "f"
@@ -1283,7 +1317,7 @@ def _build_noun_form_row(
         "meaning_hint": meaning_hint,
         "def_article": def_article,
         "article_source": article_source,
-        "form_origin": form_origin,
+        "form_origin": effective_origin,
     }
 
 
@@ -1385,6 +1419,7 @@ def import_wiktextract(
         "skipped": 0,
         "misspellings_skipped": 0,
         "alt_forms_skipped": 0,
+        "blocklisted_lemmas": 0,
         "cleared": cleared,
     }
 
@@ -1485,6 +1520,11 @@ def import_wiktextract(
             # Filter out misspellings (applies to all POS)
             if _is_misspelling(entry):
                 stats["misspellings_skipped"] += 1
+                continue
+
+            # Filter out lemmas with malformed Wiktextract data (applies to all POS)
+            if _is_blocklisted_lemma(entry):
+                stats["blocklisted_lemmas"] += 1
                 continue
 
             # Filter out alt-of entries for adjectives (gran, grand', bel, bell')

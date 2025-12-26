@@ -374,6 +374,8 @@ def _run_wiktextract_import(
     print(f"{indent}Skipped:     {stats['skipped']:,}")
     if stats.get("nouns_skipped_no_gender", 0) > 0:
         print(f"{indent}  No gender: {stats['nouns_skipped_no_gender']:,}")
+    if stats.get("blocklisted_lemmas", 0) > 0:
+        print(f"{indent}  Blocklisted: {stats['blocklisted_lemmas']:,}")
     return stats
 
 
