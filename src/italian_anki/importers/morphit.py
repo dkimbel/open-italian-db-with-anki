@@ -509,6 +509,77 @@ def apply_unstressed_fallback(
     return stats
 
 
+def apply_orthography_fallback(
+    conn: Connection,
+    pos_filter: str = "noun",
+) -> dict[str, int]:
+    """Derive written from stressed for remaining NULL values using orthography rules.
+
+    This is the final fallback for forms that:
+    - Were not found in Morph-it!
+    - Could not use the unstressed fallback (have accent marks)
+
+    Uses Italian orthography rules to derive the correct written form from the
+    stressed form. Handles French loanwords with multiple accents via whitelist.
+
+    Sets written_source to either:
+    - 'derived:orthography_rule' for standard derivation
+    - 'hardcoded:loanword' for French loanword whitelist matches
+
+    Args:
+        conn: SQLAlchemy connection
+        pos_filter: Part of speech to process (default: "noun")
+
+    Returns:
+        Statistics dict with 'updated', 'loanwords', 'failed' counts
+    """
+    from italian_anki.normalize import (
+        FRENCH_LOANWORD_WHITELIST,
+        derive_written_from_stressed,
+    )
+
+    stats = {"updated": 0, "loanwords": 0, "failed": 0}
+
+    pos_form_table = POS_FORM_TABLES.get(pos_filter)
+    if pos_form_table is None:
+        return stats
+
+    # Find forms with NULL written
+    result = conn.execute(
+        select(pos_form_table.c.id, pos_form_table.c.stressed).where(
+            pos_form_table.c.written.is_(None)
+        )
+    )
+
+    for row in result:
+        stressed_form = row.stressed
+        # Skip "-" which represents missing forms for defective verbs
+        if stressed_form == "-":
+            continue
+
+        # Try to derive written form
+        written = derive_written_from_stressed(stressed_form)
+        if written is None:
+            stats["failed"] += 1
+            continue
+
+        # Determine source: loanword whitelist or regular derivation
+        if stressed_form in FRENCH_LOANWORD_WHITELIST:
+            written_source = "hardcoded:loanword"
+            stats["loanwords"] += 1
+        else:
+            written_source = "derived:orthography_rule"
+
+        conn.execute(
+            update(pos_form_table)
+            .where(pos_form_table.c.id == row.id)
+            .values(written=written, written_source=written_source)
+        )
+        stats["updated"] += 1
+
+    return stats
+
+
 def _build_lemma_lookup(morphit_path: Path) -> tuple[dict[str, str], dict[str, str]]:
     """Build lookup dicts for Morphit lemmas.
 

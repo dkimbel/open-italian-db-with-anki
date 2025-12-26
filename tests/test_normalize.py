@@ -111,3 +111,15 @@ class TestDeriveWrittenFromStressed:
     def test_multi_word_with_unaccented_words(self) -> None:
         assert derive_written_from_stressed("il bèllo") == "il bello"
         assert derive_written_from_stressed("la càsa") == "la casa"
+
+    def test_french_loanword_whitelist(self) -> None:
+        # French loanwords with multiple accents should be returned unchanged
+        assert derive_written_from_stressed("décolleté") == "décolleté"
+        assert derive_written_from_stressed("négligé") == "négligé"
+        assert derive_written_from_stressed("séparé") == "séparé"
+        assert derive_written_from_stressed("arrière-pensée") == "arrière-pensée"
+
+    def test_non_whitelisted_multi_accent_returns_none(self) -> None:
+        # Multi-accent words NOT in the whitelist should return None
+        # (and log a warning, but we don't test that here)
+        assert derive_written_from_stressed("café-théâtre") is None

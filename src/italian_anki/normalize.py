@@ -100,6 +100,15 @@ ACCENT_WHITELIST = frozenset(
 # (These are single-syllable due to the 'qu' digraph being a single consonant unit)
 ACCENT_BLACKLIST = frozenset({"qua", "qui"})
 
+# French loanwords with multiple accents that are used as-is in Italian
+# These bypass the normal multi-accent warning and are returned unchanged
+FRENCH_LOANWORD_WHITELIST: dict[str, str] = {
+    "arrière-pensée": "arrière-pensée",
+    "décolleté": "décolleté",
+    "négligé": "négligé",
+    "séparé": "séparé",
+}
+
 # All accented characters (both uppercase and lowercase)
 ACCENTED_CHARS = frozenset("àèéìòóùÀÈÉÌÒÓÙ")
 
@@ -114,10 +123,14 @@ def _derive_single_word(word: str) -> str | None:
     """Derive written form for a single word (no spaces).
 
     Returns the written form, or None if derivation fails (e.g., multiple accents).
-    Logs a warning for single words with multiple accents.
+    Logs a warning for single words with multiple accents (unless whitelisted).
     """
     if not word:
         return None
+
+    # Check French loanword whitelist first (bypasses multi-accent warning)
+    if word in FRENCH_LOANWORD_WHITELIST:
+        return FRENCH_LOANWORD_WHITELIST[word]
 
     # Count accent marks in this single word
     accent_count = sum(1 for c in word if c in ACCENTED_CHARS)

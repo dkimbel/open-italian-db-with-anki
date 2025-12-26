@@ -33,6 +33,7 @@ from italian_anki.importers import (
 )
 from italian_anki.importers.itwac import ITWAC_CSV_FILES
 from italian_anki.importers.morphit import (
+    apply_orthography_fallback,
     apply_unstressed_fallback,
     enrich_lemma_written,
     fill_missing_adjective_forms,
@@ -489,7 +490,9 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print()
 
         # Determine step count: adjectives have 2 extra steps (allomorphs, fill-missing)
-        total_steps = 9 if pos == "adjective" else 7
+        # All POS have: wiktextract, form-of, morphit forms, morphit lemmas, form-of spelling,
+        #               unstressed fallback, orthography fallback, itwac
+        total_steps = 10 if pos == "adjective" else 8
 
         with get_connection(db_path) as conn:
             # Step 1: Wiktextract import
@@ -563,8 +566,18 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             print(f"{indent}Forms updated: {stats['updated']:,}")
             print()
 
-            # Step 7 (or 9 for adjectives): ItWaC frequency import
-            step_itwac = 9 if pos == "adjective" else 7
+            # Step 7 (or 9 for adjectives): Orthography-based written derivation
+            step_ortho = 9 if pos == "adjective" else 7
+            print(f"[{step_ortho}/{total_steps}] Applying orthography-based written derivation...")
+            stats = apply_orthography_fallback(conn, pos_filter=pos)
+            print(f"{indent}Forms updated: {stats['updated']:,}")
+            print(f"{indent}Loanwords:     {stats['loanwords']:,}")
+            if stats["failed"] > 0:
+                print(f"{indent}Failed:        {stats['failed']:,}")
+            print()
+
+            # Step 8 (or 10 for adjectives): ItWaC frequency import
+            step_itwac = 10 if pos == "adjective" else 8
             csv_filename = ITWAC_CSV_FILES.get(pos)
             if csv_filename:
                 csv_path = DEFAULT_ITWAC_DIR / csv_filename
