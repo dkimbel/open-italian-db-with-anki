@@ -11,7 +11,6 @@ from sqlalchemy import Connection, Table, select, update
 from italian_anki.articles import get_definite
 from italian_anki.db.schema import (
     adjective_forms,
-    form_lookup,
     lemmas,
     noun_forms,
     verb_forms,
@@ -215,7 +214,7 @@ def import_morphit(
     Returns:
         Statistics dict with counts
     """
-    stats = {"updated": 0, "not_found": 0, "lookup_added": 0, "exact_matched": 0}
+    stats = {"updated": 0, "not_found": 0, "exact_matched": 0}
 
     # Get POS-specific form table
     pos_form_table = POS_FORM_TABLES.get(pos_filter)
@@ -239,10 +238,9 @@ def import_morphit(
 
     # Batch updates
     update_batch: list[dict[str, Any]] = []
-    lookup_batch: list[dict[str, Any]] = []
 
     def flush_batches() -> None:
-        nonlocal update_batch, lookup_batch
+        nonlocal update_batch
 
         if update_batch:
             # Update written column in POS-specific table
@@ -254,14 +252,6 @@ def import_morphit(
                 )
             stats["updated"] += len(update_batch)
             update_batch = []
-
-        if lookup_batch:
-            conn.execute(
-                form_lookup.insert().prefix_with("OR IGNORE"),
-                lookup_batch,
-            )
-            stats["lookup_added"] += len(lookup_batch)
-            lookup_batch = []
 
     for idx, row in enumerate(all_forms, 1):
         if progress_callback and idx % 10000 == 0:
@@ -281,19 +271,6 @@ def import_morphit(
 
         if real_form:
             update_batch.append({"id": form_id, "written": real_form, "written_source": "morphit"})
-
-            # Also add the Morph-it! normalized form to lookup
-            # (in case it differs from Wiktextract normalization)
-            morphit_normalized = normalize(real_form)
-            normalized = normalize(stressed_form)
-            if morphit_normalized != normalized:
-                lookup_batch.append(
-                    {
-                        "form_normalized": morphit_normalized,
-                        "pos": pos_filter,
-                        "form_id": form_id,
-                    }
-                )
         else:
             stats["not_found"] += 1
 

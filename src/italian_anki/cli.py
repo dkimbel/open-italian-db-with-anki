@@ -402,7 +402,6 @@ def _run_morphit_import(
     print()
     print(f"{indent}Forms updated:    {stats['updated']:,}")
     print(f"{indent}Forms not found:  {stats['not_found']:,}")
-    print(f"{indent}Lookup entries:   {stats['lookup_added']:,}")
     return stats
 
 

@@ -14,7 +14,6 @@ from italian_anki.db.schema import (
     adjective_forms,
     adjective_metadata,
     definitions,
-    form_lookup,
     frequencies,
     lemmas,
     noun_forms,
@@ -1081,8 +1080,8 @@ def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | 
 def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     """Clear all existing data for the given POS.
 
-    Deletes in FK-safe order: form_lookup → POS form tables → definitions
-    → frequencies → verb_metadata → lemmas.
+    Deletes in FK-safe order: POS form tables → definitions → frequencies
+    → verb_metadata → lemmas.
     Returns the number of lemmas cleared.
     """
     # Count existing lemmas for this POS (for return value)
@@ -1101,23 +1100,15 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     pos_form_table = POS_FORM_TABLES.get(pos_filter)
 
     # Delete in FK-safe order
-    # 1. form_lookup (references *_forms tables)
+    # 1. POS-specific form table
     if pos_form_table is not None:
-        form_id_subq = select(pos_form_table.c.id).where(pos_form_table.c.lemma_id.in_(lemma_subq))
-        conn.execute(
-            form_lookup.delete().where(
-                form_lookup.c.form_id.in_(form_id_subq),
-                form_lookup.c.pos == pos_filter,
-            )
-        )
-        # 2. POS-specific form table
         conn.execute(pos_form_table.delete().where(pos_form_table.c.lemma_id.in_(lemma_subq)))
 
-    # 3. definitions (references lemmas)
+    # 2. definitions (references lemmas)
     conn.execute(definitions.delete().where(definitions.c.lemma_id.in_(lemma_subq)))
-    # 4. frequencies (references lemmas)
+    # 3. frequencies (references lemmas)
     conn.execute(frequencies.delete().where(frequencies.c.lemma_id.in_(lemma_subq)))
-    # 5. POS-specific metadata tables
+    # 4. POS-specific metadata tables
     if pos_filter == "verb":
         conn.execute(verb_metadata.delete().where(verb_metadata.c.lemma_id.in_(lemma_subq)))
     elif pos_filter == "noun":
@@ -1126,7 +1117,7 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
         conn.execute(
             adjective_metadata.delete().where(adjective_metadata.c.lemma_id.in_(lemma_subq))
         )
-    # 6. lemmas (direct filter, no subquery needed)
+    # 5. lemmas (direct filter, no subquery needed)
     conn.execute(lemmas.delete().where(lemmas.c.pos == pos_filter))
 
     return count
@@ -1412,7 +1403,6 @@ def import_wiktextract(
         raise ValueError(msg)
 
     form_batch: list[dict[str, Any]] = []
-    lookup_batch: list[dict[str, Any]] = []
     definition_batch: list[dict[str, Any]] = []
 
     # Track unique verb forms to avoid duplicates (Wiktextract source sometimes has duplicates)
@@ -1448,34 +1438,11 @@ def import_wiktextract(
         return True
 
     def flush_batches() -> None:
-        nonlocal form_batch, lookup_batch, definition_batch
+        nonlocal form_batch, definition_batch
         if form_batch:
-            result = conn.execute(
-                pos_form_table.insert().returning(pos_form_table.c.id), form_batch
-            )
-            form_ids = [row.id for row in result]
-
-            # Build lookup entries with the returned IDs
-            for form_id, form_data in zip(form_ids, form_batch, strict=True):
-                form_normalized = normalize(form_data["stressed"])
-                lookup_batch.append(
-                    {
-                        "form_normalized": form_normalized,
-                        "pos": pos_filter,
-                        "form_id": form_id,
-                    }
-                )
-
+            conn.execute(pos_form_table.insert(), form_batch)
+            stats["forms"] += len(form_batch)
             form_batch = []
-            stats["forms"] += len(form_ids)
-
-        if lookup_batch:
-            # Use INSERT OR IGNORE for lookup (same normalized form can map to multiple form_ids)
-            conn.execute(
-                form_lookup.insert().prefix_with("OR IGNORE"),
-                lookup_batch,
-            )
-            lookup_batch = []
 
         if definition_batch:
             conn.execute(definitions.insert(), definition_batch)

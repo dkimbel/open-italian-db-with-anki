@@ -149,17 +149,6 @@ adjective_forms = Table(
     ),
 )
 
-# Lookup table for matching forms in sentences (with POS awareness)
-# WITHOUT ROWID: All columns are in PK, so no need for hidden rowid
-form_lookup = Table(
-    "form_lookup",
-    metadata,
-    Column("form_normalized", Text, nullable=False, primary_key=True),  # accent-stripped
-    Column("pos", Text, nullable=False, primary_key=True),  # verb, noun, adjective
-    Column("form_id", Integer, nullable=False, primary_key=True),  # references *_forms.id
-    sqlite_with_rowid=False,
-)
-
 # English definitions
 definitions = Table(
     "definitions",
@@ -289,8 +278,6 @@ Index("idx_adjective_forms_written", adjective_forms.c.written)
 Index("idx_adjective_forms_origin", adjective_forms.c.form_origin)
 # adjective_metadata indexes
 Index("idx_adjective_metadata_base", adjective_metadata.c.base_lemma_id)
-# New form_lookup indexes
-Index("idx_form_lookup_form_id", form_lookup.c.form_id)
 # Other indexes
 Index("idx_definitions_lemma", definitions.c.lemma_id)
 Index("idx_frequencies_lemma", frequencies.c.lemma_id)

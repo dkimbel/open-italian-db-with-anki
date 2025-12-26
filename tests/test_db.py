@@ -74,7 +74,6 @@ class TestSchema:
                 "verb_forms",
                 "noun_forms",
                 "adjective_forms",
-                "form_lookup",
                 "definitions",
                 "sentences",
                 "translations",

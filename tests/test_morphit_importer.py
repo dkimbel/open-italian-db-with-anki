@@ -10,7 +10,6 @@ from sqlalchemy import select
 
 from italian_anki.db import (
     adjective_forms,
-    form_lookup,
     get_connection,
     get_engine,
     init_db,
@@ -207,41 +206,6 @@ class TestMorphitImporter:
             # Verbs already have written, so updated=0
             # The point is it shouldn't crash on non-verb entries
             assert stats["updated"] == 0
-
-        finally:
-            db_path.unlink()
-            jsonl_path.unlink()
-            morphit_path.unlink()
-
-    def test_adds_lookup_entries(self) -> None:
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
-            db_path = Path(db_file.name)
-
-        jsonl_path = _create_test_jsonl([SAMPLE_VERB])
-        morphit_path = _create_test_morphit(
-            [
-                "parlo\tparlare\tVER:ind+pres+1+s",
-            ]
-        )
-
-        try:
-            engine = get_engine(db_path)
-            init_db(engine)
-
-            with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path)
-                # Count lookup entries before
-                before_count = conn.execute(select(form_lookup)).fetchall()
-
-            with get_connection(db_path) as conn:
-                import_morphit(conn, morphit_path)
-
-            with get_connection(db_path) as conn:
-                # Count lookup entries after
-                after_count = conn.execute(select(form_lookup)).fetchall()
-
-                # Should have at least as many entries as before
-                assert len(after_count) >= len(before_count)
 
         finally:
             db_path.unlink()

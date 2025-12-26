@@ -11,7 +11,6 @@ from italian_anki.db import (
     adjective_forms,
     adjective_metadata,
     definitions,
-    form_lookup,
     get_connection,
     get_engine,
     init_db,
@@ -324,10 +323,6 @@ class TestWiktextractImporter:
                     select(definitions).where(definitions.c.lemma_id == lemma_id)
                 ).fetchall()
                 assert len(def_rows) == 2
-
-                # Check form_lookup was populated
-                lookup_rows = conn.execute(select(form_lookup)).fetchall()
-                assert len(lookup_rows) > 0
         finally:
             db_path.unlink()
             jsonl_path.unlink()
@@ -426,7 +421,6 @@ class TestWiktextractImporter:
             # Get counts after first import
             with get_connection(db_path) as conn:
                 forms_before = len(conn.execute(select(verb_forms)).fetchall())
-                lookup_before = len(conn.execute(select(form_lookup)).fetchall())
 
             # Second import
             with get_connection(db_path) as conn:
@@ -435,10 +429,8 @@ class TestWiktextractImporter:
             # Counts should be the same (not doubled)
             with get_connection(db_path) as conn:
                 forms_after = len(conn.execute(select(verb_forms)).fetchall())
-                lookup_after = len(conn.execute(select(form_lookup)).fetchall())
 
             assert forms_after == forms_before
-            assert lookup_after == lookup_before
 
         finally:
             db_path.unlink()
