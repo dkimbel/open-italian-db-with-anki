@@ -150,12 +150,14 @@ adjective_forms = Table(
 )
 
 # Lookup table for matching forms in sentences (with POS awareness)
+# WITHOUT ROWID: All columns are in PK, so no need for hidden rowid
 form_lookup = Table(
     "form_lookup",
     metadata,
     Column("form_normalized", Text, nullable=False, primary_key=True),  # accent-stripped
     Column("pos", Text, nullable=False, primary_key=True),  # verb, noun, adjective
     Column("form_id", Integer, nullable=False, primary_key=True),  # references *_forms.id
+    sqlite_with_rowid=False,
 )
 
 # English definitions
@@ -182,11 +184,13 @@ sentences = Table(
 )
 
 # Translation links
+# WITHOUT ROWID: All columns are in PK, so no need for hidden rowid
 translations = Table(
     "translations",
     metadata,
     Column("ita_sentence_id", Integer, primary_key=True),
     Column("eng_sentence_id", Integer, primary_key=True),
+    sqlite_with_rowid=False,
 )
 
 # Verb-specific metadata (auxiliary and transitivity)
