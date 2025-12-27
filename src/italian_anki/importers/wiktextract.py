@@ -184,35 +184,26 @@ def _get_adjective_inflection_class(entry: dict[str, Any]) -> str:
     return "4-form"
 
 
-def _is_alt_form_entry(entry: dict[str, Any]) -> bool:
-    """Check if entry is an alt-of entry (apocopic, elided, etc.).
+def _is_pure_alt_form_entry(entry: dict[str, Any]) -> bool:
+    """Check if entry is PURELY an alt-of entry (no other meanings).
 
-    These entries (like "gran", "grand'", "bel", "bell'") are alternate
-    forms of another adjective. With Option A, their forms should be
-    stored under the parent lemma, not as separate lemmas.
+    Returns True only if ALL senses are alt_of or form_of.
+    Returns False if entry has any regular definition senses.
 
-    Detection methods:
-    1. Has alt_of in any sense (e.g., gran -> grande)
-    2. Has head_templates with '2': 'adjective form' BUT no form_of (e.g., bel)
-       Note: Regular inflections like "bella" have form_of and should NOT match
-
-    Returns:
-        True if entry is an adjective form, not a standalone lemma.
+    This preserves entries like "toro" which is both an alt-of "Toro"
+    (Taurus) AND a standalone word meaning "bull".
     """
     senses = entry.get("senses", [])
+    if not senses:
+        return False
 
-    # Method 1: Check for alt_of in senses
-    if any(sense.get("alt_of") for sense in senses):
-        return True
+    for sense in senses:
+        # If any sense is a regular definition (not alt_of or form_of), keep the entry
+        if not sense.get("alt_of") and not sense.get("form_of"):
+            return False
 
-    # Method 2: Check for "adjective form" WITHOUT form_of
-    # Regular inflections (bella, belli, belle) have form_of and should NOT be filtered
-    # Special forms (bel) lack form_of and SHOULD be filtered
-    has_adj_form_template = any(
-        t.get("args", {}).get("2") == "adjective form" for t in entry.get("head_templates", [])
-    )
-    has_form_of = any(sense.get("form_of") for sense in senses)
-    return has_adj_form_template and not has_form_of
+    # All senses are alt_of or form_of - safe to filter
+    return any(sense.get("alt_of") for sense in senses)
 
 
 # Hardcoded mappings for irregular comparatives/superlatives
@@ -1538,9 +1529,11 @@ def import_wiktextract(
                 stats["blocklisted_lemmas"] += 1
                 continue
 
-            # Filter out alt-of entries for adjectives (gran, grand', bel, bell')
-            # These are imported as forms of their parent lemma via import_adjective_allomorphs()
-            if pos_filter == "adjective" and _is_alt_form_entry(entry):
+            # Filter out PURE alt-of entries for adjectives and nouns
+            # These are alternative spellings, apocopic forms, archaic variants, etc.
+            # that shouldn't be separate lemmas. Mixed entries (with regular senses too)
+            # are preserved. Adjective allomorphs are later imported via import_adjective_allomorphs().
+            if pos_filter in ("adjective", "noun") and _is_pure_alt_form_entry(entry):
                 stats["alt_forms_skipped"] += 1
                 continue
 

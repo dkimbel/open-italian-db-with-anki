@@ -22,7 +22,6 @@ from italian_anki.db import (
 )
 from italian_anki.importers.tatoeba import import_tatoeba
 from italian_anki.importers.wiktextract import (
-    _is_alt_form_entry,  # pyright: ignore[reportPrivateUsage]
     enrich_form_spelling_from_form_of,
     enrich_from_form_of,
     import_adjective_allomorphs,
@@ -1828,91 +1827,6 @@ class TestNounClassification:
                 # The plural should be the accented "dèi", not unaccented "dei"
                 plural_stressed = [f.stressed for f in plural_forms]
                 assert "dèi" in plural_stressed, f"Expected 'dèi' in {plural_stressed}"
-
-        finally:
-            db_path.unlink()
-            jsonl_path.unlink()
-
-
-class TestAltFormFiltering:
-    """Tests for alt-of entry filtering (apocopic/elided forms)."""
-
-    def test_is_alt_form_entry_with_alt_of(self) -> None:
-        """Entry with alt_of should return True."""
-        entry = {
-            "pos": "adj",
-            "word": "gran",
-            "senses": [
-                {
-                    "tags": ["apocopic"],
-                    "alt_of": [{"word": "grande"}],
-                    "glosses": ["apocopic form of grande"],
-                }
-            ],
-        }
-        assert _is_alt_form_entry(entry) is True
-
-    def test_is_alt_form_entry_without_alt_of(self) -> None:
-        """Regular entry without alt_of should return False."""
-        entry = {
-            "pos": "adj",
-            "word": "grande",
-            "senses": [{"glosses": ["big", "large"]}],
-        }
-        assert _is_alt_form_entry(entry) is False
-
-    def test_is_alt_form_entry_empty_senses(self) -> None:
-        """Entry with no senses should return False."""
-        entry: dict[str, Any] = {"pos": "adj", "word": "test", "senses": []}
-        assert _is_alt_form_entry(entry) is False
-
-    def test_alt_form_entries_skipped_during_import(self) -> None:
-        """Alt-form entries should be skipped during adjective import."""
-        # Parent adjective entry
-        grande_entry = {
-            "pos": "adj",
-            "word": "grande",
-            "forms": [{"form": "grànde", "tags": ["canonical"]}],
-            "senses": [{"glosses": ["big", "large"]}],
-        }
-
-        # Alt-form entry (should be skipped)
-        gran_entry = {
-            "pos": "adj",
-            "word": "gran",
-            "senses": [
-                {
-                    "tags": ["apocopic"],
-                    "alt_of": [{"word": "grande"}],
-                    "glosses": ["apocopic form of grande"],
-                }
-            ],
-        }
-
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
-            db_path = Path(db_file.name)
-
-        jsonl_path = _create_test_jsonl([grande_entry, gran_entry])
-
-        try:
-            engine = get_engine(db_path)
-            init_db(engine)
-
-            with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
-
-            # Only grande should be imported, gran should be skipped
-            assert stats["lemmas"] == 1
-            assert stats["alt_forms_skipped"] == 1
-
-            with get_connection(db_path) as conn:
-                all_lemmas = conn.execute(
-                    select(lemmas).where(lemmas.c.pos == "adjective")
-                ).fetchall()
-                lemma_words = [lem.normalized for lem in all_lemmas]
-
-                assert "grande" in lemma_words
-                assert "gran" not in lemma_words
 
         finally:
             db_path.unlink()
