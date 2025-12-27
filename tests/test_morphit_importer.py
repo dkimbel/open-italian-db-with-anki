@@ -402,10 +402,10 @@ class TestMorphitAdjectiveFallback:
                 # Check all gender/number combinations exist
                 combos = {(r.gender, r.number) for r in form_rows}
                 expected = {
-                    ("masculine", "singular"),
-                    ("feminine", "singular"),
-                    ("masculine", "plural"),
-                    ("feminine", "plural"),
+                    ("m", "singular"),
+                    ("f", "singular"),
+                    ("m", "plural"),
+                    ("f", "plural"),
                 }
                 assert combos == expected
 

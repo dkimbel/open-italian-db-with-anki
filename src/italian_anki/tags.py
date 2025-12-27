@@ -226,10 +226,10 @@ def parse_verb_tags(tags: list[str]) -> VerbFormFeatures:
             result.number = tag
             break
 
-    # Extract gender (for participles)
+    # Extract gender (for participles) - convert to short form
     for tag in GENDER_TAGS:
         if tag in tag_set:
-            result.gender = tag
+            result.gender = "m" if tag == "masculine" else "f"
             break
 
     # Extract booleans
@@ -308,10 +308,10 @@ def parse_adjective_tags(tags: list[str]) -> AdjectiveFormFeatures:
         result.should_filter = True
         return result
 
-    # Extract gender
+    # Extract gender - convert to short form
     for tag in GENDER_TAGS:
         if tag in tag_set:
-            result.gender = tag
+            result.gender = "m" if tag == "masculine" else "f"
             break
 
     # Extract number

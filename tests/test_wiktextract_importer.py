@@ -305,14 +305,14 @@ class TestWiktextractImporter:
 
                 # Check verb_metadata was inserted
                 meta = conn.execute(
-                    select(verb_metadata).where(verb_metadata.c.lemma_id == row.lemma_id)
+                    select(verb_metadata).where(verb_metadata.c.lemma_id == row.id)
                 ).fetchone()
                 assert meta is not None
                 assert meta.auxiliary == "avere"
                 assert meta.transitivity == "both"
 
                 # Check forms were inserted in verb_forms table
-                lemma_id = row.lemma_id
+                lemma_id = row.id
                 form_rows = conn.execute(
                     select(verb_forms).where(verb_forms.c.lemma_id == lemma_id)
                 ).fetchall()
@@ -462,11 +462,11 @@ class TestWiktextractImporter:
 
                 # Gender is now stored per-form in noun_forms
                 libro_forms = conn.execute(
-                    select(noun_forms).where(noun_forms.c.lemma_id == libro.lemma_id)
+                    select(noun_forms).where(noun_forms.c.lemma_id == libro.id)
                 ).fetchall()
                 assert len(libro_forms) >= 1
                 # Check that forms have gender
-                assert all(f.gender == "masculine" for f in libro_forms)
+                assert all(f.gender == "m" for f in libro_forms)
                 # Check that articles are computed
                 libro_sing = [f for f in libro_forms if f.number == "singular"]
                 assert len(libro_sing) >= 1
@@ -478,10 +478,10 @@ class TestWiktextractImporter:
                 assert casa is not None
 
                 casa_forms = conn.execute(
-                    select(noun_forms).where(noun_forms.c.lemma_id == casa.lemma_id)
+                    select(noun_forms).where(noun_forms.c.lemma_id == casa.id)
                 ).fetchall()
                 assert len(casa_forms) >= 1
-                assert all(f.gender == "feminine" for f in casa_forms)
+                assert all(f.gender == "f" for f in casa_forms)
                 # Check feminine articles
                 casa_sing = [f for f in casa_forms if f.number == "singular"]
                 assert len(casa_sing) >= 1
@@ -520,7 +520,7 @@ class TestWiktextractImporter:
 
                 # Check forms were inserted in adjective_forms table
                 form_rows = conn.execute(
-                    select(adjective_forms).where(adjective_forms.c.lemma_id == bello.lemma_id)
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == bello.id)
                 ).fetchall()
                 form_texts = [row.stressed for row in form_rows]
                 assert "bello" in form_texts  # canonical kept for adjectives
@@ -564,13 +564,13 @@ class TestWiktextractImporter:
                 assert alto is not None
 
                 form_rows = conn.execute(
-                    select(adjective_forms).where(adjective_forms.c.lemma_id == alto.lemma_id)
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == alto.id)
                 ).fetchall()
 
                 # Check alta was imported with inferred singular
                 alta_form = next((f for f in form_rows if f.stressed == "alta"), None)
                 assert alta_form is not None, "alta should be imported"
-                assert alta_form.gender == "feminine"
+                assert alta_form.gender == "f"
                 assert alta_form.number == "singular"
                 assert alta_form.def_article == "l'"  # l'alta
 
@@ -607,7 +607,7 @@ class TestWiktextractImporter:
                 assert facile is not None
 
                 form_rows = conn.execute(
-                    select(adjective_forms).where(adjective_forms.c.lemma_id == facile.lemma_id)
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == facile.id)
                 ).fetchall()
 
                 # Check facili appears as both masculine and feminine plural
@@ -615,7 +615,7 @@ class TestWiktextractImporter:
                 assert len(facili_forms) == 2, "facili should appear twice (m.pl and f.pl)"
 
                 genders = {f.gender for f in facili_forms}
-                assert genders == {"masculine", "feminine"}
+                assert genders == {"m", "f"}
 
                 for f in facili_forms:
                     assert f.number == "plural"
@@ -625,7 +625,7 @@ class TestWiktextractImporter:
                 assert len(facile_forms) == 2, "facile should appear twice (m.sg and f.sg)"
 
                 genders = {f.gender for f in facile_forms}
-                assert genders == {"masculine", "feminine"}
+                assert genders == {"m", "f"}
 
                 for f in facile_forms:
                     assert f.number == "singular"
@@ -658,7 +658,7 @@ class TestWiktextractImporter:
                 assert blu is not None
 
                 form_rows = conn.execute(
-                    select(adjective_forms).where(adjective_forms.c.lemma_id == blu.lemma_id)
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == blu.id)
                 ).fetchall()
 
                 assert len(form_rows) == 4
@@ -670,10 +670,10 @@ class TestWiktextractImporter:
                 # Check all 4 gender/number combinations exist
                 combos = {(f.gender, f.number) for f in form_rows}
                 assert combos == {
-                    ("masculine", "singular"),
-                    ("masculine", "plural"),
-                    ("feminine", "singular"),
-                    ("feminine", "plural"),
+                    ("m", "singular"),
+                    ("m", "plural"),
+                    ("f", "singular"),
+                    ("f", "plural"),
                 }
 
                 # All forms should have form_origin = "inferred:invariable"
@@ -704,7 +704,7 @@ class TestWiktextractImporter:
                 blu = conn.execute(select(lemmas).where(lemmas.c.normalized == "blu")).fetchone()
                 assert blu is not None
                 blu_forms = conn.execute(
-                    select(adjective_forms).where(adjective_forms.c.lemma_id == blu.lemma_id)
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == blu.id)
                 ).fetchall()
                 for f in blu_forms:
                     assert f.form_origin == "inferred:invariable"
@@ -715,7 +715,7 @@ class TestWiktextractImporter:
                 ).fetchone()
                 assert facile is not None
                 facile_forms = conn.execute(
-                    select(adjective_forms).where(adjective_forms.c.lemma_id == facile.lemma_id)
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == facile.id)
                 ).fetchall()
 
                 # Plural forms from wiktextract should have "inferred:two_form"
@@ -756,9 +756,7 @@ class TestWiktextractImporter:
                 ).fetchone()
                 assert bello is not None
                 bello_meta = conn.execute(
-                    select(adjective_metadata).where(
-                        adjective_metadata.c.lemma_id == bello.lemma_id
-                    )
+                    select(adjective_metadata).where(adjective_metadata.c.lemma_id == bello.id)
                 ).fetchone()
                 assert bello_meta is not None
                 assert bello_meta.inflection_class == "4-form"
@@ -769,9 +767,7 @@ class TestWiktextractImporter:
                 ).fetchone()
                 assert facile is not None
                 facile_meta = conn.execute(
-                    select(adjective_metadata).where(
-                        adjective_metadata.c.lemma_id == facile.lemma_id
-                    )
+                    select(adjective_metadata).where(adjective_metadata.c.lemma_id == facile.id)
                 ).fetchone()
                 assert facile_meta is not None
                 assert facile_meta.inflection_class == "2-form"
@@ -780,7 +776,7 @@ class TestWiktextractImporter:
                 blu = conn.execute(select(lemmas).where(lemmas.c.normalized == "blu")).fetchone()
                 assert blu is not None
                 blu_meta = conn.execute(
-                    select(adjective_metadata).where(adjective_metadata.c.lemma_id == blu.lemma_id)
+                    select(adjective_metadata).where(adjective_metadata.c.lemma_id == blu.id)
                 ).fetchone()
                 assert blu_meta is not None
                 assert blu_meta.inflection_class == "invariable"
@@ -816,16 +812,14 @@ class TestWiktextractImporter:
                 assert ottimista is not None
 
                 meta = conn.execute(
-                    select(adjective_metadata).where(
-                        adjective_metadata.c.lemma_id == ottimista.lemma_id
-                    )
+                    select(adjective_metadata).where(adjective_metadata.c.lemma_id == ottimista.id)
                 ).fetchone()
                 assert meta is not None
                 assert meta.inflection_class == "2-form"
 
                 # Check that feminine singular was generated from the shared singular
                 forms = conn.execute(
-                    select(adjective_forms).where(adjective_forms.c.lemma_id == ottimista.lemma_id)
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == ottimista.id)
                 ).fetchall()
 
                 # Should have 4 forms: m.sg, f.sg (shared text), m.pl, f.pl
@@ -835,7 +829,7 @@ class TestWiktextractImporter:
                 sing_forms = [f for f in forms if f.number == "singular"]
                 assert len(sing_forms) == 2
                 sing_genders = {f.gender for f in sing_forms}
-                assert sing_genders == {"masculine", "feminine"}
+                assert sing_genders == {"m", "f"}
                 # Both singulars should have the same text
                 assert all(f.stressed == "ottimista" for f in sing_forms)
 
@@ -920,12 +914,10 @@ class TestWiktextractImporter:
                 assert cattivo is not None
 
                 pessimo_meta = conn.execute(
-                    select(adjective_metadata).where(
-                        adjective_metadata.c.lemma_id == pessimo.lemma_id
-                    )
+                    select(adjective_metadata).where(adjective_metadata.c.lemma_id == pessimo.id)
                 ).fetchone()
                 assert pessimo_meta is not None
-                assert pessimo_meta.base_lemma_id == cattivo.lemma_id
+                assert pessimo_meta.base_lemma_id == cattivo.id
                 assert pessimo_meta.degree_relationship == "superlative_of"
                 assert pessimo_meta.degree_relationship_source == "hardcoded"
 
@@ -1011,7 +1003,7 @@ class TestWiktextractImporter:
                 # Find the first-person singular form
                 form_row = conn.execute(
                     select(verb_forms).where(
-                        verb_forms.c.lemma_id == parlare.lemma_id,
+                        verb_forms.c.lemma_id == parlare.id,
                         verb_forms.c.person == 1,
                         verb_forms.c.number == "singular",
                         verb_forms.c.mood == "indicative",
@@ -1037,7 +1029,7 @@ class TestWiktextractImporter:
 
                 form_row = conn.execute(
                     select(verb_forms).where(
-                        verb_forms.c.lemma_id == parlare.lemma_id,
+                        verb_forms.c.lemma_id == parlare.id,
                         verb_forms.c.person == 1,
                         verb_forms.c.number == "singular",
                         verb_forms.c.mood == "indicative",
@@ -1401,7 +1393,7 @@ class TestNounClassification:
 
                 # Check noun_metadata
                 meta = conn.execute(
-                    select(noun_metadata).where(noun_metadata.c.lemma_id == collega.lemma_id)
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == collega.id)
                 ).fetchone()
                 assert meta is not None
                 assert meta.gender_class == "common_gender_variable"
@@ -1409,21 +1401,21 @@ class TestNounClassification:
 
                 # Check forms - should have 4 forms: M/F singular, M/F plural
                 forms = conn.execute(
-                    select(noun_forms).where(noun_forms.c.lemma_id == collega.lemma_id)
+                    select(noun_forms).where(noun_forms.c.lemma_id == collega.id)
                 ).fetchall()
                 assert len(forms) >= 4
 
                 # Check we have both genders for singular
                 sing_forms = [f for f in forms if f.number == "singular"]
                 sing_genders = {f.gender for f in sing_forms}
-                assert "masculine" in sing_genders
-                assert "feminine" in sing_genders
+                assert "m" in sing_genders
+                assert "f" in sing_genders
 
                 # Check plurals have explicit gender
                 plural_forms = [f for f in forms if f.number == "plural"]
                 plural_genders = {f.gender for f in plural_forms}
-                assert "masculine" in plural_genders
-                assert "feminine" in plural_genders
+                assert "m" in plural_genders
+                assert "f" in plural_genders
 
         finally:
             db_path.unlink()
@@ -1454,22 +1446,22 @@ class TestNounClassification:
 
                 # Check noun_metadata - mfbysense is detected from args
                 meta = conn.execute(
-                    select(noun_metadata).where(noun_metadata.c.lemma_id == cantante.lemma_id)
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == cantante.id)
                 ).fetchone()
                 assert meta is not None
-                assert meta.gender_class == "mfbysense"
+                assert meta.gender_class == "by_sense"
 
                 # Check forms - should have M/F singular and M/F plural
                 forms = conn.execute(
-                    select(noun_forms).where(noun_forms.c.lemma_id == cantante.lemma_id)
+                    select(noun_forms).where(noun_forms.c.lemma_id == cantante.id)
                 ).fetchall()
                 assert len(forms) >= 4
 
                 # Check both genders exist for singular
                 sing_forms = [f for f in forms if f.number == "singular"]
                 sing_genders = {f.gender for f in sing_forms}
-                assert "masculine" in sing_genders
-                assert "feminine" in sing_genders
+                assert "m" in sing_genders
+                assert "f" in sing_genders
 
         finally:
             db_path.unlink()
@@ -1500,7 +1492,7 @@ class TestNounClassification:
 
                 # Check noun_metadata
                 meta = conn.execute(
-                    select(noun_metadata).where(noun_metadata.c.lemma_id == forbici.lemma_id)
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == forbici.id)
                 ).fetchone()
                 assert meta is not None
                 assert meta.gender_class == "f"
@@ -1508,7 +1500,7 @@ class TestNounClassification:
 
                 # Check forms - should only have plural form
                 forms = conn.execute(
-                    select(noun_forms).where(noun_forms.c.lemma_id == forbici.lemma_id)
+                    select(noun_forms).where(noun_forms.c.lemma_id == forbici.id)
                 ).fetchall()
                 assert len(forms) >= 1
                 assert all(f.number == "plural" for f in forms)
@@ -1542,7 +1534,7 @@ class TestNounClassification:
 
                 # Check noun_metadata
                 meta = conn.execute(
-                    select(noun_metadata).where(noun_metadata.c.lemma_id == citta.lemma_id)
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == citta.id)
                 ).fetchone()
                 assert meta is not None
                 assert meta.gender_class == "f"
@@ -1626,23 +1618,23 @@ class TestNounClassification:
 
                 # Check noun_metadata - should detect both genders from "f": "+"
                 meta = conn.execute(
-                    select(noun_metadata).where(noun_metadata.c.lemma_id == amico.lemma_id)
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == amico.id)
                 ).fetchone()
                 assert meta is not None
                 assert meta.gender_class == "common_gender_variable"
 
                 # Check forms - should have masculine and feminine forms
                 forms = conn.execute(
-                    select(noun_forms).where(noun_forms.c.lemma_id == amico.lemma_id)
+                    select(noun_forms).where(noun_forms.c.lemma_id == amico.id)
                 ).fetchall()
 
                 # Check we have feminine singular form (amica)
-                fem_sing = [f for f in forms if f.gender == "feminine" and f.number == "singular"]
+                fem_sing = [f for f in forms if f.gender == "f" and f.number == "singular"]
                 assert len(fem_sing) == 1, f"Expected 1 feminine singular, got {len(fem_sing)}"
                 assert fem_sing[0].stressed == "amica"
 
                 # Check we have feminine plural form (amiche)
-                fem_plur = [f for f in forms if f.gender == "feminine" and f.number == "plural"]
+                fem_plur = [f for f in forms if f.gender == "f" and f.number == "plural"]
                 assert len(fem_plur) >= 1, f"Expected feminine plural, got {len(fem_plur)}"
 
         finally:
@@ -1707,16 +1699,16 @@ class TestNounClassification:
                 assert amico is not None
 
                 forms = conn.execute(
-                    select(noun_forms).where(noun_forms.c.lemma_id == amico.lemma_id)
+                    select(noun_forms).where(noun_forms.c.lemma_id == amico.id)
                 ).fetchall()
 
                 # Check masculine plural (amici)
-                masc_plur = [f for f in forms if f.gender == "masculine" and f.number == "plural"]
+                masc_plur = [f for f in forms if f.gender == "m" and f.number == "plural"]
                 assert len(masc_plur) == 1, f"Expected 1 masculine plural, got {len(masc_plur)}"
                 assert masc_plur[0].stressed == "amici"
 
                 # Check feminine plural (amiche) - from counterpart lookup!
-                fem_plur = [f for f in forms if f.gender == "feminine" and f.number == "plural"]
+                fem_plur = [f for f in forms if f.gender == "f" and f.number == "plural"]
                 assert len(fem_plur) == 1, f"Expected 1 feminine plural, got {len(fem_plur)}"
                 assert fem_plur[0].stressed == "amiche"
 
@@ -1763,17 +1755,17 @@ class TestNounClassification:
                 assert dio is not None
 
                 forms = conn.execute(
-                    select(noun_forms).where(noun_forms.c.lemma_id == dio.lemma_id)
+                    select(noun_forms).where(noun_forms.c.lemma_id == dio.id)
                 ).fetchall()
 
                 # Check masculine plurals - should have both dei and dii
-                masc_plur = [f for f in forms if f.gender == "masculine" and f.number == "plural"]
+                masc_plur = [f for f in forms if f.gender == "m" and f.number == "plural"]
                 masc_forms = {f.stressed for f in masc_plur}
                 assert "dei" in masc_forms, f"Expected 'dei' in masculine plurals, got {masc_forms}"
                 assert "dii" in masc_forms, f"Expected 'dii' in masculine plurals, got {masc_forms}"
 
                 # Check feminine plural - should ONLY have dee, NOT dei/dii
-                fem_plur = [f for f in forms if f.gender == "feminine" and f.number == "plural"]
+                fem_plur = [f for f in forms if f.gender == "f" and f.number == "plural"]
                 fem_forms = {f.stressed for f in fem_plur}
                 assert fem_forms == {"dee"}, f"Expected only 'dee' for feminine, got {fem_forms}"
 
@@ -1827,7 +1819,7 @@ class TestNounClassification:
                 assert dio is not None
 
                 forms = conn.execute(
-                    select(noun_forms).where(noun_forms.c.lemma_id == dio.lemma_id)
+                    select(noun_forms).where(noun_forms.c.lemma_id == dio.id)
                 ).fetchall()
 
                 plural_forms = [f for f in forms if f.number == "plural"]
@@ -1979,7 +1971,7 @@ class TestImportAdjAllomorphs:
                 assert grande is not None
 
                 forms = conn.execute(
-                    select(adjective_forms).where(adjective_forms.c.lemma_id == grande.lemma_id)
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == grande.id)
                 ).fetchall()
 
                 # Find allomorph forms (labeled apocopic)
@@ -2036,7 +2028,7 @@ class TestImportAdjAllomorphs:
                 assert grande is not None
 
                 forms = conn.execute(
-                    select(adjective_forms).where(adjective_forms.c.lemma_id == grande.lemma_id)
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == grande.id)
                 ).fetchall()
 
                 elided_forms = [f for f in forms if f.labels == "elided"]
@@ -2127,16 +2119,14 @@ class TestImportAdjAllomorphs:
                 assert santo_lemma is not None
 
                 forms = conn.execute(
-                    select(adjective_forms).where(
-                        adjective_forms.c.lemma_id == santo_lemma.lemma_id
-                    )
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == santo_lemma.id)
                 ).fetchall()
 
                 # Check that 'san' was added with correct attributes
                 san_forms = [f for f in forms if f.written == "san"]
                 assert len(san_forms) == 1
                 san_form = san_forms[0]
-                assert san_form.gender == "masculine"
+                assert san_form.gender == "m"
                 assert san_form.number == "singular"
                 assert san_form.labels == "apocopic"
                 assert san_form.form_origin == "hardcoded"

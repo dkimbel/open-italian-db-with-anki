@@ -101,7 +101,7 @@ class TestItwacImporter:
                 # Check parlare frequency (aggregated: 1000 + 500 = 1500)
                 parlare_row = conn.execute(
                     select(frequencies)
-                    .join(lemmas, frequencies.c.lemma_id == lemmas.c.lemma_id)
+                    .join(lemmas, frequencies.c.lemma_id == lemmas.c.id)
                     .where(lemmas.c.normalized == "parlare")
                 ).fetchone()
                 assert parlare_row is not None
@@ -112,7 +112,7 @@ class TestItwacImporter:
                 # Check essere frequency
                 essere_row = conn.execute(
                     select(frequencies)
-                    .join(lemmas, frequencies.c.lemma_id == lemmas.c.lemma_id)
+                    .join(lemmas, frequencies.c.lemma_id == lemmas.c.id)
                     .where(lemmas.c.normalized == "essere")
                 ).fetchone()
                 assert essere_row is not None

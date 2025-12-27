@@ -33,14 +33,14 @@ def derive_participle_forms(
 
     Example:
         >>> derive_participle_forms("parlàto")
-        [('parlàta', 'feminine', 'singular'),
-         ('parlàti', 'masculine', 'plural'),
-         ('parlàte', 'feminine', 'plural')]
+        [('parlàta', 'f', 'singular'),
+         ('parlàti', 'm', 'plural'),
+         ('parlàte', 'f', 'plural')]
 
         >>> derive_participle_forms("fàtto")
-        [('fàtta', 'feminine', 'singular'),
-         ('fàtti', 'masculine', 'plural'),
-         ('fàtte', 'feminine', 'plural')]
+        [('fàtta', 'f', 'singular'),
+         ('fàtti', 'm', 'plural'),
+         ('fàtte', 'f', 'plural')]
     """
     if not base_stressed.endswith("o"):
         # Can't derive - might be a clitic form or other edge case
@@ -49,7 +49,7 @@ def derive_participle_forms(
     stem = base_stressed[:-1]  # Remove final 'o'
 
     return [
-        (stem + "a", "feminine", "singular"),
-        (stem + "i", "masculine", "plural"),
-        (stem + "e", "feminine", "plural"),
+        (stem + "a", "f", "singular"),
+        (stem + "i", "m", "plural"),
+        (stem + "e", "f", "plural"),
     ]

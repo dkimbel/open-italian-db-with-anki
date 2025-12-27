@@ -35,8 +35,8 @@ POS_FORM_TABLES: dict[str, Table] = {
 
 # Morphit adjective tag components
 _DEGREE_MAP = {"pos": "positive", "sup": "superlative", "comp": "comparative"}
-_GENDER_MAP = {"m": "masculine", "f": "feminine"}
 _NUMBER_MAP = {"s": "singular", "p": "plural"}
+# No need for a _GENDER_MAP -- we just reuse the "m" or "f" value
 
 
 @dataclass
@@ -46,7 +46,7 @@ class MorphitEntry:
     form: str  # Real Italian spelling (e.g., "grandi")
     lemma: str  # Lemma word (e.g., "grande")
     degree: str  # "positive", "superlative", "comparative"
-    gender: str  # "masculine", "feminine"
+    gender: str  # "m", "f"
     number: str  # "singular", "plural"
 
 
@@ -54,8 +54,8 @@ def _parse_adjective_tag(tags: str) -> tuple[str, str, str] | None:
     """Parse ADJ:{degree}+{gender}+{number} format.
 
     Examples:
-        ADJ:pos+m+s -> ("positive", "masculine", "singular")
-        ADJ:sup+f+p -> ("superlative", "feminine", "plural")
+        ADJ:pos+m+s -> ("positive", "m", "singular")
+        ADJ:sup+f+p -> ("superlative", "f", "plural")
 
     Returns:
         Tuple of (degree, gender, number) or None if not a valid adjective tag.
@@ -68,13 +68,12 @@ def _parse_adjective_tag(tags: str) -> tuple[str, str, str] | None:
     if len(parts) != 3:
         return None
 
-    degree_raw, gender_raw, number_raw = parts
+    degree_raw, gender, number_raw = parts
 
     degree = _DEGREE_MAP.get(degree_raw)
-    gender = _GENDER_MAP.get(gender_raw)
     number = _NUMBER_MAP.get(number_raw)
 
-    if degree is None or gender is None or number is None:
+    if degree is None or number is None:
         return None
 
     return (degree, gender, number)
@@ -160,8 +159,8 @@ def _build_adjective_lookup(morphit_path: Path) -> dict[str, list[MorphitEntry]]
 
     Returns:
         Dict mapping normalized lemma to list of all its adjective forms.
-        E.g., {"grande": [MorphitEntry(form="grande", gender="masculine", ...),
-                          MorphitEntry(form="grandi", gender="masculine", number="plural", ...),
+        E.g., {"grande": [MorphitEntry(form="grande", gender="m", ...),
+                          MorphitEntry(form="grandi", gender="m", number="plural", ...),
                           ...]}
     """
     lookup: dict[str, list[MorphitEntry]] = {}
@@ -230,7 +229,7 @@ def import_morphit(
     # Get all forms that don't have real spelling yet from POS-specific table
     result = conn.execute(
         select(pos_form_table.c.id, pos_form_table.c.stressed)
-        .select_from(pos_form_table.join(lemmas, pos_form_table.c.lemma_id == lemmas.c.lemma_id))
+        .select_from(pos_form_table.join(lemmas, pos_form_table.c.lemma_id == lemmas.c.id))
         .where(pos_form_table.c.written.is_(None))
     )
     all_forms = result.fetchall()
@@ -329,7 +328,7 @@ def fill_missing_adjective_forms(
     # Get ALL adjectives (not just incomplete ones)
     # The existing_combos logic prevents duplicate insertions
     result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.normalized).where(lemmas.c.pos == "adjective")
+        select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == "adjective")
     )
     all_adjectives = result.fetchall()
     stats["adjectives_checked"] = len(all_adjectives)
@@ -390,9 +389,8 @@ def fill_missing_adjective_forms(
                 )
                 continue
 
-            # Compute definite article for this form
-            gender_abbr = "m" if entry.gender == "masculine" else "f"
-            def_article, article_source = get_definite(entry.form, gender_abbr, entry.number)
+            # Compute definite article for this form (gender is already 'm'/'f')
+            def_article, article_source = get_definite(entry.form, entry.gender, entry.number)
 
             # Insert new form
             conn.execute(
@@ -609,7 +607,7 @@ def enrich_lemma_written(
 
     # Get all lemmas that don't have written form yet
     result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.stressed)
+        select(lemmas.c.id, lemmas.c.stressed)
         .where(lemmas.c.pos == pos_filter)
         .where(lemmas.c.written.is_(None))
     )
@@ -620,7 +618,7 @@ def enrich_lemma_written(
         if progress_callback and idx % 5000 == 0:
             progress_callback(idx, total_lemmas)
 
-        lemma_id = row.lemma_id
+        lemma_id = row.id
         stressed_lemma = row.stressed
 
         # Try exact match first (preserves written accents like "città")
@@ -633,9 +631,7 @@ def enrich_lemma_written(
             real_lemma = normalized_lookup.get(normalized)
 
         if real_lemma:
-            conn.execute(
-                update(lemmas).where(lemmas.c.lemma_id == lemma_id).values(written=real_lemma)
-            )
+            conn.execute(update(lemmas).where(lemmas.c.id == lemma_id).values(written=real_lemma))
             stats["updated"] += 1
         else:
             stats["not_found"] += 1

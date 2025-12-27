@@ -234,7 +234,7 @@ HARDCODED_DEGREE_RELATIONSHIPS: dict[str, tuple[str, str]] = {
 # Note: sant' is NOT hardcoded - it comes from Morphit via fill_missing_adjective_forms()
 HARDCODED_ALLOMORPH_FORMS: list[tuple[str, str, str, str, str]] = [
     # san is apocopic (before consonants) - not in Morphit as adjective
-    ("san", "santo", "masculine", "singular", "apocopic"),  # San Pietro, San Marco
+    ("san", "santo", "m", "singular", "apocopic"),  # San Pietro, San Marco
 ]
 
 
@@ -827,7 +827,7 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
     if has_masculine and has_feminine:
         if is_mfbysense:
             # Different meanings per gender - will create separate lemmas
-            result["gender_class"] = "mfbysense"
+            result["gender_class"] = "by_sense"
         elif has_counterpart_marker:
             # Counterpart marker (f: "+" or m: "+") means forms differ by gender
             # (e.g., amico/amica, professore/professoressa)
@@ -1119,7 +1119,7 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
         return 0
 
     # Use subquery to avoid "too many SQL variables" with large POS categories
-    lemma_subq = select(lemmas.c.lemma_id).where(lemmas.c.pos == pos_filter)
+    lemma_subq = select(lemmas.c.id).where(lemmas.c.pos == pos_filter)
 
     # Get the POS-specific form table
     pos_form_table = POS_FORM_TABLES.get(pos_filter)
@@ -1186,7 +1186,7 @@ def _build_verb_form_row(
         and number is None
         and form_stressed.endswith("o")
     ):
-        gender = "masculine"
+        gender = "m"
         number = "singular"
 
     # Derive written form using Italian orthography rules
@@ -1272,22 +1272,18 @@ def _build_noun_form_row(
 
     # Extract gender from tags (for forms like "uova" with ["feminine", "plural"])
     # Track if we used fallback so we can mark form_origin appropriately
+    # Gender is stored as 'm'/'f' (short form)
     gender: str | None = None
     gender_from_fallback = False
     if "masculine" in tags:
-        gender = "masculine"
+        gender = "m"
     elif "feminine" in tags:
-        gender = "feminine"
+        gender = "f"
     elif lemma_gender:
         # Fall back to lemma gender for forms without explicit gender tag
+        # lemma_gender is already 'm'/'f'
         gender_from_fallback = True
-        # Convert 'm'/'f' to full strings if needed
-        if lemma_gender == "m":
-            gender = "masculine"
-        elif lemma_gender == "f":
-            gender = "feminine"
-        else:
-            gender = lemma_gender
+        gender = lemma_gender
 
     # Filter out forms without gender (incomplete data)
     if gender is None:
@@ -1298,8 +1294,8 @@ def _build_noun_form_row(
     if gender_from_fallback and form_origin == "wiktextract":
         effective_origin = "wiktextract:gender_fallback"
 
-    # Convert to short form for article computation
-    gender_short = "m" if gender == "masculine" else "f"
+    # gender is already 'm'/'f' (short form)
+    gender_short = gender
 
     # Compute definite article from orthography
     def_article, article_source = get_definite(form_stressed, gender_short, features.number)
@@ -1349,8 +1345,8 @@ def _build_adjective_form_row(
     if features.should_filter or features.gender is None or features.number is None:
         return None
 
-    # Normalize gender for article computation: "masculine" -> "m", "feminine" -> "f"
-    gender_short = "m" if features.gender == "masculine" else "f"
+    # features.gender is already 'm' or 'f' from parse_adjective_tags
+    gender_short = features.gender
 
     # Compute definite article from orthography
     def_article, article_source = get_definite(form_stressed, gender_short, features.number)
@@ -1600,7 +1596,7 @@ def import_wiktextract(
                     if gender_class in ("m", "f"):
                         lemma_gender = gender_class
                     elif gender_class == "common_gender_fixed":
-                        # For fixed common gender (mfbysense), same form for both - no default needed
+                        # For fixed common gender (by_sense), same form for both - no default needed
                         lemma_gender = None
                     elif gender_class == "common_gender_variable":
                         # For variable common gender (amico/amica), the lemma has a specific gender
@@ -1702,12 +1698,12 @@ def import_wiktextract(
                     is_common_gender = noun_class and noun_class.get("gender_class") in (
                         "common_gender_fixed",
                         "common_gender_variable",
-                        "mfbysense",
+                        "by_sense",
                     )
 
                     if is_common_gender and not has_gender_tag:
                         # For common_gender nouns without explicit gender tags:
-                        # - common_gender_fixed/mfbysense: same form works for both genders
+                        # - common_gender_fixed/by_sense: same form works for both genders
                         # - common_gender_variable: different forms for m/f (need counterpart lookup)
                         gender_class = noun_class.get("gender_class") if noun_class else None
                         is_variable_gender = gender_class == "common_gender_variable"
@@ -1826,7 +1822,7 @@ def import_wiktextract(
                             continue
 
                         else:
-                            # For fixed-gender nouns (mfbysense) or non-plural forms:
+                            # For fixed-gender nouns (by_sense) or non-plural forms:
                             # duplicate for both genders with same form
                             for gender in ("m", "f"):
                                 row = _build_noun_form_row(
@@ -1912,7 +1908,7 @@ def import_wiktextract(
                 is_common_gender = gender_class in (
                     "common_gender_fixed",
                     "common_gender_variable",
-                    "mfbysense",
+                    "by_sense",
                 )
 
                 if is_common_gender:
@@ -2125,9 +2121,9 @@ def enrich_from_form_of(
 
     # Build lemma lookup: normalized_lemma -> lemma_id
     lemma_result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.normalized).where(lemmas.c.pos == pos_filter)
+        select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == pos_filter)
     )
-    lemma_lookup: dict[str, int] = {row.normalized: row.lemma_id for row in lemma_result}
+    lemma_lookup: dict[str, int] = {row.normalized: row.id for row in lemma_result}
 
     # Build form lookup: (lemma_id, normalized_form) -> list of form_ids
     form_result = conn.execute(
@@ -2237,9 +2233,9 @@ def enrich_form_spelling_from_form_of(
 
     # Build lemma lookup: normalized_lemma -> lemma_id
     lemma_result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.normalized).where(lemmas.c.pos == pos_filter)
+        select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == pos_filter)
     )
-    lemma_lookup: dict[str, int] = {row.normalized: row.lemma_id for row in lemma_result}
+    lemma_lookup: dict[str, int] = {row.normalized: row.id for row in lemma_result}
 
     # Build form lookup: (lemma_id, normalized_form) -> list of form_ids
     # Only include forms where written IS NULL (not already filled by Morph-it!)
@@ -2352,9 +2348,9 @@ def link_comparative_superlative(
 
     # Build lookup: normalized lemma -> lemma_id for adjectives
     result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.normalized).where(lemmas.c.pos == "adjective")
+        select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == "adjective")
     )
-    lemma_lookup = {row.normalized: row.lemma_id for row in result}
+    lemma_lookup = {row.normalized: row.id for row in result}
 
     for lemma_id, base_word, relationship, source in degree_links:
         base_normalized = normalize(base_word)
@@ -2418,9 +2414,9 @@ def import_adjective_allomorphs(
 
     # Build lookup: normalized lemma -> lemma_id for adjectives
     result = conn.execute(
-        select(lemmas.c.lemma_id, lemmas.c.normalized).where(lemmas.c.pos == "adjective")
+        select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == "adjective")
     )
-    adj_lookup = {row.normalized: row.lemma_id for row in result}
+    adj_lookup = {row.normalized: row.id for row in result}
 
     # Count lines for progress
     total_lines = _count_lines(jsonl_path) if progress_callback else 0
@@ -2508,10 +2504,9 @@ def import_adjective_allomorphs(
                 continue
 
             # Add form for all 4 gender/number combinations
-            for gender in ("masculine", "feminine"):
+            for gender in ("m", "f"):
                 for number in ("singular", "plural"):
-                    gender_abbr = "m" if gender == "masculine" else "f"
-                    def_article, article_source = get_definite(allomorph_word, gender_abbr, number)
+                    def_article, article_source = get_definite(allomorph_word, gender, number)
 
                     try:
                         conn.execute(
@@ -2558,9 +2553,8 @@ def import_adjective_allomorphs(
         if (form, gender, number) in existing_combos:
             continue
 
-        # Compute definite article
-        gender_abbr = "m" if gender == "masculine" else "f"
-        def_article, article_source = get_definite(form, gender_abbr, number)
+        # Compute definite article (gender is already 'm'/'f')
+        def_article, article_source = get_definite(form, gender, number)
 
         try:
             conn.execute(
@@ -2627,7 +2621,7 @@ def generate_gendered_participles(
         ).where(
             verb_forms.c.mood == "participle",
             verb_forms.c.tense == "past",
-            verb_forms.c.gender == "masculine",
+            verb_forms.c.gender == "m",
             verb_forms.c.number == "singular",
         )
     ).fetchall()

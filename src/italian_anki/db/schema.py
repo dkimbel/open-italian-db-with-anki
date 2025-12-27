@@ -21,7 +21,7 @@ metadata = MetaData()
 lemmas = Table(
     "lemmas",
     metadata,
-    Column("lemma_id", Integer, primary_key=True, autoincrement=True),
+    Column("id", Integer, primary_key=True, autoincrement=True),
     Column("normalized", Text, nullable=False),  # accent-stripped for lookup (e.g., "citta")
     Column("written", Text),  # actual written form from Morphit (e.g., "città"), NULL if unknown
     Column("stressed", Text, nullable=False),  # with stress marks (e.g., "città", "parlàre")
@@ -33,7 +33,7 @@ lemmas = Table(
 frequencies = Table(
     "frequencies",
     metadata,
-    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False, primary_key=True),
+    Column("lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False, primary_key=True),
     Column("corpus", String(20), nullable=False, primary_key=True),  # 'itwac', 'colfis'
     Column("freq_raw", Integer),  # raw count
     Column("freq_zipf", Float),  # type: ignore[arg-type] # zipf score (normalized)
@@ -45,7 +45,7 @@ verb_forms = Table(
     "verb_forms",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
+    Column("lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False),
     Column("written", Text),  # actual written form from Morphit (e.g., "parlò"), NULL if unknown
     Column("written_source", Text),  # "morphit", NULL if not found
     Column("stressed", Text, nullable=False),  # with stress marks (e.g., "parlò", "pàrlo")
@@ -56,7 +56,7 @@ verb_forms = Table(
     Column("tense", Text),  # present, imperfect, remote, future (NULL for non-finite)
     Column("person", Integer),  # 1, 2, 3 (NULL for non-finite)
     Column("number", Text),  # singular, plural (NULL for some non-finite)
-    Column("gender", Text),  # masculine, feminine (for participles only)
+    Column("gender", Text),  # 'm', 'f' (for participles only)
     # Modifiers
     Column("is_formal", Boolean, default=False),  # Lei/Loro forms
     Column("is_negative", Boolean, default=False),  # negative imperative
@@ -85,13 +85,11 @@ noun_forms = Table(
     "noun_forms",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
+    Column("lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False),
     Column("written", Text),  # actual written form from Morphit (e.g., "città"), NULL if unknown
     Column("written_source", Text),  # "morphit", NULL if not found
     Column("stressed", Text, nullable=False),  # with stress marks (e.g., "città", "càsa")
-    Column(
-        "gender", Text, nullable=False
-    ),  # 'masculine' or 'feminine' (per-form, for nouns like paio/paia)
+    Column("gender", Text, nullable=False),  # 'm' or 'f' (per-form, for nouns like paio/paia)
     Column("number", Text, nullable=False),  # singular, plural
     Column("labels", Text),  # NULL=standard, or comma-separated labels
     Column("is_diminutive", Boolean, default=False),
@@ -130,11 +128,11 @@ adjective_forms = Table(
     "adjective_forms",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
+    Column("lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False),
     Column("written", Text),  # actual written form from Morphit (e.g., "bella"), NULL if unknown
     Column("written_source", Text),  # "morphit", NULL if not found
     Column("stressed", Text, nullable=False),  # with stress marks (e.g., "bèlla")
-    Column("gender", Text, nullable=False),  # masculine, feminine
+    Column("gender", Text, nullable=False),  # 'm', 'f'
     Column("number", Text, nullable=False),  # singular, plural
     Column("degree", Text, default="positive"),  # positive, comparative, superlative
     Column("labels", Text),  # NULL=standard, or comma-separated labels
@@ -154,7 +152,7 @@ definitions = Table(
     "definitions",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), nullable=False),
+    Column("lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False),
     Column("gloss", Text, nullable=False),
     Column("tags", Text),  # JSON array (e.g., ["transitive"])
     # Optional linkage to specific forms (for nouns with meaning-dependent gender/plurals)
@@ -186,7 +184,7 @@ translations = Table(
 verb_metadata = Table(
     "verb_metadata",
     metadata,
-    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), primary_key=True),
+    Column("lemma_id", Integer, ForeignKey("lemmas.id"), primary_key=True),
     Column("auxiliary", String(20)),  # 'avere', 'essere', 'both', NULL
     Column("transitivity", String(20)),  # 'transitive', 'intransitive', 'both', NULL
 )
@@ -206,11 +204,12 @@ verb_metadata = Table(
 noun_metadata = Table(
     "noun_metadata",
     metadata,
-    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), primary_key=True),
+    Column("lemma_id", Integer, ForeignKey("lemmas.id"), primary_key=True),
     # Gender classification (mutually exclusive):
     # 'm' = masculine only, 'f' = feminine only,
     # 'common_gender_fixed' = both genders, identical forms (cantante),
-    # 'common_gender_variable' = both genders, forms can differ (collega)
+    # 'common_gender_variable' = both genders, forms can differ (collega),
+    # 'by_sense' = gender depends on meaning (il fine=goal vs la fine=end)
     Column("gender_class", Text, nullable=False),
     # Number behavior (mutually exclusive):
     # 'standard' = has both singular and plural,
@@ -219,10 +218,8 @@ noun_metadata = Table(
     # 'invariable' = same form for both (città)
     Column("number_class", Text, default="standard"),
     # Links to related lemmas
-    Column(
-        "counterpart_lemma_id", Integer, ForeignKey("lemmas.lemma_id")
-    ),  # professore↔professoressa
-    Column("base_lemma_id", Integer, ForeignKey("lemmas.lemma_id")),  # tavolino→tavola
+    Column("counterpart_lemma_id", Integer, ForeignKey("lemmas.id")),  # professore↔professoressa
+    Column("base_lemma_id", Integer, ForeignKey("lemmas.id")),  # tavolino→tavola
     Column("derivation_type", Text),  # 'diminutive', 'augmentative', 'pejorative'
 )
 
@@ -241,14 +238,14 @@ noun_metadata = Table(
 adjective_metadata = Table(
     "adjective_metadata",
     metadata,
-    Column("lemma_id", Integer, ForeignKey("lemmas.lemma_id"), primary_key=True),
+    Column("lemma_id", Integer, ForeignKey("lemmas.id"), primary_key=True),
     # Inflection class (mutually exclusive):
     # '4-form' = standard (bello/bella/belli/belle)
     # '2-form' = same form for m/f (facile/facile/facili/facili)
     # 'invariable' = same form for all (blu)
     Column("inflection_class", Text),
     # Links to related lemmas (for comparative/superlative)
-    Column("base_lemma_id", Integer, ForeignKey("lemmas.lemma_id")),  # migliore→buono
+    Column("base_lemma_id", Integer, ForeignKey("lemmas.id")),  # migliore→buono
     Column("degree_relationship", Text),  # 'comparative_of', 'superlative_of'
     Column(
         "degree_relationship_source", Text

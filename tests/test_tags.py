@@ -90,7 +90,7 @@ class TestParseVerbTagsBasic:
         """Test that gender can be extracted for participles."""
         tags = ["participle", "past", "masculine", "singular"]
         result = parse_verb_tags(tags)
-        assert result.gender == "masculine"
+        assert result.gender == "m"
         assert result.number == "singular"
 
     def test_passato_remoto(self) -> None:

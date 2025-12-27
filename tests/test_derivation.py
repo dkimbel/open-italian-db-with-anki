@@ -10,63 +10,63 @@ class TestDeriveParticipleForms:
         """Test regular -are verb participle (parlare -> parlato)."""
         forms = derive_participle_forms("parlàto")
         assert forms == [
-            ("parlàta", "feminine", "singular"),
-            ("parlàti", "masculine", "plural"),
-            ("parlàte", "feminine", "plural"),
+            ("parlàta", "f", "singular"),
+            ("parlàti", "m", "plural"),
+            ("parlàte", "f", "plural"),
         ]
 
     def test_regular_ere_verb(self) -> None:
         """Test regular -ere verb participle (credere -> creduto)."""
         forms = derive_participle_forms("credùto")
         assert forms == [
-            ("credùta", "feminine", "singular"),
-            ("credùti", "masculine", "plural"),
-            ("credùte", "feminine", "plural"),
+            ("credùta", "f", "singular"),
+            ("credùti", "m", "plural"),
+            ("credùte", "f", "plural"),
         ]
 
     def test_regular_ire_verb(self) -> None:
         """Test regular -ire verb participle (dormire -> dormito)."""
         forms = derive_participle_forms("dormìto")
         assert forms == [
-            ("dormìta", "feminine", "singular"),
-            ("dormìti", "masculine", "plural"),
-            ("dormìte", "feminine", "plural"),
+            ("dormìta", "f", "singular"),
+            ("dormìti", "m", "plural"),
+            ("dormìte", "f", "plural"),
         ]
 
     def test_irregular_fatto(self) -> None:
         """Test irregular participle fatto (fare)."""
         forms = derive_participle_forms("fàtto")
         assert forms == [
-            ("fàtta", "feminine", "singular"),
-            ("fàtti", "masculine", "plural"),
-            ("fàtte", "feminine", "plural"),
+            ("fàtta", "f", "singular"),
+            ("fàtti", "m", "plural"),
+            ("fàtte", "f", "plural"),
         ]
 
     def test_irregular_scritto(self) -> None:
         """Test irregular participle scritto (scrivere)."""
         forms = derive_participle_forms("scrìtto")
         assert forms == [
-            ("scrìtta", "feminine", "singular"),
-            ("scrìtti", "masculine", "plural"),
-            ("scrìtte", "feminine", "plural"),
+            ("scrìtta", "f", "singular"),
+            ("scrìtti", "m", "plural"),
+            ("scrìtte", "f", "plural"),
         ]
 
     def test_irregular_aperto(self) -> None:
         """Test irregular participle aperto (aprire)."""
         forms = derive_participle_forms("apèrto")
         assert forms == [
-            ("apèrta", "feminine", "singular"),
-            ("apèrti", "masculine", "plural"),
-            ("apèrte", "feminine", "plural"),
+            ("apèrta", "f", "singular"),
+            ("apèrti", "m", "plural"),
+            ("apèrte", "f", "plural"),
         ]
 
     def test_no_accent(self) -> None:
         """Test form without accent (still works)."""
         forms = derive_participle_forms("parlato")
         assert forms == [
-            ("parlata", "feminine", "singular"),
-            ("parlati", "masculine", "plural"),
-            ("parlate", "feminine", "plural"),
+            ("parlata", "f", "singular"),
+            ("parlati", "m", "plural"),
+            ("parlate", "f", "plural"),
         ]
 
     def test_non_o_ending_returns_empty(self) -> None:
@@ -85,9 +85,9 @@ class TestDeriveParticipleForms:
         # Should work but produce unusual forms
         forms = derive_participle_forms("o")
         assert forms == [
-            ("a", "feminine", "singular"),
-            ("i", "masculine", "plural"),
-            ("e", "feminine", "plural"),
+            ("a", "f", "singular"),
+            ("i", "m", "plural"),
+            ("e", "f", "plural"),
         ]
 
     def test_preserves_stress_marks(self) -> None:
@@ -99,7 +99,7 @@ class TestDeriveParticipleForms:
         """Test participle with double consonant before -o."""
         forms = derive_participle_forms("dètto")
         assert forms == [
-            ("dètta", "feminine", "singular"),
-            ("dètti", "masculine", "plural"),
-            ("dètte", "feminine", "plural"),
+            ("dètta", "f", "singular"),
+            ("dètti", "m", "plural"),
+            ("dètte", "f", "plural"),
         ]
