@@ -1318,6 +1318,20 @@ def _build_noun_form_row(
     }
 
 
+def _is_trackable_base_form(row: dict[str, Any], tags: list[str]) -> bool:
+    """Check if a noun form should be tracked in seen_base_forms.
+
+    Returns False for forms that shouldn't block base form inference:
+    - Derived forms (diminutives, augmentatives, pejoratives)
+    - Alternative forms (alternative spellings/variants of the lemma)
+
+    These can coexist with the canonical lemma word.
+    """
+    if row.get("is_diminutive") or row.get("is_augmentative") or row.get("is_pejorative"):
+        return False
+    return "alternative" not in tags
+
+
 def _build_adjective_form_row(
     lemma_id: int,
     form_stressed: str,
@@ -1743,8 +1757,8 @@ def import_wiktextract(
                                 )
                                 if row:
                                     add_form(row)
-                                    number = "plural"
-                                    seen_base_forms.add((number, own_gender))
+                                    if _is_trackable_base_form(row, tags):
+                                        seen_base_forms.add(("plural", own_gender))
                                 else:
                                     stats["forms_filtered"] += 1
                                 continue
@@ -1763,7 +1777,8 @@ def import_wiktextract(
                                     )
                                     if row:
                                         add_form(row)
-                                        seen_base_forms.add(("plural", own_gender))
+                                        if _is_trackable_base_form(row, tags):
+                                            seen_base_forms.add(("plural", own_gender))
                                     else:
                                         stats["forms_filtered"] += 1
 
@@ -1778,7 +1793,8 @@ def import_wiktextract(
                                     )
                                     if row:
                                         add_form(row)
-                                        seen_base_forms.add(("plural", other_gender))
+                                        if _is_trackable_base_form(row, tags):
+                                            seen_base_forms.add(("plural", other_gender))
                                     else:
                                         stats["forms_filtered"] += 1
                                     continue
@@ -1798,7 +1814,8 @@ def import_wiktextract(
                                     )
                                     if row:
                                         add_form(row)
-                                        seen_base_forms.add(("plural", own_gender))
+                                        if _is_trackable_base_form(row, tags):
+                                            seen_base_forms.add(("plural", own_gender))
                                     else:
                                         stats["forms_filtered"] += 1
                                     continue
@@ -1818,7 +1835,8 @@ def import_wiktextract(
                             )
                             if row:
                                 add_form(row)
-                                seen_base_forms.add(("plural", own_gender))
+                                if _is_trackable_base_form(row, tags):
+                                    seen_base_forms.add(("plural", own_gender))
                             else:
                                 stats["forms_filtered"] += 1
                             continue
@@ -1838,12 +1856,7 @@ def import_wiktextract(
                                     stats["forms_filtered"] += 1
                                     continue
                                 add_form(row)
-                                # Only track base forms - derived forms shouldn't block base form inference
-                                if not (
-                                    row["is_diminutive"]
-                                    or row["is_augmentative"]
-                                    or row["is_pejorative"]
-                                ):
+                                if _is_trackable_base_form(row, tags):
                                     number = "plural" if "plural" in tags else "singular"
                                     seen_base_forms.add((number, gender))
                     else:
@@ -1858,10 +1871,7 @@ def import_wiktextract(
                             stats["forms_filtered"] += 1
                             continue
                         add_form(row)
-                        # Only track base forms - derived forms shouldn't block base form inference
-                        if not (
-                            row["is_diminutive"] or row["is_augmentative"] or row["is_pejorative"]
-                        ):
+                        if _is_trackable_base_form(row, tags):
                             number = "plural" if "plural" in tags else "singular"
                             gender = (
                                 "m"
