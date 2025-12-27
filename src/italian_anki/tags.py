@@ -89,8 +89,8 @@ LABEL_TAGS = frozenset(LABEL_CANONICAL.keys())
 # Adjective degree tags
 DEGREE_TAGS = frozenset({"superlative", "comparative"})
 
-# Noun derivation tags
-NOUN_DERIVATION_TAGS = frozenset({"diminutive", "augmentative"})
+# Noun derivation tags (these modify the base form semantically)
+NOUN_DERIVATION_TAGS = frozenset({"diminutive", "augmentative", "pejorative"})
 
 
 @dataclass
@@ -116,6 +116,7 @@ class NounFormFeatures:
     labels: str | None = None  # comma-separated if multiple
     is_diminutive: bool = False
     is_augmentative: bool = False
+    is_pejorative: bool = False
     should_filter: bool = False
 
 
@@ -276,6 +277,7 @@ def parse_noun_tags(tags: list[str]) -> NounFormFeatures:
     # Extract derivation type
     result.is_diminutive = "diminutive" in tag_set
     result.is_augmentative = "augmentative" in tag_set
+    result.is_pejorative = "pejorative" in tag_set
 
     # Extract labels
     result.labels = _extract_labels(tag_set)

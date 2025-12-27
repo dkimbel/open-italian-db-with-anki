@@ -1310,6 +1310,7 @@ def _build_noun_form_row(
         "labels": features.labels,
         "is_diminutive": features.is_diminutive,
         "is_augmentative": features.is_augmentative,
+        "is_pejorative": features.is_pejorative,
         "meaning_hint": meaning_hint,
         "def_article": def_article,
         "article_source": article_source,
@@ -1665,8 +1666,9 @@ def import_wiktextract(
                     degree_links.append((lemma_id, base_word, relationship, source))
 
             # Queue forms for batch insert (using POS-specific builder)
-            # Track what number/gender combinations we've already added for nouns
-            seen_noun_forms: set[tuple[str, str]] = set()  # (number, gender)
+            # Track base form number/gender combinations for nouns (excludes diminutives,
+            # augmentatives, pejoratives to avoid blocking base form inference)
+            seen_base_forms: set[tuple[str, str]] = set()  # (number, gender)
 
             # Pre-scan: collect explicit gender-tagged plurals from this entry
             # (used to avoid duplicating untagged plurals when explicit ones exist)
@@ -1742,7 +1744,7 @@ def import_wiktextract(
                                 if row:
                                     add_form(row)
                                     number = "plural"
-                                    seen_noun_forms.add((number, own_gender))
+                                    seen_base_forms.add((number, own_gender))
                                 else:
                                     stats["forms_filtered"] += 1
                                 continue
@@ -1761,7 +1763,7 @@ def import_wiktextract(
                                     )
                                     if row:
                                         add_form(row)
-                                        seen_noun_forms.add(("plural", own_gender))
+                                        seen_base_forms.add(("plural", own_gender))
                                     else:
                                         stats["forms_filtered"] += 1
 
@@ -1776,7 +1778,7 @@ def import_wiktextract(
                                     )
                                     if row:
                                         add_form(row)
-                                        seen_noun_forms.add(("plural", other_gender))
+                                        seen_base_forms.add(("plural", other_gender))
                                     else:
                                         stats["forms_filtered"] += 1
                                     continue
@@ -1796,7 +1798,7 @@ def import_wiktextract(
                                     )
                                     if row:
                                         add_form(row)
-                                        seen_noun_forms.add(("plural", own_gender))
+                                        seen_base_forms.add(("plural", own_gender))
                                     else:
                                         stats["forms_filtered"] += 1
                                     continue
@@ -1816,7 +1818,7 @@ def import_wiktextract(
                             )
                             if row:
                                 add_form(row)
-                                seen_noun_forms.add(("plural", own_gender))
+                                seen_base_forms.add(("plural", own_gender))
                             else:
                                 stats["forms_filtered"] += 1
                             continue
@@ -1836,8 +1838,14 @@ def import_wiktextract(
                                     stats["forms_filtered"] += 1
                                     continue
                                 add_form(row)
-                                number = "plural" if "plural" in tags else "singular"
-                                seen_noun_forms.add((number, gender))
+                                # Only track base forms - derived forms shouldn't block base form inference
+                                if not (
+                                    row["is_diminutive"]
+                                    or row["is_augmentative"]
+                                    or row["is_pejorative"]
+                                ):
+                                    number = "plural" if "plural" in tags else "singular"
+                                    seen_base_forms.add((number, gender))
                     else:
                         row = _build_noun_form_row(
                             lemma_id,
@@ -1850,15 +1858,18 @@ def import_wiktextract(
                             stats["forms_filtered"] += 1
                             continue
                         add_form(row)
-                        # Track what we've added
-                        number = "plural" if "plural" in tags else "singular"
-                        gender = (
-                            "m"
-                            if "masculine" in tags
-                            else ("f" if "feminine" in tags else lemma_gender)
-                        )
-                        if gender:
-                            seen_noun_forms.add((number, gender))
+                        # Only track base forms - derived forms shouldn't block base form inference
+                        if not (
+                            row["is_diminutive"] or row["is_augmentative"] or row["is_pejorative"]
+                        ):
+                            number = "plural" if "plural" in tags else "singular"
+                            gender = (
+                                "m"
+                                if "masculine" in tags
+                                else ("f" if "feminine" in tags else lemma_gender)
+                            )
+                            if gender:
+                                seen_base_forms.add((number, gender))
                 else:
                     # Pass form_origin to all POS form builders
                     if pos_filter == "adjective":
@@ -1883,7 +1894,7 @@ def import_wiktextract(
             # These are forms that only exist in head_templates, not in the forms array
             if pos_filter == "noun" and synthesize_plurals:
                 for form_text, gender, hint in synthesize_plurals:
-                    if ("plural", gender) not in seen_noun_forms:
+                    if ("plural", gender) not in seen_base_forms:
                         row = _build_noun_form_row(
                             lemma_id,
                             form_text,
@@ -1895,7 +1906,7 @@ def import_wiktextract(
                         )
                         if row:
                             add_form(row)
-                            seen_noun_forms.add(("plural", gender))
+                            seen_base_forms.add(("plural", gender))
 
             # For nouns: add base form from lemma word if not already present
             # The lemma word is always the base form (singular for regular, plural for pluralia tantum)
@@ -1914,7 +1925,7 @@ def import_wiktextract(
                 if is_common_gender:
                     # Add base form for both genders if not already present
                     for gender in ("m", "f"):
-                        if (base_number, gender) not in seen_noun_forms:
+                        if (base_number, gender) not in seen_base_forms:
                             row = _build_noun_form_row(
                                 lemma_id,
                                 lemma_stressed,
@@ -1924,7 +1935,7 @@ def import_wiktextract(
                             )
                             if row:
                                 add_form(row)
-                elif lemma_gender and (base_number, lemma_gender) not in seen_noun_forms:
+                elif lemma_gender and (base_number, lemma_gender) not in seen_base_forms:
                     # Add base form for single gender if not already present
                     row = _build_noun_form_row(
                         lemma_id,
@@ -1943,7 +1954,7 @@ def import_wiktextract(
                     if is_common_gender:
                         # Add plural for both genders
                         for gender in ("m", "f"):
-                            if ("plural", gender) not in seen_noun_forms:
+                            if ("plural", gender) not in seen_base_forms:
                                 row = _build_noun_form_row(
                                     lemma_id,
                                     lemma_stressed,
@@ -1953,7 +1964,7 @@ def import_wiktextract(
                                 )
                                 if row:
                                     add_form(row)
-                    elif lemma_gender and ("plural", lemma_gender) not in seen_noun_forms:
+                    elif lemma_gender and ("plural", lemma_gender) not in seen_base_forms:
                         # Add plural for single gender
                         row = _build_noun_form_row(
                             lemma_id,

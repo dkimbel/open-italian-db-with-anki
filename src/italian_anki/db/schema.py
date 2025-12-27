@@ -94,6 +94,7 @@ noun_forms = Table(
     Column("labels", Text),  # NULL=standard, or comma-separated labels
     Column("is_diminutive", Boolean, default=False),
     Column("is_augmentative", Boolean, default=False),
+    Column("is_pejorative", Boolean, default=False),
     Column("meaning_hint", Text),  # e.g., 'anatomical', 'figurative' for braccio-type plurals
     # Article columns (computed from orthography)
     Column("def_article", Text),  # 'il', 'lo', 'la', "l'", 'i', 'gli', 'le'
