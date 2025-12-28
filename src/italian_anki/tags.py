@@ -196,8 +196,8 @@ def parse_verb_tags(tags: list[str]) -> VerbFormFeatures:
         result.should_filter = True
         return result
 
-    # Skip metadata tags
-    if tag_set & SKIP_TAGS:
+    # Skip metadata tags (but not "canonical" - we treat it as infinitive below)
+    if tag_set & (SKIP_TAGS - {"canonical"}):
         result.should_filter = True
         return result
 
@@ -206,6 +206,11 @@ def parse_verb_tags(tags: list[str]) -> VerbFormFeatures:
         if tag in MOOD_TAGS:
             result.mood = tag
             break
+
+    # For verbs, "canonical" tag means infinitive (the citation form)
+    # This handles sparse Wiktionary entries that lack conjugation tables
+    if result.mood is None and "canonical" in tag_set:
+        result.mood = "infinitive"
 
     # Filter participles with person tags - these are Wiktextract data bugs.
     # Participles don't have person (they're non-finite). The 2 known cases are

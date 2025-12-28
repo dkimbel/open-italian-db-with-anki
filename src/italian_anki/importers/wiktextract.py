@@ -1130,8 +1130,8 @@ def _iter_forms(
         if not form_stressed:
             continue
 
-        # For verbs, skip all metadata tags
-        if pos == "verb" and tag_set & SKIP_TAGS:
+        # For verbs, skip metadata tags (but not "canonical" - we treat it as infinitive)
+        if pos == "verb" and tag_set & (SKIP_TAGS - {"canonical"}):
             continue
 
         # For nouns/adjectives, skip metadata-only forms but keep forms with meaningful info
@@ -1197,10 +1197,13 @@ def _iter_forms(
         if "auxiliary" in tags:
             continue
 
-        # Skip canonical form for verbs only (stored separately as lemma_stressed)
-        # For nouns/adjectives, canonical is the singular form we want to keep
-        if pos == "verb" and "canonical" in tags:
-            continue
+        # For verb canonical forms: strip bracket annotations and filter garbage
+        # (e.g., "dolére [auxiliary essere" → "dolére", skip "avere]")
+        if pos == "verb" and "canonical" in tag_set:
+            form_stressed = _BRACKET_ANNOTATION_RE.sub("", form_stressed).strip()
+            # Skip garbage-only forms from malformed source data
+            if not form_stressed or len(form_stressed) < 2 or form_stressed.endswith("]"):
+                continue
 
         # Track whether we've seen the base forms (for adjectives)
         if pos == "adjective" and "masculine" in tags and "singular" in tags:
