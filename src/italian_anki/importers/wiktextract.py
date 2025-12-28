@@ -48,6 +48,11 @@ POS_FORM_TABLES = {
     "adjective": adjective_forms,
 }
 
+# Regex to strip bracket annotations from canonical forms
+# e.g., "[auxiliary essere]", "[transitive 'something'"
+# Handles malformed cases with missing closing bracket
+_BRACKET_ANNOTATION_RE = re.compile(r"\s*\[[^\]]*\]?\s*$")
+
 # Known gender patterns in Wiktextract head_template args
 # Maps raw values to normalized forms
 GENDER_PATTERNS: dict[str, str] = {
@@ -773,6 +778,10 @@ LEMMA_BLOCKLIST: frozenset[str] = frozenset(
         "farsi un culo così",  # Vulgar expression with no forms
         # === Verbs with invalid data ===
         "perplettere",  # Humorous neologism (Corrado Guzzanti), not a real verb
+        # === Verbs with conflicting/corrupt auxiliary data ===
+        # bruire: canonical form says [auxiliary avere] but auxiliary-tagged form is "-"
+        # (defective verb). Obscure word, safe to exclude.
+        "bruire",
     }
 )
 
@@ -1048,6 +1057,7 @@ def _extract_lemma_stressed(entry: dict[str, Any]) -> str:
 
     Applies normalizations:
     - Apostrophe spacing (e.g., "d' occhio" -> "d'occhio")
+    - Strip bracket annotations (e.g., "[auxiliary essere]")
     - Known overrides for Wiktionary errors (e.g., "sùggere" -> "suggére")
     """
     # First check forms for canonical or infinitive
@@ -1062,6 +1072,10 @@ def _extract_lemma_stressed(entry: dict[str, Any]) -> str:
 
     # Normalize apostrophe spacing
     stressed = _normalize_apostrophe_spacing(stressed)
+
+    # Strip bracket annotations (e.g., "[auxiliary essere]", "[transitive 'something'")
+    # that Wiktextract sometimes includes in canonical forms
+    stressed = _BRACKET_ANNOTATION_RE.sub("", stressed)
 
     # Apply known overrides for Wiktionary inconsistencies
     stressed = LEMMA_STRESSED_OVERRIDES.get(stressed, stressed)
