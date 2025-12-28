@@ -2135,3 +2135,196 @@ class TestImportAdjAllomorphs:
         finally:
             db_path.unlink()
             jsonl_path.unlink()
+
+
+class TestNormalizationsAndOverrides:
+    """Tests for apostrophe spacing normalization and stressed form overrides."""
+
+    def test_apostrophe_spacing_normalized_in_lemma(self):
+        """Lemma stressed form should have apostrophe spacing normalized."""
+        # Verb with space after apostrophe (like "tenére d' occhio")
+        verb_with_space = {
+            "pos": "verb",
+            "word": "tenere d'occhio",
+            "forms": [
+                {"form": "tenére d' occhio", "tags": ["canonical"]},
+                {"form": "tenére d' occhio", "tags": ["infinitive"]},
+            ],
+            "senses": [{"glosses": ["to keep an eye on"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([verb_with_space])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="verb")
+
+            with get_connection(db_path) as conn:
+                lemma = conn.execute(
+                    select(lemmas).where(lemmas.c.normalized == "tenere d'occhio")
+                ).fetchone()
+
+                assert lemma is not None
+                # Space after apostrophe should be removed
+                assert lemma.stressed == "tenére d'occhio"
+                assert "d' " not in lemma.stressed  # No space after apostrophe
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_apostrophe_spacing_normalized_in_forms(self):
+        """Form stressed values should have apostrophe spacing normalized."""
+        verb_with_space = {
+            "pos": "verb",
+            "word": "tenere d'occhio",
+            "forms": [
+                {"form": "tenére d'occhio", "tags": ["canonical"]},
+                {"form": "tenére d'occhio", "tags": ["infinitive"]},
+                {
+                    "form": "tèngo d' occhio",
+                    "tags": ["first-person", "indicative", "present", "singular"],
+                },
+            ],
+            "senses": [{"glosses": ["to keep an eye on"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([verb_with_space])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="verb")
+
+            with get_connection(db_path) as conn:
+                forms = conn.execute(select(verb_forms)).fetchall()
+                tengo_form = next(f for f in forms if "tèngo" in f.stressed)
+
+                # Space after apostrophe should be removed
+                assert tengo_form.stressed == "tèngo d'occhio"
+                assert "d' " not in tengo_form.stressed
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_lemma_stressed_override_applied(self):
+        """LEMMA_STRESSED_OVERRIDES should correct Wiktionary inconsistencies."""
+        # Create a verb with the wrong stress position in lemma
+        suggere_verb = {
+            "pos": "verb",
+            "word": "suggere",
+            "forms": [
+                {"form": "sùggere", "tags": ["canonical"]},  # Wrong stress position
+                {"form": "suggére", "tags": ["infinitive"]},  # Correct stress position
+                {"form": "sùggo", "tags": ["first-person", "indicative", "present", "singular"]},
+            ],
+            "senses": [{"glosses": ["to suck"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([suggere_verb])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="verb")
+
+            with get_connection(db_path) as conn:
+                lemma = conn.execute(
+                    select(lemmas).where(lemmas.c.normalized == "suggere")
+                ).fetchone()
+
+                assert lemma is not None
+                # Override should have been applied: sùggere -> suggére
+                assert lemma.stressed == "suggére"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_blocklisted_formless_verb_filtered(self):
+        """Verbs with no forms should be blocklisted (fé, farsi un culo così)."""
+        # This verb is in LEMMA_BLOCKLIST
+        fe_verb = {
+            "pos": "verb",
+            "word": "fé",
+            "forms": [],
+            "senses": [{"glosses": ["archaic form of fare"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([fe_verb])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="verb")
+
+            assert stats["blocklisted_lemmas"] >= 1
+
+            with get_connection(db_path) as conn:
+                lemma = conn.execute(select(lemmas).where(lemmas.c.normalized == "fe")).fetchone()
+
+                # Should have been filtered out
+                assert lemma is None
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_blocklisted_neologism_verb_filtered(self):
+        """Humorous neologism verbs should be blocklisted (perplèttére)."""
+        perplettere_verb = {
+            "pos": "verb",
+            "word": "perplettere",
+            "forms": [
+                {"form": "perplèttére", "tags": ["canonical"]},
+            ],
+            "senses": [{"glosses": ["to perplex"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([perplettere_verb])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="verb")
+
+            assert stats["blocklisted_lemmas"] >= 1
+
+            with get_connection(db_path) as conn:
+                lemma = conn.execute(
+                    select(lemmas).where(lemmas.c.normalized == "perplettere")
+                ).fetchone()
+
+                # Should have been filtered out
+                assert lemma is None
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()

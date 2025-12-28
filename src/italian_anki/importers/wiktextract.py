@@ -64,6 +64,22 @@ GENDER_PATTERNS: dict[str, str] = {
 # Italian accented vowels (used to detect stressed/accented forms)
 ACCENTED_CHARS = frozenset("àèéìòóùÀÈÉÌÒÓÙ")
 
+# Hardcoded overrides for lemma stressed forms where Wiktionary is inconsistent.
+# Maps Wiktionary's stressed form to the correct stressed form.
+LEMMA_STRESSED_OVERRIDES: dict[str, str] = {
+    "sùggere": "suggére",  # Wiktionary lemma has wrong stress position vs forms
+}
+
+
+def _normalize_apostrophe_spacing(text: str) -> str:
+    """Remove spaces after apostrophes in Italian contractions.
+
+    Wiktionary sometimes has inconsistent spacing after apostrophes in
+    multi-word expressions (e.g., "d' occhio" vs "d'occhio"). This normalizes
+    them to the standard form without space.
+    """
+    return re.sub(r"'\s+", "'", text)
+
 
 def _is_invariable_adjective(entry: dict[str, Any]) -> bool:
     """Check if adjective is invariable (same form for all gender/number).
@@ -752,6 +768,11 @@ LEMMA_BLOCKLIST: frozenset[str] = frozenset(
         "nullafare",  # Compound, incomplete
         "scarrupare",  # Dialectal (Neapolitan)
         "tollere",  # Latin infinitive
+        # === Verbs with no forms (orphaned entries) ===
+        "fé",  # Archaic "fare" with no conjugation table
+        "farsi un culo così",  # Vulgar expression with no forms
+        # === Verbs with invalid data ===
+        "perplettere",  # Humorous neologism (Corrado Guzzanti), not a real verb
     }
 )
 
@@ -1023,14 +1044,29 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def _extract_lemma_stressed(entry: dict[str, Any]) -> str:
-    """Extract the stressed form of the lemma (infinitive)."""
+    """Extract the stressed form of the lemma (infinitive).
+
+    Applies normalizations:
+    - Apostrophe spacing (e.g., "d' occhio" -> "d'occhio")
+    - Known overrides for Wiktionary errors (e.g., "sùggere" -> "suggére")
+    """
     # First check forms for canonical or infinitive
     for form in entry.get("forms", []):
         tags = form.get("tags", [])
         if "canonical" in tags or "infinitive" in tags:
-            return form.get("form", entry["word"])
-    # Fallback to word
-    return entry["word"]
+            stressed = form.get("form", entry["word"])
+            break
+    else:
+        # Fallback to word
+        stressed = entry["word"]
+
+    # Normalize apostrophe spacing
+    stressed = _normalize_apostrophe_spacing(stressed)
+
+    # Apply known overrides for Wiktionary inconsistencies
+    stressed = LEMMA_STRESSED_OVERRIDES.get(stressed, stressed)
+
+    return stressed
 
 
 def _iter_forms(
@@ -1314,6 +1350,9 @@ def _build_verb_form_row(
     # Skip defective verb forms (marked as "-" in Wiktionary)
     if form_stressed == "-":
         return None
+
+    # Normalize apostrophe spacing (e.g., "d' occhio" -> "d'occhio")
+    form_stressed = _normalize_apostrophe_spacing(form_stressed)
 
     if should_filter_form(tags):
         return None
