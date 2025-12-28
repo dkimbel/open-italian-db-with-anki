@@ -117,9 +117,7 @@ class NounFormFeatures:
 
     number: str | None = None
     labels: str | None = None  # comma-separated if multiple
-    is_diminutive: bool = False
-    is_augmentative: bool = False
-    is_pejorative: bool = False
+    derivation_type: str | None = None  # 'diminutive', 'augmentative', 'pejorative'
     should_filter: bool = False
 
 
@@ -282,10 +280,11 @@ def parse_noun_tags(tags: list[str]) -> NounFormFeatures:
             result.number = tag
             break
 
-    # Extract derivation type
-    result.is_diminutive = "diminutive" in tag_set
-    result.is_augmentative = "augmentative" in tag_set
-    result.is_pejorative = "pejorative" in tag_set
+    # Extract derivation type (mutually exclusive)
+    for tag in ("diminutive", "augmentative", "pejorative"):
+        if tag in tag_set:
+            result.derivation_type = tag
+            break
 
     # Extract labels
     result.labels = _extract_labels(tag_set)

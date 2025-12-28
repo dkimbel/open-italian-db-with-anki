@@ -1511,9 +1511,7 @@ def _build_noun_form_row(
         "gender": gender,
         "number": features.number,
         "labels": features.labels,
-        "is_diminutive": features.is_diminutive,
-        "is_augmentative": features.is_augmentative,
-        "is_pejorative": features.is_pejorative,
+        "derivation_type": features.derivation_type,
         "meaning_hint": meaning_hint,
         "def_article": def_article,
         "article_source": article_source,
@@ -1530,7 +1528,7 @@ def _is_trackable_base_form(row: dict[str, Any], tags: list[str]) -> bool:
 
     These can coexist with the canonical lemma word.
     """
-    if row.get("is_diminutive") or row.get("is_augmentative") or row.get("is_pejorative"):
+    if row.get("derivation_type"):
         return False
     return "alternative" not in tags
 
