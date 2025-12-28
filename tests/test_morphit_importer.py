@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -1100,3 +1101,119 @@ class TestOrthographyFallback:
             db_path.unlink()
             jsonl_path.unlink()
             morphit_path.unlink()
+
+
+class TestOptionEHomographFix:
+    """Tests for Option E: don't use normalized fallback for unaccented forms.
+
+    This prevents homograph conflation, e.g., Greek letter "eta" should not
+    acquire the accent from Italian word "età".
+    """
+
+    def test_unaccented_form_does_not_acquire_accent(self):
+        """Unaccented forms should not get accented via normalized fallback.
+
+        When Morph-it has "età" but the form has stressed="eta" (no accent),
+        the form should NOT get written="età" because they're different words.
+        """
+        # Create a noun with unaccented form (like Greek letter eta)
+        sample_noun = {
+            "pos": "noun",
+            "word": "eta",  # Greek letter η
+            "head_templates": [{"name": "it-noun", "args": {"1": "mf", "2": "#"}}],
+            "forms": [],
+            "senses": [{"glosses": ["Greek letter eta"]}],
+        }
+
+        # Create Morph-it with only accented version (Italian word)
+        morphit_content = "età\tetà\tNOUN-F:s\n"
+
+        fd, db_path_str = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db_path = Path(db_path_str)
+        jsonl_path = _create_test_jsonl([sample_noun])
+        fd, morphit_path_str = tempfile.mkstemp(suffix=".txt")
+        os.close(fd)
+        morphit_path = Path(morphit_path_str)
+        morphit_path.write_text(morphit_content, encoding="latin-1")
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            with get_connection(db_path) as conn:
+                import_morphit(conn, morphit_path, pos_filter="noun")
+
+            # Verify that form with stressed="eta" did NOT get written="età"
+            with get_connection(db_path) as conn:
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.stressed == "eta")
+                ).fetchall()
+
+                for form in forms:
+                    # Should NOT have acquired accent from Morph-it
+                    assert form.written != "età", (
+                        "Form with stressed='eta' should not get written='età' "
+                        "via normalized fallback (homograph conflation bug)"
+                    )
+
+        finally:
+            db_path.unlink(missing_ok=True)
+            jsonl_path.unlink(missing_ok=True)
+            morphit_path.unlink(missing_ok=True)
+
+    def test_accented_form_gets_correct_written_form(self):
+        """Accented forms with non-final stress should get correct written form.
+
+        When form has stressed="pàrlo" (pedagogical accent on non-final syllable),
+        the orthography rule correctly strips it to "parlo".
+
+        Note: The orthography rule runs during wiktextract import, so Morph-it
+        lookup isn't needed for these simple cases. This test verifies the
+        overall pipeline produces the correct result.
+        """
+        sample_verb = {
+            "pos": "verb",
+            "word": "parlare",
+            "forms": [
+                {"form": "parlàre", "tags": ["canonical"]},
+                {"form": "parlàre", "tags": ["infinitive"]},
+                {"form": "avére", "tags": ["auxiliary"]},
+                {"form": "pàrlo", "tags": ["first-person", "indicative", "present", "singular"]},
+            ],
+            "senses": [{"glosses": ["to speak"]}],
+        }
+
+        fd, db_path_str = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db_path = Path(db_path_str)
+        jsonl_path = _create_test_jsonl([sample_verb])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="verb")
+
+            # Verify that form with stressed="pàrlo" got written="parlo"
+            with get_connection(db_path) as conn:
+                forms = conn.execute(
+                    select(verb_forms).where(verb_forms.c.stressed == "pàrlo")
+                ).fetchall()
+
+                assert len(forms) == 1
+                # Should have written form with accent stripped
+                assert forms[0].written == "parlo", (
+                    "Form with stressed='pàrlo' should get written='parlo' "
+                    "(non-final pedagogical accent stripped)"
+                )
+                # The orthography rule derives this during wiktextract import
+                assert forms[0].written_source == "derived:orthography_rule"
+
+        finally:
+            db_path.unlink(missing_ok=True)
+            jsonl_path.unlink(missing_ok=True)

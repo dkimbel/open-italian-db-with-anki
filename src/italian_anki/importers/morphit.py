@@ -264,9 +264,12 @@ def import_morphit(
         if real_form:
             stats["exact_matched"] += 1
         else:
-            # Fall back to normalized lookup (for pronunciation-only marks like "pàrlo")
-            normalized = normalize(stressed_form)
-            real_form = normalized_lookup.get(normalized)
+            # Only use normalized fallback if the form has accent marks to strip.
+            # Unaccented forms (e.g., "eta") should not acquire accents via fallback,
+            # as this conflates homographs (Greek letter eta vs Italian età).
+            if _has_accents(stressed_form):
+                normalized = normalize(stressed_form)
+                real_form = normalized_lookup.get(normalized)
 
         if real_form:
             # Check if this is a French loanword that should preserve its accent
@@ -643,9 +646,12 @@ def enrich_lemma_written(
         if real_lemma:
             stats["exact_matched"] += 1
         else:
-            # Fall back to normalized lookup
-            normalized = normalize(stressed_lemma)
-            real_lemma = normalized_lookup.get(normalized)
+            # Only use normalized fallback if the lemma has accent marks to strip.
+            # Unaccented lemmas (e.g., "eta") should not acquire accents via fallback,
+            # as this conflates homographs (Greek letter eta vs Italian età).
+            if _has_accents(stressed_lemma):
+                normalized = normalize(stressed_lemma)
+                real_lemma = normalized_lookup.get(normalized)
 
         if real_lemma:
             conn.execute(update(lemmas).where(lemmas.c.id == lemma_id).values(written=real_lemma))

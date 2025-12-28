@@ -878,6 +878,93 @@ class TestWiktextractImporter:
             db_path.unlink()
             jsonl_path.unlink()
 
+    def test_blocklisted_verb_filtered(self) -> None:
+        """Test that blocklisted verbs (orphan conjugated forms) are filtered out."""
+        # "possiamo" is a conjugated form incorrectly listed as a verb lemma
+        sample_blocklisted_verb = {
+            "pos": "verb",
+            "word": "possiamo",
+            "forms": [{"form": "possiamo", "tags": ["canonical"]}],
+            "senses": [{"glosses": ["we can"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_VERB, sample_blocklisted_verb])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="verb")
+
+            # Only the valid verb should be imported
+            assert stats["lemmas"] == 1
+            assert stats["blocklisted_lemmas"] >= 1
+
+            with get_connection(db_path) as conn:
+                # Check that parlare is imported
+                parlare = conn.execute(
+                    select(lemmas).where(lemmas.c.normalized == "parlare")
+                ).fetchone()
+                assert parlare is not None
+
+                # Check that possiamo is NOT imported
+                blocklisted = conn.execute(
+                    select(lemmas).where(lemmas.c.normalized == "possiamo")
+                ).fetchone()
+                assert blocklisted is None
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_blocklisted_noun_filtered(self) -> None:
+        """Test that blocklisted nouns (corrupted Wiktionary data) are filtered out."""
+        # "verseggiatore" has wrong gender in Wiktionary
+        sample_blocklisted_noun = {
+            "pos": "noun",
+            "word": "verseggiatore",
+            "head_templates": [{"name": "it-noun", "args": {"1": "f"}}],
+            "forms": [{"form": "verseggiatori", "tags": ["plural"]}],
+            "senses": [{"glosses": ["versifier"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_NOUN_MASCULINE, sample_blocklisted_noun])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            # Only the valid noun should be imported
+            assert stats["lemmas"] == 1
+            assert stats["blocklisted_lemmas"] >= 1
+
+            with get_connection(db_path) as conn:
+                # Check that libro is imported
+                libro = conn.execute(
+                    select(lemmas).where(lemmas.c.normalized == "libro")
+                ).fetchone()
+                assert libro is not None
+
+                # Check that verseggiatore is NOT imported
+                blocklisted = conn.execute(
+                    select(lemmas).where(lemmas.c.normalized == "verseggiatore")
+                ).fetchone()
+                assert blocklisted is None
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
     def test_comparative_superlative_hardcoded_fallback(self) -> None:
         """Test that hardcoded degree relationships are linked with source tracking.
 
