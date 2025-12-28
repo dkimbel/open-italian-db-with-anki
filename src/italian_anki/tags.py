@@ -7,6 +7,9 @@ FILTER_TAGS = frozenset(
     {
         "misspelling",
         "proscribed",
+        # POS tags on forms are Wiktionary data errors (e.g., negriere tagged
+        # ['alternative', 'masculine', 'noun'] when it's actually f.pl of negriero)
+        "noun",
         # Note: "error-unknown-tag" and "error-unrecognized-form" are NOT filtered -
         # they just mean wiktextract couldn't parse some annotation, but the forms
         # themselves are valid
