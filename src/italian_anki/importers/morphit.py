@@ -15,7 +15,7 @@ from italian_anki.db.schema import (
     noun_forms,
     verb_forms,
 )
-from italian_anki.normalize import normalize
+from italian_anki.normalize import FRENCH_LOANWORD_WHITELIST, normalize
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +269,16 @@ def import_morphit(
             real_form = normalized_lookup.get(normalized)
 
         if real_form:
-            update_batch.append({"id": form_id, "written": real_form, "written_source": "morphit"})
+            # Check if this is a French loanword that should preserve its accent
+            # Morph-it! may have stripped the accent (e.g., "defaillance" not "défaillance")
+            if stressed_form in FRENCH_LOANWORD_WHITELIST:
+                real_form = FRENCH_LOANWORD_WHITELIST[stressed_form]
+                written_source = "hardcoded:loanword"
+            else:
+                written_source = "morphit"
+            update_batch.append(
+                {"id": form_id, "written": real_form, "written_source": written_source}
+            )
         else:
             stats["not_found"] += 1
 
@@ -389,15 +398,23 @@ def fill_missing_adjective_forms(
                 )
                 continue
 
+            # Check if this is a French loanword that should preserve its accent
+            if entry.form in FRENCH_LOANWORD_WHITELIST:
+                written_form = FRENCH_LOANWORD_WHITELIST[entry.form]
+                written_source = "hardcoded:loanword"
+            else:
+                written_form = entry.form
+                written_source = "morphit"
+
             # Compute definite article for this form (gender is already 'm'/'f')
-            def_article, article_source = get_definite(entry.form, entry.gender, entry.number)
+            def_article, article_source = get_definite(written_form, entry.gender, entry.number)
 
             # Insert new form
             conn.execute(
                 adjective_forms.insert().values(
                     lemma_id=lemma_id,
-                    written=entry.form,  # Morphit provides real spelling directly
-                    written_source="morphit",
+                    written=written_form,
+                    written_source=written_source,
                     stressed=entry.form,  # Morphit doesn't have stress; use form
                     gender=entry.gender,
                     number=entry.number,

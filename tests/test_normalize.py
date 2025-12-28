@@ -112,12 +112,35 @@ class TestDeriveWrittenFromStressed:
         assert derive_written_from_stressed("il bèllo") == "il bello"
         assert derive_written_from_stressed("la càsa") == "la casa"
 
-    def test_french_loanword_whitelist(self) -> None:
+    def test_french_loanword_whitelist_multi_accent(self) -> None:
         # French loanwords with multiple accents should be returned unchanged
         assert derive_written_from_stressed("décolleté") == "décolleté"
         assert derive_written_from_stressed("négligé") == "négligé"
         assert derive_written_from_stressed("séparé") == "séparé"
         assert derive_written_from_stressed("arrière-pensée") == "arrière-pensée"
+        assert derive_written_from_stressed("défilé") == "défilé"
+        assert derive_written_from_stressed("démodé") == "démodé"
+
+    def test_french_loanword_whitelist_single_accent(self) -> None:
+        # French loanwords with single non-final accent should be preserved
+        assert derive_written_from_stressed("rétro") == "rétro"
+        assert derive_written_from_stressed("éclair") == "éclair"
+        assert derive_written_from_stressed("élite") == "élite"
+        assert derive_written_from_stressed("étoile") == "étoile"
+        assert derive_written_from_stressed("matinée") == "matinée"
+        assert derive_written_from_stressed("mèche") == "mèche"
+        assert derive_written_from_stressed("mélo") == "mélo"
+        assert derive_written_from_stressed("ampère") == "ampère"
+
+    def test_french_loanword_single_letter(self) -> None:
+        # The French preposition "à" should be preserved
+        assert derive_written_from_stressed("à") == "à"
+
+    def test_french_loanword_in_phrase(self) -> None:
+        # French loanwords in phrases should work via per-word whitelist check
+        assert derive_written_from_stressed("pasta brisée") == "pasta brisée"
+        assert derive_written_from_stressed("à la page") == "à la page"
+        assert derive_written_from_stressed("la mêlée") == "la mêlée"
 
     def test_non_whitelisted_multi_accent_returns_none(self) -> None:
         # Multi-accent words NOT in the whitelist should return None

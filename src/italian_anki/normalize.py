@@ -100,13 +100,101 @@ ACCENT_WHITELIST = frozenset(
 # (These are single-syllable due to the 'qu' digraph being a single consonant unit)
 ACCENT_BLACKLIST = frozenset({"qua", "qui"})
 
-# French loanwords with multiple accents that are used as-is in Italian
-# These bypass the normal multi-accent warning and are returned unchanged
+# ============================================================================
+# Loanword Handling
+# ============================================================================
+#
+# The algorithm strips non-final accents assuming they're pedagogical stress
+# marks for Italian pronunciation. However, some loanwords have orthographic
+# accents from their source language that should be preserved.
+#
+# FRENCH LOANWORDS (need whitelist):
+#   French spelling uses orthographic accents (é, è, ê, â, etc.) that overlap
+#   with Italian accent characters. When these appear in non-final position,
+#   the algorithm would incorrectly strip them (e.g., rétro → retro).
+#   Solution: Whitelist French loanwords with non-final accents.
+#
+# GERMAN LOANWORDS (already safe):
+#   German uses umlauts (ö, ü) and eszett (ß). These are NOT in ACCENTED_CHARS
+#   so the algorithm ignores them. Example: föhn passes through unchanged.
+#
+# PORTUGUESE LOANWORDS (already safe):
+#   Portuguese uses cedillas (ç) and tildes (ã, õ). These are NOT in
+#   ACCENTED_CHARS so the algorithm ignores them.
+#
+# SPANISH LOANWORDS (already safe):
+#   Spanish loanwords in Italian typically have FINAL accents (oxytone stress)
+#   matching Italian patterns (e.g., colibrì, cincillà). The algorithm
+#   correctly preserves final accents on polysyllables.
+#
+# ENGLISH LOANWORDS (correct behavior):
+#   English has no orthographic accents. When English words are borrowed into
+#   Italian, any accents (e.g., bàrista from "barrister") are pedagogical
+#   pronunciation guides that SHOULD be stripped.
+#
+# This analysis was performed against the full Wiktextract Italian dictionary
+# (~620K entries) to verify that French is the only source of loanwords
+# requiring special handling.
+# ============================================================================
+
+# French loanwords with accents that must be preserved in written Italian.
+# These bypass the normal accent-stripping logic and multi-accent warning.
+# The whitelist is checked FIRST in _derive_single_word(), so multi-accent
+# French words work correctly when whitelisted.
 FRENCH_LOANWORD_WHITELIST: dict[str, str] = {
+    # =========================================================================
+    # Multi-accent words
+    # =========================================================================
     "arrière-pensée": "arrière-pensée",
     "décolleté": "décolleté",
+    "défilé": "défilé",
+    "démodé": "démodé",
     "négligé": "négligé",
     "séparé": "séparé",
+    # =========================================================================
+    # Single-accent French loanwords
+    # These have Italian-detectable accents (é, è) in non-final position
+    # =========================================================================
+    "ampère": "ampère",
+    "arrière-goût": "arrière-goût",
+    "bohémien": "bohémien",
+    "brisée": "brisée",  # From phrases like "pasta brisée"
+    "brûlé": "brûlé",
+    "café-chantant": "café-chantant",
+    "crépon": "crépon",
+    "d'emblée": "d'emblée",
+    "débauche": "débauche",
+    "débrayage": "débrayage",
+    "défaillance": "défaillance",
+    "démaquillage": "démaquillage",
+    "dépendance": "dépendance",
+    "dépliant": "dépliant",
+    "doléances": "doléances",  # From "cahier de doléances"
+    "eurochèque": "eurochèque",
+    "garçonnière": "garçonnière",
+    "guêpière": "guêpière",
+    "matinée": "matinée",
+    "mèche": "mèche",
+    "mélo": "mélo",
+    "mêlée": "mêlée",  # From "au-dessus de la mêlée"
+    "nécessaire": "nécessaire",
+    "pré-maman": "pré-maman",
+    "randonnée": "randonnée",
+    "rétro": "rétro",
+    "sommelière": "sommelière",
+    "tournée": "tournée",
+    "éclair": "éclair",
+    "écru": "écru",
+    "élite": "élite",
+    "épagneul": "épagneul",
+    "étoile": "étoile",
+    # =========================================================================
+    # Single-letter word
+    # Italian has no pedagogical "à" - the only uses are:
+    #   1. French preposition (à la page) - orthographic, should preserve
+    #   2. Obsolete Italian "ha" - also orthographic, would also preserve
+    # =========================================================================
+    "à": "à",  # From "à la page"
 }
 
 # All accented characters (both uppercase and lowercase)
