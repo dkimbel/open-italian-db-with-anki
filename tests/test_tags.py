@@ -84,7 +84,7 @@ class TestParseVerbTagsParticipleFilter:
         result = parse_verb_tags(tags)
         assert result.should_filter is False
         assert result.mood == "participle"
-        assert result.labels == "uncommon"
+        assert result.labels == ["uncommon"]
 
     def test_allows_finite_verb_with_person(self) -> None:
         """Test that finite verbs with person tags are still allowed."""

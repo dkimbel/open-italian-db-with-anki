@@ -121,7 +121,7 @@ class VerbFormFeatures:
     gender: str | None = None  # for participles
     is_formal: bool = False
     is_negative: bool = False
-    labels: str | None = None  # comma-separated if multiple, e.g. "archaic,literary"
+    labels: list[str] | None = None  # e.g. ["archaic", "literary"]
     should_filter: bool = False
 
 
@@ -130,7 +130,7 @@ class NounFormFeatures:
     """Parsed grammatical features for a noun form."""
 
     number: str | None = None
-    labels: str | None = None  # comma-separated if multiple
+    labels: list[str] | None = None  # e.g. ["archaic", "literary"]
     derivation_type: str | None = None  # 'diminutive', 'augmentative', 'pejorative'
     should_filter: bool = False
 
@@ -142,7 +142,7 @@ class AdjectiveFormFeatures:
     gender: str | None = None
     number: str | None = None
     degree: str = "positive"
-    labels: str | None = None  # comma-separated if multiple
+    labels: list[str] | None = None  # e.g. ["archaic", "literary"]
     should_filter: bool = False
 
 
@@ -158,16 +158,16 @@ def should_filter_form(tags: list[str]) -> bool:
     return "alternative" in tag_set and "misspelling" in tag_set
 
 
-def _extract_labels(tags: set[str]) -> str | None:
+def _extract_labels(tags: set[str]) -> list[str] | None:
     """Extract labels from tags, mapping to canonical forms.
 
     Uses LABEL_CANONICAL to map raw wiktextract tags (e.g., "Tuscany", "slang")
-    to canonical labels (e.g., "regional", "colloquial"). Returns comma-separated
-    canonical labels, sorted alphabetically. Duplicates are removed (e.g., if both
-    "Tuscany" and "regional" appear, only "regional" is returned once).
+    to canonical labels (e.g., "regional", "colloquial"). Returns a sorted list
+    of canonical labels. Duplicates are removed (e.g., if both "Tuscany" and
+    "regional" appear, only "regional" is returned once).
     """
     canonical = {LABEL_CANONICAL[tag] for tag in tags if tag in LABEL_CANONICAL}
-    return ",".join(sorted(canonical)) if canonical else None
+    return sorted(canonical) if canonical else None
 
 
 def _extract_tense(tags: set[str], mood: str | None) -> str | None:

@@ -1712,6 +1712,9 @@ def import_wiktextract(
 
     def _verb_form_key(row: dict[str, Any]) -> tuple[Any, ...]:
         """Create a key tuple for deduplication matching the unique constraint columns."""
+        # Convert labels list to tuple for hashability
+        labels = row.get("labels")
+        labels_key = tuple(labels) if labels else None
         return (
             row["lemma_id"],
             row["stressed"],
@@ -1722,7 +1725,7 @@ def import_wiktextract(
             row.get("gender"),
             row.get("is_formal", False),
             row.get("is_negative", False),
-            row.get("labels"),
+            labels_key,
         )
 
     def add_form(row: dict[str, Any]) -> bool:
@@ -2351,7 +2354,7 @@ def import_wiktextract(
                             {
                                 "lemma_id": lemma_id,
                                 "gloss": gloss,
-                                "tags": json.dumps(def_tags) if def_tags else None,
+                                "tags": def_tags or None,
                                 "form_meaning_hint": form_text,
                             }
                             for form_text in matched_forms
@@ -2362,7 +2365,7 @@ def import_wiktextract(
                             {
                                 "lemma_id": lemma_id,
                                 "gloss": gloss,
-                                "tags": json.dumps(def_tags) if def_tags else None,
+                                "tags": def_tags or None,
                                 "form_meaning_hint": None,  # Consistent keys for batch insert
                             }
                         )
@@ -2373,7 +2376,7 @@ def import_wiktextract(
                         {
                             "lemma_id": lemma_id,
                             "gloss": gloss,
-                            "tags": json.dumps(def_tags) if def_tags else None,
+                            "tags": def_tags or None,
                             "form_meaning_hint": None,  # Consistent keys for batch insert
                         }
                     )
@@ -2407,12 +2410,12 @@ def _is_form_of_entry(entry: dict[str, Any], pos: str) -> bool:
 
 def _extract_form_of_info(
     entry: dict[str, Any],
-) -> Iterator[tuple[str, str, str | None]]:
+) -> Iterator[tuple[str, str, list[str] | None]]:
     """Extract form-of info from an entry.
 
     Yields (form_word, lemma_word, labels) tuples.
     A form-of entry can reference multiple lemmas in different senses.
-    Labels are comma-separated if multiple.
+    Labels is a sorted list if any labels are present.
     """
     form_word = entry.get("word", "")
     if not form_word:
@@ -2426,7 +2429,7 @@ def _extract_form_of_info(
         # Extract and canonicalize labels from sense tags
         tags = set(sense.get("tags", []))
         canonical = {LABEL_CANONICAL[t] for t in tags if t in LABEL_CANONICAL}
-        labels = ",".join(sorted(canonical)) if canonical else None
+        labels = sorted(canonical) if canonical else None
 
         # Only proceed if there are labels to apply
         if labels is None:

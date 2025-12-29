@@ -1112,7 +1112,7 @@ class TestWiktextractImporter:
                     )
                 ).fetchone()
                 assert form_row is not None
-                assert form_row.labels == "literary"
+                assert form_row.labels == ["literary"]
 
         finally:
             db_path.unlink()

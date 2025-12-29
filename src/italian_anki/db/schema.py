@@ -1,6 +1,7 @@
 """Database schema definition using SQLAlchemy Core."""
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Column,
     Float,
@@ -62,8 +63,10 @@ verb_forms = Table(
     # Modifiers
     Column("is_formal", Boolean, default=False),  # Lei/Loro forms
     Column("is_negative", Boolean, default=False),  # negative imperative
-    # Usage labels (comma-separated if multiple)
-    Column("labels", Text),  # NULL=standard, or "archaic", "archaic,literary", etc.
+    # Usage labels (JSON array)
+    Column(
+        "labels", JSON(none_as_null=True)
+    ),  # NULL=standard, or ["archaic"], ["archaic", "literary"], etc.
     # Form origin tracking - how we determined this form exists
     Column("form_origin", Text),  # 'wiktextract', 'inferred:singular', etc.
     # Citation form marker - True for the canonical/dictionary form (infinitive for verbs)
@@ -95,7 +98,7 @@ noun_forms = Table(
     Column("stressed", Text, nullable=False),  # with stress marks (e.g., "città", "càsa")
     Column("gender", Text, nullable=False),  # 'm' or 'f' (per-form, for nouns like paio/paia)
     Column("number", Text, nullable=False),  # singular, plural
-    Column("labels", Text),  # NULL=standard, or comma-separated labels
+    Column("labels", JSON(none_as_null=True)),  # NULL=standard, or JSON array of labels
     Column("derivation_type", Text),  # NULL, 'diminutive', 'augmentative', 'pejorative'
     Column("meaning_hint", Text),  # e.g., 'anatomical', 'figurative' for braccio-type plurals
     # Article columns (computed from orthography)
@@ -141,7 +144,7 @@ adjective_forms = Table(
     Column("gender", Text, nullable=False),  # 'm', 'f'
     Column("number", Text, nullable=False),  # singular, plural
     Column("degree", Text, default="positive"),  # positive, comparative, superlative
-    Column("labels", Text),  # NULL=standard, or comma-separated labels
+    Column("labels", JSON(none_as_null=True)),  # NULL=standard, or JSON array of labels
     # Article columns (computed from orthography)
     Column("def_article", Text),  # 'il', 'lo', 'la', "l'", 'i', 'gli', 'le'
     Column("article_source", Text),  # 'inferred' or 'exception:<reason>'
@@ -162,7 +165,7 @@ definitions = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False),
     Column("gloss", Text, nullable=False),
-    Column("tags", Text),  # JSON array (e.g., ["transitive"])
+    Column("tags", JSON(none_as_null=True)),  # JSON array (e.g., ["transitive"])
     # Optional linkage to specific forms (for nouns with meaning-dependent gender/plurals)
     Column("form_gender", Text),  # NULL (all), 'masculine', 'feminine'
     Column("form_number", Text),  # NULL (all), 'singular', 'plural'
@@ -183,8 +186,18 @@ sentences = Table(
 translations = Table(
     "translations",
     metadata,
-    Column("ita_sentence_id", Integer, primary_key=True),
-    Column("eng_sentence_id", Integer, primary_key=True),
+    Column(
+        "ita_sentence_id",
+        Integer,
+        ForeignKey("sentences.sentence_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "eng_sentence_id",
+        Integer,
+        ForeignKey("sentences.sentence_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
     sqlite_with_rowid=False,
 )
 
