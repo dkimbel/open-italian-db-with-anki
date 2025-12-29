@@ -1367,6 +1367,7 @@ def _build_verb_form_row(
     tags: list[str],
     *,
     form_origin: str = "wiktextract",
+    is_citation_form: bool = False,
 ) -> dict[str, Any] | None:
     """Build a verb_forms row dict from tags, or None if should filter.
 
@@ -1376,6 +1377,7 @@ def _build_verb_form_row(
         tags: Wiktextract tags for this form
         form_origin: How we determined this form exists:
             - 'wiktextract': Direct from forms array (default)
+        is_citation_form: Whether this is the canonical dictionary form (infinitive)
     """
     # Skip defective verb forms (marked as "-" in Wiktionary)
     if form_stressed == "-":
@@ -1423,6 +1425,7 @@ def _build_verb_form_row(
         "is_negative": features.is_negative,
         "labels": features.labels,
         "form_origin": form_origin,
+        "is_citation_form": is_citation_form,
     }
 
 
@@ -1458,6 +1461,7 @@ def _build_noun_form_row(
     meaning_hint: str | None = None,
     written_source: str = "wiktionary",
     form_origin: str = "wiktextract",
+    is_citation_form: bool = False,
 ) -> dict[str, Any] | None:
     """Build a noun_forms row dict from tags, or None if should filter.
 
@@ -1478,6 +1482,7 @@ def _build_noun_form_row(
             - 'wiktextract': Direct from forms array with explicit gender tags (default)
             - 'wiktextract:gender_fallback': From forms array but gender came from lemma
             - 'inferred:singular': Added missing singular tag
+        is_citation_form: Whether this is the canonical dictionary form
     """
     if should_filter_form(tags):
         return None
@@ -1529,6 +1534,7 @@ def _build_noun_form_row(
         "def_article": def_article,
         "article_source": article_source,
         "form_origin": effective_origin,
+        "is_citation_form": is_citation_form,
     }
 
 
@@ -1546,12 +1552,46 @@ def _is_trackable_base_form(row: dict[str, Any], tags: list[str]) -> bool:
     return "alternative" not in tags
 
 
+def _is_noun_citation_form(
+    form_stressed: str,
+    tags: list[str],
+    lemma_stressed: str,
+    number_class: str | None,
+) -> bool:
+    """Determine if a noun form is the citation (dictionary) form.
+
+    Citation form is:
+    - For pluralia tantum nouns: plural form matching lemma_stressed
+    - For all other nouns: singular form matching lemma_stressed
+
+    Args:
+        form_stressed: The stressed form of this particular form
+        tags: Wiktextract tags for this form
+        lemma_stressed: The lemma's stressed form (from head word)
+        number_class: The noun's number classification (from noun_metadata)
+
+    Returns:
+        True if this form should be marked as citation form.
+    """
+    if form_stressed != lemma_stressed:
+        return False
+
+    is_plural = "plural" in tags
+    is_singular = "singular" in tags or "plural" not in tags  # Default to singular
+
+    if number_class == "pluralia_tantum":
+        return is_plural
+    else:
+        return is_singular
+
+
 def _build_adjective_form_row(
     lemma_id: int,
     form_stressed: str,
     tags: list[str],
     *,
     form_origin: str = "wiktextract",
+    is_citation_form: bool = False,
 ) -> dict[str, Any] | None:
     """Build an adjective_forms row dict from tags, or None if should filter.
 
@@ -1566,6 +1606,7 @@ def _build_adjective_form_row(
             - 'inferred:base_form': From lemma word field
             - 'inferred:invariable': Generated all 4 forms for invariable adjective
             - 'morphit': From Morphit fallback
+        is_citation_form: Whether this is the canonical dictionary form (masculine singular)
     """
     if should_filter_form(tags):
         return None
@@ -1591,6 +1632,7 @@ def _build_adjective_form_row(
         "def_article": def_article,
         "article_source": article_source,
         "form_origin": form_origin,
+        "is_citation_form": is_citation_form,
     }
 
 
@@ -1767,7 +1809,6 @@ def import_wiktextract(
 
             # Extract lemma data
             word = entry["word"]
-            lemma_normalized = normalize(word)
             lemma_stressed = _extract_lemma_stressed(entry)
 
             # For nouns: pre-check gender info before inserting lemma
@@ -1785,8 +1826,8 @@ def import_wiktextract(
             try:
                 result = conn.execute(
                     lemmas.insert().values(
-                        normalized=lemma_normalized,
-                        written=None,  # Will be filled by Morph-it! importer
+                        written=None,  # Will be filled by enrich_lemma_written()
+                        written_source=None,
                         stressed=lemma_stressed,
                         pos=pos_filter,
                         ipa=_extract_ipa(entry),
@@ -1900,6 +1941,23 @@ def import_wiktextract(
             # augmentatives, pejoratives to avoid blocking base form inference)
             seen_base_forms: set[tuple[str, str]] = set()  # (number, gender)
 
+            # Track if we've already marked a citation form for verbs (avoid duplicates
+            # when multiple infinitive variants exist, e.g., chièdere / chiédere)
+            verb_citation_marked = False
+
+            # Track if we've already marked a citation form for adjectives (for feminine-only
+            # adjectives like 'incinta' where f/s should be the citation form)
+            adj_citation_marked = False
+
+            # Pre-scan for adjectives: check if masculine singular will exist
+            # This determines whether m/s or f/s should be the citation form.
+            # Key insight: m/s will ALWAYS exist unless the adjective is feminine-only,
+            # because _iter_forms() adds the lemma word as m/s via base form inference.
+            # For feminine-only adjectives (like "incinta"), only f/s exists.
+            adj_has_masc_singular = pos_filter == "adjective" and not _is_feminine_only_adjective(
+                entry
+            )
+
             # Pre-scan: collect explicit gender-tagged plurals from this entry
             # (used to avoid duplicating untagged plurals when explicit ones exist)
             explicit_fem_plurals: set[str] = set()
@@ -1918,10 +1976,13 @@ def import_wiktextract(
                 entry, pos_filter, stressed_alternatives
             ):
                 if pos_filter == "noun":
-                    # Skip singular forms for pluralia tantum nouns
-                    is_pluralia_tantum = (
-                        noun_class and noun_class.get("number_class") == "pluralia_tantum"
+                    # Get number_class for citation form determination
+                    loop_number_class = (
+                        noun_class.get("number_class", "standard") if noun_class else "standard"
                     )
+
+                    # Skip singular forms for pluralia tantum nouns
+                    is_pluralia_tantum = loop_number_class == "pluralia_tantum"
                     if is_pluralia_tantum and "singular" in tags:
                         continue
 
@@ -2060,17 +2121,25 @@ def import_wiktextract(
                         else:
                             # For fixed-gender nouns (by_sense) or non-plural forms:
                             # duplicate for both genders with same form
+                            # Only mark first gender (m) as citation form to avoid duplicates
+                            citation_marked = False
                             for gender in ("m", "f"):
+                                is_citation = not citation_marked and _is_noun_citation_form(
+                                    form_stressed, tags, lemma_stressed, loop_number_class
+                                )
                                 row = _build_noun_form_row(
                                     lemma_id,
                                     form_stressed,
                                     tags,
                                     gender,
                                     meaning_hint=form_meaning_hints.get(form_stressed),
+                                    is_citation_form=is_citation,
                                 )
                                 if row is None:
                                     stats["forms_filtered"] += 1
                                     continue
+                                if is_citation:
+                                    citation_marked = True
                                 add_form(row)
                                 if _is_trackable_base_form(row, tags):
                                     number = "plural" if "plural" in tags else "singular"
@@ -2082,6 +2151,9 @@ def import_wiktextract(
                             tags,
                             lemma_gender,
                             meaning_hint=form_meaning_hints.get(form_stressed),
+                            is_citation_form=_is_noun_citation_form(
+                                form_stressed, tags, lemma_stressed, loop_number_class
+                            ),
                         )
                         if row is None:
                             stats["forms_filtered"] += 1
@@ -2099,13 +2171,40 @@ def import_wiktextract(
                 else:
                     # Pass form_origin to all POS form builders
                     if pos_filter == "adjective":
+                        # Citation form: m/s for standard adjectives, f/s only for feminine-only
+                        is_masc_singular = "masculine" in tags and "singular" in tags
+                        is_fem_singular = "feminine" in tags and "singular" in tags
+
+                        # Only mark m/s as citation, OR f/s if this is a feminine-only adjective
+                        is_adj_citation = (is_masc_singular and not adj_citation_marked) or (
+                            is_fem_singular
+                            and not adj_has_masc_singular
+                            and not adj_citation_marked
+                        )
+
                         row = _build_adjective_form_row(
-                            lemma_id, form_stressed, tags, form_origin=form_origin
+                            lemma_id,
+                            form_stressed,
+                            tags,
+                            form_origin=form_origin,
+                            is_citation_form=is_adj_citation,
                         )
+                        if row and is_adj_citation:
+                            adj_citation_marked = True
                     elif pos_filter == "verb":
+                        # Citation form is infinitive (tagged as "infinitive" or "canonical")
+                        # Only mark first infinitive to avoid duplicates for stress variants
+                        is_infinitive = "infinitive" in tags or "canonical" in tags
+                        is_verb_citation = is_infinitive and not verb_citation_marked
                         row = _build_verb_form_row(
-                            lemma_id, form_stressed, tags, form_origin=form_origin
+                            lemma_id,
+                            form_stressed,
+                            tags,
+                            form_origin=form_origin,
+                            is_citation_form=is_verb_citation,
                         )
+                        if row and is_verb_citation:
+                            verb_citation_marked = True
                     else:
                         row = build_form_row(lemma_id, form_stressed, tags)
                     if row is None:
@@ -2150,6 +2249,13 @@ def import_wiktextract(
 
                 if is_common_gender:
                     # Add base form for both genders if not already present
+                    # Only mark as citation if no citation form was added in main loop
+                    has_existing_citation = any(
+                        f.get("is_citation_form")
+                        for f in form_batch
+                        if f.get("lemma_id") == lemma_id
+                    )
+                    citation_marked = has_existing_citation
                     for gender in ("m", "f"):
                         if (base_number, gender) not in seen_base_forms:
                             row = _build_noun_form_row(
@@ -2158,17 +2264,26 @@ def import_wiktextract(
                                 [base_number],
                                 gender,
                                 form_origin="inferred:base_form",
+                                is_citation_form=not citation_marked,
                             )
                             if row:
                                 add_form(row)
+                                citation_marked = True
                 elif lemma_gender and (base_number, lemma_gender) not in seen_base_forms:
                     # Add base form for single gender if not already present
+                    # Only mark as citation if no citation form was added in main loop
+                    has_existing_citation = any(
+                        f.get("is_citation_form")
+                        for f in form_batch
+                        if f.get("lemma_id") == lemma_id
+                    )
                     row = _build_noun_form_row(
                         lemma_id,
                         lemma_stressed,
                         [base_number],
                         lemma_gender,
                         form_origin="inferred:base_form",
+                        is_citation_form=not has_existing_citation,
                     )
                     if row:
                         add_form(row)
@@ -2358,9 +2473,9 @@ def enrich_from_form_of(
 
     # Build lemma lookup: normalized_lemma -> lemma_id
     lemma_result = conn.execute(
-        select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == pos_filter)
+        select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == pos_filter)
     )
-    lemma_lookup: dict[str, int] = {row.normalized: row.id for row in lemma_result}
+    lemma_lookup: dict[str, int] = {normalize(row.stressed): row.id for row in lemma_result}
 
     # Build form lookup: (lemma_id, normalized_form) -> list of form_ids
     form_result = conn.execute(
@@ -2470,9 +2585,9 @@ def enrich_form_spelling_from_form_of(
 
     # Build lemma lookup: normalized_lemma -> lemma_id
     lemma_result = conn.execute(
-        select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == pos_filter)
+        select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == pos_filter)
     )
-    lemma_lookup: dict[str, int] = {row.normalized: row.id for row in lemma_result}
+    lemma_lookup: dict[str, int] = {normalize(row.stressed): row.id for row in lemma_result}
 
     # Build form lookup: (lemma_id, normalized_form) -> list of form_ids
     # Only include forms where written IS NULL (not already filled by Morph-it!)
@@ -2584,10 +2699,8 @@ def link_comparative_superlative(
         return stats
 
     # Build lookup: normalized lemma -> lemma_id for adjectives
-    result = conn.execute(
-        select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == "adjective")
-    )
-    lemma_lookup = {row.normalized: row.id for row in result}
+    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "adjective"))
+    lemma_lookup = {normalize(row.stressed): row.id for row in result}
 
     for lemma_id, base_word, relationship, source in degree_links:
         base_normalized = normalize(base_word)
@@ -2650,10 +2763,8 @@ def import_adjective_allomorphs(
     }
 
     # Build lookup: normalized lemma -> lemma_id for adjectives
-    result = conn.execute(
-        select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == "adjective")
-    )
-    adj_lookup = {row.normalized: row.id for row in result}
+    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "adjective"))
+    adj_lookup = {normalize(row.stressed): row.id for row in result}
 
     # Count lines for progress
     total_lines = _count_lines(jsonl_path) if progress_callback else 0
@@ -2849,8 +2960,8 @@ def import_noun_allomorphs(
     }
 
     # Build lookup: normalized lemma -> lemma_id for nouns
-    result = conn.execute(select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == "noun"))
-    noun_lookup = {row.normalized: row.id for row in result}
+    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "noun"))
+    noun_lookup = {normalize(row.stressed): row.id for row in result}
 
     # Count lines for progress
     total_lines = _count_lines(jsonl_path) if progress_callback else 0

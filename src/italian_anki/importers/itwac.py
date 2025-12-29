@@ -103,9 +103,7 @@ def import_itwac(
     corpus_version = ITWAC_VERSIONS.get(pos_filter, "unknown")
 
     # Get lemmas from database for the specified POS
-    result = conn.execute(
-        select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == pos_filter)
-    )
+    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == pos_filter))
     all_lemmas = result.fetchall()
     total_lemmas = len(all_lemmas)
 
@@ -115,7 +113,7 @@ def import_itwac(
         if progress_callback and idx % 5000 == 0:
             progress_callback(idx, total_lemmas)
         lemma_id = row.id
-        normalized = row.normalized  # Already normalized in DB
+        normalized = normalize(row.stressed)
 
         if normalized in freq_data:
             total_freq, zipf = freq_data[normalized]

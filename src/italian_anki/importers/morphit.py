@@ -38,6 +38,12 @@ _DEGREE_MAP = {"pos": "positive", "sup": "superlative", "comp": "comparative"}
 _NUMBER_MAP = {"s": "singular", "p": "plural"}
 # No need for a _GENDER_MAP -- we just reuse the "m" or "f" value
 
+# Corrections for known Morphit errors in noun forms
+# Applied when enriching noun_forms.written from Morphit data
+NOUN_WRITTEN_CORRECTIONS: dict[str, str] = {
+    "toto": "totò",  # Morphit error: pluralia tantum game name needs final accent
+}
+
 
 @dataclass
 class MorphitEntry:
@@ -277,6 +283,10 @@ def import_morphit(
             if stressed_form in FRENCH_LOANWORD_WHITELIST:
                 real_form = FRENCH_LOANWORD_WHITELIST[stressed_form]
                 written_source = "hardcoded:loanword"
+            # Check if this is a known Morphit error for nouns
+            elif pos_filter == "noun" and real_form in NOUN_WRITTEN_CORRECTIONS:
+                real_form = NOUN_WRITTEN_CORRECTIONS[real_form]
+                written_source = "hardcoded:correction"
             else:
                 written_source = "morphit"
             update_batch.append(
@@ -339,10 +349,8 @@ def fill_missing_adjective_forms(
 
     # Get ALL adjectives (not just incomplete ones)
     # The existing_combos logic prevents duplicate insertions
-    result = conn.execute(
-        select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == "adjective")
-    )
-    all_adjectives = result.fetchall()
+    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "adjective"))
+    all_adjectives = [(row.id, normalize(row.stressed)) for row in result]
     stats["adjectives_checked"] = len(all_adjectives)
 
     if progress_callback:
@@ -366,6 +374,7 @@ def fill_missing_adjective_forms(
                 adjective_forms.c.stressed,
                 adjective_forms.c.gender,
                 adjective_forms.c.number,
+                adjective_forms.c.is_citation_form,
             )
             .where(adjective_forms.c.lemma_id == lemma_id)
             .where(adjective_forms.c.degree == "positive")
@@ -375,6 +384,10 @@ def fill_missing_adjective_forms(
         # Key matches DB constraint: UNIQUE (lemma_id, stressed, gender, number, degree)
         # This allows multiple forms per (gender, number) as long as stressed differs
         existing_combos = {(row.stressed, row.gender, row.number) for row in existing_rows}
+
+        # Check if lemma already has a citation form
+        has_citation_form = any(row.is_citation_form for row in existing_rows)
+        citation_form_set_this_lemma = False
 
         forms_added_for_lemma = 0
 
@@ -412,6 +425,10 @@ def fill_missing_adjective_forms(
             # Compute definite article for this form (gender is already 'm'/'f')
             def_article, article_source = get_definite(written_form, entry.gender, entry.number)
 
+            # Set is_citation_form for m/s if lemma lacks citation form
+            is_m_s = entry.gender == "m" and entry.number == "singular"
+            set_as_citation = is_m_s and not has_citation_form and not citation_form_set_this_lemma
+
             # Insert new form
             conn.execute(
                 adjective_forms.insert().values(
@@ -426,8 +443,11 @@ def fill_missing_adjective_forms(
                     def_article=def_article,
                     article_source=article_source,
                     form_origin="morphit",
+                    is_citation_form=set_as_citation,
                 )
             )
+            if set_as_citation:
+                citation_form_set_this_lemma = True
             # Mark this combo as filled to prevent duplicate insertions
             existing_combos.add(combo)
             forms_added_for_lemma += 1
@@ -575,55 +595,45 @@ def apply_orthography_fallback(
     return stats
 
 
-def _build_lemma_lookup(morphit_path: Path) -> tuple[dict[str, str], dict[str, str]]:
-    """Build lookup dicts for Morphit lemmas.
-
-    Returns two lookups:
-    1. exact_lookup: lemma (with accents) -> lemma (exact match)
-    2. normalized_lookup: normalized_lemma -> real_lemma (fallback)
-
-    Similar to _build_form_lookup but for lemmas.
-    """
-    exact_lookup: dict[str, str] = {}
-    normalized_lookup: dict[str, str] = {}
-
-    for _form, lemma, _tags in _parse_morphit(morphit_path):
-        # Store exact lemma (with accents intact)
-        exact_lookup[lemma] = lemma
-
-        # Also store normalized for fallback
-        normalized = normalize(lemma)
-        if normalized not in normalized_lookup:
-            normalized_lookup[normalized] = lemma
-
-    return exact_lookup, normalized_lookup
-
-
 def enrich_lemma_written(
     conn: Connection,
-    morphit_path: Path,
     *,
     pos_filter: str = "verb",
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
-    """Update lemmas.written with real Italian spelling from Morph-it!.
+    """Update lemmas.written by copying from the citation form.
 
-    Uses exact matching first (to preserve written accents like "città"),
-    then falls back to normalized matching (for pronunciation-only marks).
+    Citation forms are identified by the is_citation_form=True column:
+    - verb: infinitive form
+    - adjective: masculine singular form
+    - noun: singular (or plural for pluralia tantum) form matching lemma.stressed
+
+    If the citation form's written is NULL, falls back to orthography rules.
 
     Args:
         conn: SQLAlchemy connection
-        morphit_path: Path to morph-it.txt file
         pos_filter: Part of speech to enrich (default: "verb")
         progress_callback: Optional callback for progress reporting (current, total)
 
     Returns:
         Statistics dict with counts
     """
-    stats = {"updated": 0, "not_found": 0, "exact_matched": 0}
+    from italian_anki.normalize import (
+        FRENCH_LOANWORD_WHITELIST,
+        derive_written_from_stressed,
+    )
 
-    # Build the lookup dictionaries for lemmas
-    exact_lookup, normalized_lookup = _build_lemma_lookup(morphit_path)
+    stats = {
+        "updated": 0,
+        "from_form": 0,
+        "derived": 0,
+        "loanwords": 0,
+        "no_citation_form": 0,
+    }
+
+    pos_form_table = POS_FORM_TABLES.get(pos_filter)
+    if pos_form_table is None:
+        return stats
 
     # Get all lemmas that don't have written form yet
     result = conn.execute(
@@ -641,23 +651,42 @@ def enrich_lemma_written(
         lemma_id = row.id
         stressed_lemma = row.stressed
 
-        # Try exact match first (preserves written accents like "città")
-        real_lemma = exact_lookup.get(stressed_lemma)
-        if real_lemma:
-            stats["exact_matched"] += 1
-        else:
-            # Only use normalized fallback if the lemma has accent marks to strip.
-            # Unaccented lemmas (e.g., "eta") should not acquire accents via fallback,
-            # as this conflates homographs (Greek letter eta vs Italian età).
-            if _has_accents(stressed_lemma):
-                normalized = normalize(stressed_lemma)
-                real_lemma = normalized_lookup.get(normalized)
+        # Query the citation form using is_citation_form flag (unified across all POS)
+        form_result = conn.execute(
+            select(pos_form_table.c.written, pos_form_table.c.written_source)
+            .where(pos_form_table.c.lemma_id == lemma_id)
+            .where(pos_form_table.c.is_citation_form == True)  # noqa: E712
+            .limit(1)
+        ).fetchone()
 
-        if real_lemma:
-            conn.execute(update(lemmas).where(lemmas.c.id == lemma_id).values(written=real_lemma))
+        written: str | None = None
+        written_source: str | None = None
+
+        if form_result and form_result.written:
+            # Copy from citation form
+            written = form_result.written
+            written_source = f"from:{pos_filter}_forms"
+            stats["from_form"] += 1
+        elif stressed_lemma != "-":
+            # Fallback: apply orthography rules
+            written = derive_written_from_stressed(stressed_lemma)
+            if written is not None:
+                if stressed_lemma in FRENCH_LOANWORD_WHITELIST:
+                    written_source = "hardcoded:loanword"
+                    stats["loanwords"] += 1
+                else:
+                    written_source = "derived:orthography_rule"
+                    stats["derived"] += 1
+
+        if written is not None:
+            conn.execute(
+                update(lemmas)
+                .where(lemmas.c.id == lemma_id)
+                .values(written=written, written_source=written_source)
+            )
             stats["updated"] += 1
         else:
-            stats["not_found"] += 1
+            stats["no_citation_form"] += 1
 
     if progress_callback:
         progress_callback(total_lemmas, total_lemmas)

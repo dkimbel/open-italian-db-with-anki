@@ -22,8 +22,10 @@ lemmas = Table(
     "lemmas",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("normalized", Text, nullable=False),  # accent-stripped for lookup (e.g., "citta")
-    Column("written", Text),  # actual written form from Morphit (e.g., "città"), NULL if unknown
+    Column("written", Text),  # actual written form (e.g., "città"), populated from citation form
+    Column(
+        "written_source", Text
+    ),  # provenance: "from:verb_forms", "derived:orthography_rule", etc.
     Column("stressed", Text, nullable=False),  # with stress marks (e.g., "città", "parlàre")
     Column("pos", String(20), default="verb"),
     Column("ipa", Text),  # IPA pronunciation from Wiktextract
@@ -64,6 +66,8 @@ verb_forms = Table(
     Column("labels", Text),  # NULL=standard, or "archaic", "archaic,literary", etc.
     # Form origin tracking - how we determined this form exists
     Column("form_origin", Text),  # 'wiktextract', 'inferred:singular', etc.
+    # Citation form marker - True for the canonical/dictionary form (infinitive for verbs)
+    Column("is_citation_form", Boolean, default=False),
     # Unique constraint to prevent duplicate forms
     UniqueConstraint(
         "lemma_id",
@@ -100,6 +104,9 @@ noun_forms = Table(
     # Form origin tracking - how we determined this form exists
     # Values: 'wiktextract', 'inferred:base_form', 'inferred:head_template', 'inferred:invariable'
     Column("form_origin", Text),
+    # Citation form marker - True for the canonical/dictionary form
+    # (singular for standard nouns, plural for pluralia tantum)
+    Column("is_citation_form", Boolean, default=False),
 )
 
 # Adjective forms with grammatical features
@@ -140,6 +147,8 @@ adjective_forms = Table(
     Column("article_source", Text),  # 'inferred' or 'exception:<reason>'
     # Form origin tracking - how we determined this form exists (see documentation above)
     Column("form_origin", Text),
+    # Citation form marker - True for the canonical/dictionary form (masculine singular)
+    Column("is_citation_form", Boolean, default=False),
     # Unique constraint: allows allomorphs (bel/bello/bell') but prevents true duplicates
     UniqueConstraint(
         "lemma_id", "stressed", "gender", "number", "degree", name="uq_adjective_forms_entry"
@@ -252,7 +261,9 @@ adjective_metadata = Table(
 )
 
 # Indexes (defined separately for clarity)
-Index("idx_lemmas_normalized_pos", lemmas.c.normalized, lemmas.c.pos)  # For lookups by word+POS
+Index(
+    "idx_lemmas_stressed_pos", lemmas.c.stressed, lemmas.c.pos
+)  # For lookups by stressed form+POS
 Index("idx_verb_metadata_auxiliary", verb_metadata.c.auxiliary)
 # noun_metadata indexes
 Index("idx_noun_metadata_gender_class", noun_metadata.c.gender_class)

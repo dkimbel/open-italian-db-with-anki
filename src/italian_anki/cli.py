@@ -530,18 +530,17 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             _run_morphit_import(conn, morphit_path, pos, indent=indent)
             print()
 
-            # Step 4 (or 5 for verbs): Morph-it! lemma enrichment
+            # Step 4 (or 5 for verbs): Lemma written enrichment (from citation forms)
             step_morphit_lemma = 5 if pos == "verb" else 4
-            print(
-                f"[{step_morphit_lemma}/{total_steps}] Enriching lemmas with Morph-it! spelling..."
-            )
+            print(f"[{step_morphit_lemma}/{total_steps}] Enriching lemmas with written spelling...")
             stats = enrich_lemma_written(
-                conn, morphit_path, pos_filter=pos, progress_callback=_make_progress_callback()
+                conn, pos_filter=pos, progress_callback=_make_progress_callback()
             )
             print()
             print(f"{indent}Lemmas updated:   {stats['updated']:,}")
-            print(f"{indent}Exact matched:    {stats['exact_matched']:,}")
-            print(f"{indent}Not in Morphit:   {stats['not_found']:,}")
+            print(f"{indent}From citation:    {stats['from_form']:,}")
+            print(f"{indent}Derived:          {stats['derived']:,}")
+            print(f"{indent}No citation form: {stats['no_citation_form']:,}")
             print()
 
             # Step 5 (adjective only): Fill missing forms from Morphit

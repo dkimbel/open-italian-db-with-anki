@@ -113,18 +113,14 @@ class TestSchema:
                 ipa = "par\u02c8la\u02d0re"
                 conn.execute(
                     lemmas.insert().values(
-                        normalized="parlare",
                         stressed="parlare",
                         pos="verb",
                         ipa=ipa,
                     )
                 )
 
-                row = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "parlare")
-                ).fetchone()
+                row = conn.execute(select(lemmas).where(lemmas.c.stressed == "parlare")).fetchone()
                 assert row is not None
-                assert row.normalized == "parlare"
                 assert row.stressed == "parlare"
                 assert row.pos == "verb"
                 assert row.ipa == ipa
@@ -141,9 +137,7 @@ class TestSchema:
 
             with get_connection(db_path) as conn:
                 # Insert a lemma first
-                result = conn.execute(
-                    lemmas.insert().values(normalized="parlare", stressed="parlare", pos="verb")
-                )
+                result = conn.execute(lemmas.insert().values(stressed="parlare", pos="verb"))
                 pk = result.inserted_primary_key
                 assert pk is not None
                 lemma_id: int = pk[0]

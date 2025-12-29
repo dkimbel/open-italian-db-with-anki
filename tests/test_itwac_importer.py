@@ -102,7 +102,7 @@ class TestItwacImporter:
                 parlare_row = conn.execute(
                     select(frequencies)
                     .join(lemmas, frequencies.c.lemma_id == lemmas.c.id)
-                    .where(lemmas.c.normalized == "parlare")
+                    .where(lemmas.c.stressed == "parlàre")
                 ).fetchone()
                 assert parlare_row is not None
                 assert parlare_row.freq_raw == 1500
@@ -113,7 +113,7 @@ class TestItwacImporter:
                 essere_row = conn.execute(
                     select(frequencies)
                     .join(lemmas, frequencies.c.lemma_id == lemmas.c.id)
-                    .where(lemmas.c.normalized == "essere")
+                    .where(lemmas.c.stressed == "èssere")
                 ).fetchone()
                 assert essere_row is not None
                 assert essere_row.freq_raw == 5000

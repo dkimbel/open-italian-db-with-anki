@@ -296,9 +296,7 @@ class TestWiktextractImporter:
 
             with get_connection(db_path) as conn:
                 # Check lemma was inserted
-                row = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "parlare")
-                ).fetchone()
+                row = conn.execute(select(lemmas).where(lemmas.c.stressed == "parlàre")).fetchone()
                 assert row is not None
                 assert row.stressed == "parlàre"
                 assert row.ipa == "/par\u02c8la\u02d0re/"
@@ -454,9 +452,7 @@ class TestWiktextractImporter:
 
             with get_connection(db_path) as conn:
                 # Check masculine noun
-                libro = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "libro")
-                ).fetchone()
+                libro = conn.execute(select(lemmas).where(lemmas.c.stressed == "libro")).fetchone()
                 assert libro is not None
                 assert libro.pos == "noun"
 
@@ -474,7 +470,7 @@ class TestWiktextractImporter:
                 assert libro_sing[0].article_source == "inferred"
 
                 # Check feminine noun
-                casa = conn.execute(select(lemmas).where(lemmas.c.normalized == "casa")).fetchone()
+                casa = conn.execute(select(lemmas).where(lemmas.c.stressed == "casa")).fetchone()
                 assert casa is not None
 
                 casa_forms = conn.execute(
@@ -511,9 +507,7 @@ class TestWiktextractImporter:
 
             with get_connection(db_path) as conn:
                 # Check adjective lemma
-                bello = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "bello")
-                ).fetchone()
+                bello = conn.execute(select(lemmas).where(lemmas.c.stressed == "bello")).fetchone()
                 assert bello is not None
                 assert bello.pos == "adjective"
                 assert bello.ipa == "/ˈbɛl.lo/"  # noqa: RUF001 (IPA stress marker)
@@ -560,7 +554,7 @@ class TestWiktextractImporter:
             assert stats["forms"] >= 4
 
             with get_connection(db_path) as conn:
-                alto = conn.execute(select(lemmas).where(lemmas.c.normalized == "alto")).fetchone()
+                alto = conn.execute(select(lemmas).where(lemmas.c.stressed == "alto")).fetchone()
                 assert alto is not None
 
                 form_rows = conn.execute(
@@ -602,7 +596,7 @@ class TestWiktextractImporter:
 
             with get_connection(db_path) as conn:
                 facile = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "facile")
+                    select(lemmas).where(lemmas.c.stressed == "facile")
                 ).fetchone()
                 assert facile is not None
 
@@ -654,7 +648,7 @@ class TestWiktextractImporter:
             assert stats["forms"] == 4
 
             with get_connection(db_path) as conn:
-                blu = conn.execute(select(lemmas).where(lemmas.c.normalized == "blu")).fetchone()
+                blu = conn.execute(select(lemmas).where(lemmas.c.stressed == "blu")).fetchone()
                 assert blu is not None
 
                 form_rows = conn.execute(
@@ -701,7 +695,7 @@ class TestWiktextractImporter:
 
             with get_connection(db_path) as conn:
                 # Check invariable adjective form_origin
-                blu = conn.execute(select(lemmas).where(lemmas.c.normalized == "blu")).fetchone()
+                blu = conn.execute(select(lemmas).where(lemmas.c.stressed == "blu")).fetchone()
                 assert blu is not None
                 blu_forms = conn.execute(
                     select(adjective_forms).where(adjective_forms.c.lemma_id == blu.id)
@@ -711,7 +705,7 @@ class TestWiktextractImporter:
 
                 # Check two-form adjective form_origin
                 facile = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "facile")
+                    select(lemmas).where(lemmas.c.stressed == "facile")
                 ).fetchone()
                 assert facile is not None
                 facile_forms = conn.execute(
@@ -751,9 +745,7 @@ class TestWiktextractImporter:
 
             with get_connection(db_path) as conn:
                 # Check 4-form adjective (bello)
-                bello = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "bello")
-                ).fetchone()
+                bello = conn.execute(select(lemmas).where(lemmas.c.stressed == "bello")).fetchone()
                 assert bello is not None
                 bello_meta = conn.execute(
                     select(adjective_metadata).where(adjective_metadata.c.lemma_id == bello.id)
@@ -763,7 +755,7 @@ class TestWiktextractImporter:
 
                 # Check 2-form adjective (facile)
                 facile = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "facile")
+                    select(lemmas).where(lemmas.c.stressed == "facile")
                 ).fetchone()
                 assert facile is not None
                 facile_meta = conn.execute(
@@ -773,7 +765,7 @@ class TestWiktextractImporter:
                 assert facile_meta.inflection_class == "2-form"
 
                 # Check invariable adjective (blu)
-                blu = conn.execute(select(lemmas).where(lemmas.c.normalized == "blu")).fetchone()
+                blu = conn.execute(select(lemmas).where(lemmas.c.stressed == "blu")).fetchone()
                 assert blu is not None
                 blu_meta = conn.execute(
                     select(adjective_metadata).where(adjective_metadata.c.lemma_id == blu.id)
@@ -807,7 +799,7 @@ class TestWiktextractImporter:
             with get_connection(db_path) as conn:
                 # Check ottimista is detected as 2-form
                 ottimista = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "ottimista")
+                    select(lemmas).where(lemmas.c.stressed == "ottimista")
                 ).fetchone()
                 assert ottimista is not None
 
@@ -864,14 +856,12 @@ class TestWiktextractImporter:
 
             with get_connection(db_path) as conn:
                 # Check that bello is imported
-                bello = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "bello")
-                ).fetchone()
+                bello = conn.execute(select(lemmas).where(lemmas.c.stressed == "bello")).fetchone()
                 assert bello is not None
 
                 # Check that metereologico is NOT imported
                 misspelling = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "metereologico")
+                    select(lemmas).where(lemmas.c.stressed == "metereologico")
                 ).fetchone()
                 assert misspelling is None
 
@@ -908,13 +898,13 @@ class TestWiktextractImporter:
             with get_connection(db_path) as conn:
                 # Check that parlare is imported
                 parlare = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "parlare")
+                    select(lemmas).where(lemmas.c.stressed == "parlàre")
                 ).fetchone()
                 assert parlare is not None
 
                 # Check that possiamo is NOT imported
                 blocklisted = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "possiamo")
+                    select(lemmas).where(lemmas.c.stressed == "possiamo")
                 ).fetchone()
                 assert blocklisted is None
 
@@ -951,14 +941,12 @@ class TestWiktextractImporter:
 
             with get_connection(db_path) as conn:
                 # Check that libro is imported
-                libro = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "libro")
-                ).fetchone()
+                libro = conn.execute(select(lemmas).where(lemmas.c.stressed == "libro")).fetchone()
                 assert libro is not None
 
                 # Check that verseggiatore is NOT imported
                 blocklisted = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "verseggiatore")
+                    select(lemmas).where(lemmas.c.stressed == "verseggiatore")
                 ).fetchone()
                 assert blocklisted is None
 
@@ -991,12 +979,12 @@ class TestWiktextractImporter:
             with get_connection(db_path) as conn:
                 # Check pessimo has degree relationship to cattivo
                 pessimo = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "pessimo")
+                    select(lemmas).where(lemmas.c.stressed == "pessimo")
                 ).fetchone()
                 assert pessimo is not None
 
                 cattivo = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "cattivo")
+                    select(lemmas).where(lemmas.c.stressed == "cattivo")
                 ).fetchone()
                 assert cattivo is not None
 
@@ -1083,7 +1071,7 @@ class TestWiktextractImporter:
             # Verify form exists without labels
             with get_connection(db_path) as conn:
                 parlare = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "parlare")
+                    select(lemmas).where(lemmas.c.stressed == "parlàre")
                 ).fetchone()
                 assert parlare is not None
 
@@ -1110,7 +1098,7 @@ class TestWiktextractImporter:
             # Verify labels was applied
             with get_connection(db_path) as conn:
                 parlare = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "parlare")
+                    select(lemmas).where(lemmas.c.stressed == "parlàre")
                 ).fetchone()
                 assert parlare is not None
 
@@ -1191,13 +1179,13 @@ class TestWiktextractImporter:
             with get_connection(db_path) as conn:
                 # The noun without gender should NOT exist (skipped entirely)
                 acronimo = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "acronimo")
+                    select(lemmas).where(lemmas.c.stressed == "acronimo")
                 ).fetchone()
                 assert acronimo is None  # Lemma was not created
 
                 # Nouns with gender should have forms
                 libro_forms = conn.execute(
-                    select(noun_forms).join(lemmas).where(lemmas.c.normalized == "libro")
+                    select(noun_forms).join(lemmas).where(lemmas.c.stressed == "libro")
                 ).fetchall()
                 assert len(libro_forms) > 0
                 assert all(f.gender is not None for f in libro_forms)
@@ -1474,7 +1462,7 @@ class TestNounClassification:
             with get_connection(db_path) as conn:
                 # Check lemma
                 collega = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "collega")
+                    select(lemmas).where(lemmas.c.stressed == "collega")
                 ).fetchone()
                 assert collega is not None
 
@@ -1527,7 +1515,7 @@ class TestNounClassification:
             with get_connection(db_path) as conn:
                 # Check lemma
                 cantante = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "cantante")
+                    select(lemmas).where(lemmas.c.stressed == "cantante")
                 ).fetchone()
                 assert cantante is not None
 
@@ -1573,7 +1561,7 @@ class TestNounClassification:
             with get_connection(db_path) as conn:
                 # Check lemma
                 forbici = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "forbici")
+                    select(lemmas).where(lemmas.c.stressed == "forbici")
                 ).fetchone()
                 assert forbici is not None
 
@@ -1614,9 +1602,7 @@ class TestNounClassification:
 
             with get_connection(db_path) as conn:
                 # Check lemma
-                citta = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "citta")
-                ).fetchone()
+                citta = conn.execute(select(lemmas).where(lemmas.c.stressed == "città")).fetchone()
                 assert citta is not None
 
                 # Check noun_metadata
@@ -1698,9 +1684,7 @@ class TestNounClassification:
 
             with get_connection(db_path) as conn:
                 # Check lemma
-                amico = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "amico")
-                ).fetchone()
+                amico = conn.execute(select(lemmas).where(lemmas.c.stressed == "amico")).fetchone()
                 assert amico is not None
 
                 # Check noun_metadata - should detect both genders from "f": "+"
@@ -1780,9 +1764,7 @@ class TestNounClassification:
 
             with get_connection(db_path) as conn:
                 # Check amico's forms
-                amico = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "amico")
-                ).fetchone()
+                amico = conn.execute(select(lemmas).where(lemmas.c.stressed == "amico")).fetchone()
                 assert amico is not None
 
                 forms = conn.execute(
@@ -1844,7 +1826,7 @@ class TestNounClassification:
             assert stats["lemmas"] == 1
 
             with get_connection(db_path) as conn:
-                dio = conn.execute(select(lemmas).where(lemmas.c.normalized == "dio")).fetchone()
+                dio = conn.execute(select(lemmas).where(lemmas.c.stressed == "dio")).fetchone()
                 assert dio is not None
 
                 forms = conn.execute(
@@ -1908,7 +1890,7 @@ class TestNounClassification:
 
             with get_connection(db_path) as conn:
                 # Check the plural form is accented
-                dio = conn.execute(select(lemmas).where(lemmas.c.normalized == "dio")).fetchone()
+                dio = conn.execute(select(lemmas).where(lemmas.c.stressed == "dio")).fetchone()
                 assert dio is not None
 
                 forms = conn.execute(
@@ -1974,7 +1956,7 @@ class TestImportAdjAllomorphs:
 
             with get_connection(db_path) as conn:
                 grande = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "grande")
+                    select(lemmas).where(lemmas.c.stressed == "grànde")
                 ).fetchone()
                 assert grande is not None
 
@@ -2031,7 +2013,7 @@ class TestImportAdjAllomorphs:
 
             with get_connection(db_path) as conn:
                 grande = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "grande")
+                    select(lemmas).where(lemmas.c.stressed == "grànde")
                 ).fetchone()
                 assert grande is not None
 
@@ -2122,7 +2104,7 @@ class TestImportAdjAllomorphs:
 
             with get_connection(db_path) as conn:
                 santo_lemma = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "santo")
+                    select(lemmas).where(lemmas.c.stressed == "santo")
                 ).fetchone()
                 assert santo_lemma is not None
 
@@ -2195,7 +2177,7 @@ class TestImportNounAllomorphs:
 
             with get_connection(db_path) as conn:
                 colore = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "colore")
+                    select(lemmas).where(lemmas.c.stressed == "colore")
                 ).fetchone()
                 assert colore is not None
 
@@ -2261,9 +2243,7 @@ class TestImportNounAllomorphs:
             assert stats["allomorphs_added"] == 1
 
             with get_connection(db_path) as conn:
-                valle = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "valle")
-                ).fetchone()
+                valle = conn.execute(select(lemmas).where(lemmas.c.stressed == "valle")).fetchone()
                 assert valle is not None
 
                 forms = conn.execute(
@@ -2361,7 +2341,7 @@ class TestImportNounAllomorphs:
             with get_connection(db_path) as conn:
                 # Check san was added to santo
                 santo_lemma = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "santo")
+                    select(lemmas).where(lemmas.c.stressed == "santo")
                 ).fetchone()
                 assert santo_lemma is not None
 
@@ -2379,7 +2359,7 @@ class TestImportNounAllomorphs:
 
                 # Check cor was added to cuore
                 cuore_lemma = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "cuore")
+                    select(lemmas).where(lemmas.c.stressed == "cuore")
                 ).fetchone()
                 assert cuore_lemma is not None
 
@@ -2475,7 +2455,7 @@ class TestNormalizationsAndOverrides:
 
             with get_connection(db_path) as conn:
                 lemma = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "tenere d'occhio")
+                    select(lemmas).where(lemmas.c.stressed == "tenére d'occhio")
                 ).fetchone()
 
                 assert lemma is not None
@@ -2555,7 +2535,7 @@ class TestNormalizationsAndOverrides:
 
             with get_connection(db_path) as conn:
                 lemma = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "suggere")
+                    select(lemmas).where(lemmas.c.stressed == "suggére")
                 ).fetchone()
 
                 assert lemma is not None
@@ -2591,7 +2571,7 @@ class TestNormalizationsAndOverrides:
             assert stats["blocklisted_lemmas"] >= 1
 
             with get_connection(db_path) as conn:
-                lemma = conn.execute(select(lemmas).where(lemmas.c.normalized == "fe")).fetchone()
+                lemma = conn.execute(select(lemmas).where(lemmas.c.stressed == "fe")).fetchone()
 
                 # Should have been filtered out
                 assert lemma is None
@@ -2627,7 +2607,7 @@ class TestNormalizationsAndOverrides:
 
             with get_connection(db_path) as conn:
                 lemma = conn.execute(
-                    select(lemmas).where(lemmas.c.normalized == "perplettere")
+                    select(lemmas).where(lemmas.c.stressed == "perplettere")
                 ).fetchone()
 
                 # Should have been filtered out
