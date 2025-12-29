@@ -2,7 +2,17 @@
 
 from dataclasses import dataclass
 
-# Tags that indicate a form should be filtered out entirely
+# Tags that indicate a form should be filtered out entirely.
+#
+# IMPORTANT: This filters FORMS (conjugations/spellings), NOT definitions (meanings).
+# For example, "tenere" has both modern "tèngo" and archaic "tègno" - we filter
+# the archaic form but keep the lemma and all its definitions.
+#
+# Some common words like "gente" or "merito" have all their DEFINITIONS tagged as
+# archaic/poetic in Wiktionary, but their FORMS have no such labels. This filtering
+# won't affect those words - they remain in the database with all definitions intact.
+# The archaic tags on definitions indicate historical/literary usage context, not
+# that the words themselves are obsolete.
 FILTER_TAGS = frozenset(
     {
         "misspelling",
@@ -10,6 +20,11 @@ FILTER_TAGS = frozenset(
         # POS tags on forms are Wiktionary data errors (e.g., negriere tagged
         # ['alternative', 'masculine', 'noun'] when it's actually f.pl of negriero)
         "noun",
+        # Archaic/obsolete/dated forms are not useful for modern learners.
+        # These are genuinely outdated conjugations/spellings (e.g., "tègno" for "tengo").
+        "archaic",
+        "obsolete",
+        "dated",
         # Note: "error-unknown-tag" and "error-unrecognized-form" are NOT filtered -
         # they just mean wiktextract couldn't parse some annotation, but the forms
         # themselves are valid
@@ -67,23 +82,22 @@ GENDER_TAGS = frozenset({"masculine", "feminine"})
 # Usage label tags: maps raw wiktextract tags to canonical labels.
 # Rare/regional labels are merged into broader categories for consistency.
 # The mapping also serves as a whitelist - only keys are recognized as labels.
+#
+# Note: archaic/obsolete/dated are NOT here because forms with those tags are
+# filtered out entirely (see FILTER_TAGS). These labels are only for forms we keep.
 LABEL_CANONICAL: dict[str, str] = {
     # Core labels (map to themselves)
-    "archaic": "archaic",
     "literary": "literary",
     "regional": "regional",
     "dialectal": "dialectal",
     "poetic": "poetic",
     "rare": "rare",
-    "obsolete": "obsolete",
     "colloquial": "colloquial",
-    "dated": "dated",
     "uncommon": "uncommon",
     # Merged labels (rare → canonical)
     "Tuscany": "regional",  # 7 uses → regional
     "Latinism": "literary",  # 2 uses → literary
     "slang": "colloquial",  # 5 uses → colloquial
-    # Note: "apocopic" was defined but never appeared in data, so dropped
 }
 
 # For backwards compatibility / set operations

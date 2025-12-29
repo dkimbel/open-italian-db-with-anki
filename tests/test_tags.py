@@ -1,6 +1,49 @@
 """Tests for tag parsing functions."""
 
-from italian_anki.tags import parse_verb_tags
+from italian_anki.tags import parse_verb_tags, should_filter_form
+
+
+class TestShouldFilterForm:
+    """Tests for should_filter_form with archaic/obsolete/dated tags."""
+
+    def test_filters_archaic_forms(self) -> None:
+        """Test that forms with archaic tag are filtered."""
+        assert should_filter_form(["archaic", "indicative", "present"]) is True
+        assert should_filter_form(["archaic"]) is True
+
+    def test_filters_obsolete_forms(self) -> None:
+        """Test that forms with obsolete tag are filtered."""
+        assert should_filter_form(["obsolete", "participle", "past"]) is True
+        assert should_filter_form(["obsolete"]) is True
+
+    def test_filters_dated_forms(self) -> None:
+        """Test that forms with dated tag are filtered."""
+        assert should_filter_form(["dated", "subjunctive", "imperfect"]) is True
+        assert should_filter_form(["dated"]) is True
+
+    def test_allows_rare_forms(self) -> None:
+        """Test that forms with rare tag are NOT filtered (kept with label)."""
+        assert should_filter_form(["rare", "indicative", "present"]) is False
+
+    def test_allows_literary_forms(self) -> None:
+        """Test that forms with literary tag are NOT filtered (kept with label)."""
+        assert should_filter_form(["literary", "participle", "past"]) is False
+
+    def test_allows_uncommon_forms(self) -> None:
+        """Test that forms with uncommon tag are NOT filtered (kept with label)."""
+        assert should_filter_form(["uncommon", "gerund"]) is False
+
+    def test_allows_poetic_forms(self) -> None:
+        """Test that forms with poetic tag are NOT filtered (kept with label)."""
+        assert should_filter_form(["poetic", "infinitive"]) is False
+
+    def test_filters_misspelling(self) -> None:
+        """Test that existing misspelling filter still works."""
+        assert should_filter_form(["misspelling"]) is True
+
+    def test_allows_standard_form(self) -> None:
+        """Test that standard forms without labels are allowed."""
+        assert should_filter_form(["indicative", "present", "singular"]) is False
 
 
 class TestParseVerbTagsParticipleFilter:

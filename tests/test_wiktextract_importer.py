@@ -1807,6 +1807,12 @@ class TestNounClassification:
 
         For nouns like "dio" that have explicit feminine plural "dee", the untagged
         plurals "dei/dii" should only be used for masculine, not duplicated.
+
+        Note: "dii" has archaic tag, so it gets filtered out entirely (see FILTER_TAGS).
+        This test verifies:
+        1. Archaic forms like "dii" are filtered
+        2. Non-archaic untagged plurals go to masculine only (not fem)
+        3. Explicit feminine plurals work correctly
         """
         sample_dio = {
             "pos": "noun",
@@ -1815,7 +1821,7 @@ class TestNounClassification:
             "categories": ["Italian lemmas"],
             "forms": [
                 {"form": "dei", "tags": ["plural"]},  # Untagged - should be masc only
-                {"form": "dii", "tags": ["archaic", "dialectal", "plural"]},  # Also masc only
+                {"form": "dii", "tags": ["archaic", "dialectal", "plural"]},  # Filtered (archaic)
                 {"form": "dea", "tags": ["feminine"]},  # Feminine singular
                 {"form": "dee", "tags": ["feminine", "plural"]},  # Explicit feminine plural
             ],
@@ -1844,13 +1850,13 @@ class TestNounClassification:
                     select(noun_forms).where(noun_forms.c.lemma_id == dio.id)
                 ).fetchall()
 
-                # Check masculine plurals - should have both dei and dii
+                # Check masculine plurals - only "dei" (archaic "dii" is filtered)
                 masc_plur = [f for f in forms if f.gender == "m" and f.number == "plural"]
                 masc_forms = {f.stressed for f in masc_plur}
                 assert "dei" in masc_forms, f"Expected 'dei' in masculine plurals, got {masc_forms}"
-                assert "dii" in masc_forms, f"Expected 'dii' in masculine plurals, got {masc_forms}"
+                assert "dii" not in masc_forms, "Archaic 'dii' should be filtered out"
 
-                # Check feminine plural - should ONLY have dee, NOT dei/dii
+                # Check feminine plural - should ONLY have dee, NOT dei
                 fem_plur = [f for f in forms if f.gender == "f" and f.number == "plural"]
                 fem_forms = {f.stressed for f in fem_plur}
                 assert fem_forms == {"dee"}, f"Expected only 'dee' for feminine, got {fem_forms}"
