@@ -249,6 +249,18 @@ HARDCODED_ALLOMORPH_FORMS: list[tuple[str, str, str, str, str]] = [
     ("san", "santo", "m", "singular", "apocopic"),  # San Pietro, San Marco
 ]
 
+# Hardcoded noun allomorphs not properly captured by Wiktextract
+# These correct for Wiktionary pointing to archaic/variant parents that don't exist
+# Format: (form, parent_lemma, gender, number)
+HARDCODED_NOUN_ALLOMORPHS: list[tuple[str, str, str, str]] = [
+    ("san", "santo", "m", "singular"),  # Wiktextract has "santo saint" (malformed)
+    ("cor", "cuore", "m", "singular"),  # Wiktextract has "core" (archaic, not in DB)
+    ("figliuol", "figlio", "m", "singular"),  # Wiktextract has "figliuolo" (archaic)
+    ("gocciol", "goccia", "f", "singular"),  # Wiktextract has "gocciola" (variant)
+    ("huom", "uomo", "m", "singular"),  # Wiktextract has "uom" -> should go to "uomo"
+    ("mperador", "imperatore", "m", "singular"),  # Wiktextract has "imperadore" (archaic)
+]
+
 
 def _extract_degree_relationship(entry: dict[str, Any]) -> tuple[str, str, str] | None:
     """Extract comparative/superlative relationship from Wiktextract data.
@@ -622,6 +634,7 @@ LEMMA_BLOCKLIST: frozenset[str] = frozenset(
         "verseggiatore",  # Wiktionary incorrectly marks as feminine
         "pischelletto",  # Wiktionary incorrectly marks as feminine
         "arma inastata",  # Missing singular form, only has archaic/plural
+        "San",  # Form of santo/santa without alt_of structure; imported as form via hardcoded
         # === Orphan verbs: pronominal/clitic forms incorrectly as lemmas ===
         "accadutomi",
         "accortosene",
@@ -2799,6 +2812,169 @@ def import_adjective_allomorphs(
             stats["hardcoded_added"] += 1
         except Exception:
             # Duplicate (unique constraint violation) - already exists, skip silently
+            logger.debug("Hardcoded form '%s' already exists for '%s'", form, parent_lemma)
+
+    return stats
+
+
+def import_noun_allomorphs(
+    conn: Connection,
+    jsonl_path: Path,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
+    """Import apocopic noun forms as forms of their parent noun.
+
+    Scans Wiktextract for noun entries with alt_of tagged 'apocopic',
+    and adds their word as forms under the parent lemma.
+
+    Unlike adjective allomorphs which add 4 forms (all gender/number combos),
+    noun allomorphs add only 1 form with the specific gender from the entry.
+
+    Args:
+        conn: SQLAlchemy connection
+        jsonl_path: Path to Wiktextract JSONL file
+        progress_callback: Optional callback for progress reporting (current, total)
+
+    Returns:
+        Statistics dict with counts of processed entries
+    """
+    stats = {
+        "scanned": 0,
+        "allomorphs_added": 0,
+        "forms_added": 0,
+        "parent_not_found": 0,
+        "already_in_parent": 0,
+        "hardcoded_added": 0,
+    }
+
+    # Build lookup: normalized lemma -> lemma_id for nouns
+    result = conn.execute(select(lemmas.c.id, lemmas.c.normalized).where(lemmas.c.pos == "noun"))
+    noun_lookup = {row.normalized: row.id for row in result}
+
+    # Count lines for progress
+    total_lines = _count_lines(jsonl_path) if progress_callback else 0
+    current_line = 0
+
+    with jsonl_path.open(encoding="utf-8") as f:
+        for line in f:
+            current_line += 1
+            if progress_callback and current_line % 10000 == 0:
+                progress_callback(current_line, total_lines)
+
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            # Only process noun entries
+            if entry.get("pos") != "noun":
+                continue
+
+            stats["scanned"] += 1
+
+            # Find parent word from alt_of with apocopic tag
+            parent_word = None
+            gender = None
+            allomorph_word = entry["word"]
+
+            for sense in entry.get("senses", []):
+                tags = sense.get("tags", [])
+                if "apocopic" not in tags:
+                    continue
+
+                alt_of_list = sense.get("alt_of", [])
+                for alt_of in alt_of_list:
+                    parent_word = alt_of.get("word")
+                    if parent_word:
+                        # Extract gender from tags
+                        if "masculine" in tags:
+                            gender = "m"
+                        elif "feminine" in tags:
+                            gender = "f"
+                        break
+                if parent_word:
+                    break
+
+            if not parent_word or not gender:
+                continue
+
+            parent_id = noun_lookup.get(normalize(parent_word))
+            if parent_id is None:
+                stats["parent_not_found"] += 1
+                continue
+
+            # Check if parent already has this form
+            existing_forms = conn.execute(
+                select(noun_forms.c.stressed).where(noun_forms.c.lemma_id == parent_id)
+            ).fetchall()
+            existing_form_texts = {row.stressed for row in existing_forms if row.stressed}
+
+            if allomorph_word in existing_form_texts:
+                stats["already_in_parent"] += 1
+                continue
+
+            # Add the apocopic form (singular only - apocopic forms are singular)
+            def_article, article_source = get_definite(allomorph_word, gender, "singular")
+
+            try:
+                conn.execute(
+                    noun_forms.insert().values(
+                        lemma_id=parent_id,
+                        written=allomorph_word,
+                        written_source="wiktionary",
+                        stressed=allomorph_word,
+                        gender=gender,
+                        number="singular",
+                        labels="apocopic",
+                        def_article=def_article,
+                        article_source=article_source,
+                        form_origin="alt_of",
+                    )
+                )
+                stats["forms_added"] += 1
+                stats["allomorphs_added"] += 1
+            except Exception:
+                # Form already exists - skip silently
+                logger.debug("Apocopic form '%s' already exists for parent", allomorph_word)
+
+    if progress_callback:
+        progress_callback(total_lines, total_lines)
+
+    # Import hardcoded noun allomorphs
+    for form, parent_lemma, gender, number in HARDCODED_NOUN_ALLOMORPHS:
+        parent_id = noun_lookup.get(normalize(parent_lemma))
+        if parent_id is None:
+            continue
+
+        # Check if this form already exists
+        existing = conn.execute(
+            select(noun_forms.c.stressed).where(noun_forms.c.lemma_id == parent_id)
+        ).fetchall()
+        existing_texts = {row.stressed for row in existing if row.stressed}
+
+        if form in existing_texts:
+            continue
+
+        def_article, article_source = get_definite(form, gender, number)
+
+        try:
+            conn.execute(
+                noun_forms.insert().values(
+                    lemma_id=parent_id,
+                    written=form,
+                    written_source="hardcoded",
+                    stressed=form,
+                    gender=gender,
+                    number=number,
+                    labels="apocopic",
+                    def_article=def_article,
+                    article_source=article_source,
+                    form_origin="hardcoded",
+                )
+            )
+            stats["hardcoded_added"] += 1
+        except Exception:
             logger.debug("Hardcoded form '%s' already exists for '%s'", form, parent_lemma)
 
     return stats

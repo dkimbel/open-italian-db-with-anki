@@ -43,6 +43,7 @@ from italian_anki.importers.wiktextract import (
     enrich_from_form_of,
     generate_gendered_participles,
     import_adjective_allomorphs,
+    import_noun_allomorphs,
 )
 
 DEFAULT_WIKTEXTRACT_PATH = Path("data/wiktextract/kaikki.org-dictionary-Italian.jsonl")
@@ -494,10 +495,10 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         # Determine step count:
         # - adjectives: 10 steps (extra: fill-missing, allomorphs)
         # - verbs: 9 steps (extra: gendered participles)
-        # - nouns: 8 steps (base)
+        # - nouns: 9 steps (extra: allomorphs)
         # All POS have: wiktextract, form-of, morphit forms, morphit lemmas, form-of spelling,
         #               unstressed fallback, orthography fallback, itwac
-        total_steps = 10 if pos == "adjective" else (9 if pos == "verb" else 8)
+        total_steps = 10 if pos == "adjective" else 9
 
         with get_connection(db_path) as conn:
             # Step 1: Wiktextract import
@@ -558,6 +559,21 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Combos skipped:       {stats['combos_skipped']:,}")
                 print()
 
+            # Step 5 (noun only): Import noun allomorphs from alt_of entries
+            if pos == "noun":
+                print(f"[5/{total_steps}] Importing allomorphs (apocopic forms)...")
+                stats = import_noun_allomorphs(
+                    conn, jsonl_path, progress_callback=_make_progress_callback()
+                )
+                print()
+                print(f"{indent}Entries scanned:      {stats['scanned']:,}")
+                print(f"{indent}Allomorphs found:     {stats['allomorphs_added']:,}")
+                print(f"{indent}Forms added:          {stats['forms_added']:,}")
+                print(f"{indent}Already in parent:    {stats['already_in_parent']:,}")
+                print(f"{indent}Parent not found:     {stats['parent_not_found']:,}")
+                print(f"{indent}Hardcoded added:      {stats['hardcoded_added']:,}")
+                print()
+
             # Step 6 (adjective only): Import allomorphs from alt_of entries
             # Must run AFTER fill_missing so allomorphs don't prevent grandi from being added
             if pos == "adjective":
@@ -575,21 +591,21 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Hardcoded added:      {stats['hardcoded_added']:,}")
                 print()
 
-            # Step 5 (verb: 6, adjective: 7): Form-of spelling fallback
-            step_formof = 7 if pos == "adjective" else (6 if pos == "verb" else 5)
+            # Step 6 (noun/verb), Step 7 (adjective): Form-of spelling fallback
+            step_formof = 7 if pos == "adjective" else 6
             print(f"[{step_formof}/{total_steps}] Enriching form spelling from form-of entries...")
             _run_formof_spelling_enrichment(conn, jsonl_path, pos, indent=indent)
             print()
 
-            # Step 6 (verb: 7, adjective: 8): Unstressed fallback (for all POS)
-            step_unstressed = 8 if pos == "adjective" else (7 if pos == "verb" else 6)
+            # Step 7 (noun/verb), Step 8 (adjective): Unstressed fallback (for all POS)
+            step_unstressed = 8 if pos == "adjective" else 7
             print(f"[{step_unstressed}/{total_steps}] Applying unstressed form fallback...")
             stats = apply_unstressed_fallback(conn, pos_filter=pos)
             print(f"{indent}Forms updated: {stats['updated']:,}")
             print()
 
-            # Step 7 (verb: 8, adjective: 9): Orthography-based written derivation
-            step_ortho = 9 if pos == "adjective" else (8 if pos == "verb" else 7)
+            # Step 8 (noun/verb), Step 9 (adjective): Orthography-based written derivation
+            step_ortho = 9 if pos == "adjective" else 8
             print(f"[{step_ortho}/{total_steps}] Applying orthography-based written derivation...")
             stats = apply_orthography_fallback(conn, pos_filter=pos)
             print(f"{indent}Forms updated: {stats['updated']:,}")
@@ -598,8 +614,8 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Failed:        {stats['failed']:,}")
             print()
 
-            # Step 8 (verb: 9, adjective: 10): ItWaC frequency import
-            step_itwac = 10 if pos == "adjective" else (9 if pos == "verb" else 8)
+            # Step 9 (noun/verb), Step 10 (adjective): ItWaC frequency import
+            step_itwac = 10 if pos == "adjective" else 9
             csv_filename = ITWAC_CSV_FILES.get(pos)
             if csv_filename:
                 csv_path = DEFAULT_ITWAC_DIR / csv_filename

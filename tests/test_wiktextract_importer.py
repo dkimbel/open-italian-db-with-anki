@@ -25,6 +25,7 @@ from italian_anki.importers.wiktextract import (
     enrich_form_spelling_from_form_of,
     enrich_from_form_of,
     import_adjective_allomorphs,
+    import_noun_allomorphs,
     import_wiktextract,
 )
 
@@ -2137,6 +2138,307 @@ class TestImportAdjAllomorphs:
                 assert san_form.number == "singular"
                 assert san_form.labels == "apocopic"
                 assert san_form.form_origin == "hardcoded"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+
+class TestImportNounAllomorphs:
+    """Tests for import_noun_allomorphs function."""
+
+    def test_allomorph_import_adds_form_to_parent(self) -> None:
+        """Noun allomorph import should add apocopic form under parent lemma."""
+        # Parent noun entry (with head_templates for gender info)
+        colore_entry = {
+            "pos": "noun",
+            "word": "colore",
+            "head_templates": [{"args": {"1": "it", "2": "m"}, "name": "it-noun"}],
+            "forms": [
+                {"form": "colóre", "tags": ["masculine", "singular"]},
+                {"form": "colóri", "tags": ["masculine", "plural"]},
+            ],
+            "senses": [{"glosses": ["color"]}],
+        }
+
+        # Alt-form entry (should be imported as allomorph)
+        color_entry = {
+            "pos": "noun",
+            "word": "color",
+            "senses": [
+                {
+                    "tags": ["abbreviation", "alt-of", "apocopic", "masculine"],
+                    "alt_of": [{"word": "colore"}],
+                    "glosses": ["apocopic form of colore"],
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([colore_entry, color_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                # First import nouns (colore only, color skipped as alt-of)
+                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+                # Then import allomorphs
+                stats = import_noun_allomorphs(conn, jsonl_path)
+
+            assert stats["allomorphs_added"] == 1
+            assert stats["forms_added"] == 1  # Nouns add 1 form (not 4 like adjectives)
+
+            with get_connection(db_path) as conn:
+                colore = conn.execute(
+                    select(lemmas).where(lemmas.c.normalized == "colore")
+                ).fetchone()
+                assert colore is not None
+
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == colore.id)
+                ).fetchall()
+
+                # Find allomorph forms (labeled apocopic)
+                allomorph_forms = [f for f in forms if f.labels == "apocopic"]
+                assert len(allomorph_forms) == 1
+
+                form = allomorph_forms[0]
+                assert form.written == "color"
+                assert form.stressed == "color"
+                assert form.gender == "m"
+                assert form.number == "singular"
+                assert form.form_origin == "alt_of"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_feminine_noun_allomorph(self) -> None:
+        """Feminine noun allomorphs should preserve gender correctly."""
+        # Parent noun entry (with head_templates for gender info)
+        valle_entry = {
+            "pos": "noun",
+            "word": "valle",
+            "head_templates": [{"args": {"1": "it", "2": "f"}, "name": "it-noun"}],
+            "forms": [
+                {"form": "vàlle", "tags": ["feminine", "singular"]},
+                {"form": "vàlli", "tags": ["feminine", "plural"]},
+            ],
+            "senses": [{"glosses": ["valley"]}],
+        }
+
+        # Alt-form entry
+        val_entry = {
+            "pos": "noun",
+            "word": "val",
+            "senses": [
+                {
+                    "tags": ["abbreviation", "alt-of", "apocopic", "feminine"],
+                    "alt_of": [{"word": "valle"}],
+                    "glosses": ["apocopic form of valle"],
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([valle_entry, val_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_noun_allomorphs(conn, jsonl_path)
+
+            assert stats["allomorphs_added"] == 1
+
+            with get_connection(db_path) as conn:
+                valle = conn.execute(
+                    select(lemmas).where(lemmas.c.normalized == "valle")
+                ).fetchone()
+                assert valle is not None
+
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == valle.id)
+                ).fetchall()
+
+                val_forms = [f for f in forms if f.written == "val"]
+                assert len(val_forms) == 1
+
+                form = val_forms[0]
+                assert form.gender == "f"
+                assert form.labels == "apocopic"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_parent_not_found_tracked(self) -> None:
+        """If parent noun doesn't exist, should track as parent_not_found."""
+        # Only alt-form entry, no parent
+        color_entry = {
+            "pos": "noun",
+            "word": "color",
+            "senses": [
+                {
+                    "tags": ["abbreviation", "alt-of", "apocopic", "masculine"],
+                    "alt_of": [{"word": "colore"}],
+                    "glosses": ["apocopic form of colore"],
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([color_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_noun_allomorphs(conn, jsonl_path)
+
+            assert stats["parent_not_found"] == 1
+            assert stats["allomorphs_added"] == 0
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_hardcoded_noun_allomorphs_added(self) -> None:
+        """Hardcoded noun allomorphs (san, cor, etc.) should be added to parents."""
+        # Parent noun: santo (with head_templates for gender info)
+        santo = {
+            "pos": "noun",
+            "word": "santo",
+            "head_templates": [{"args": {"1": "it", "2": "m"}, "name": "it-noun"}],
+            "forms": [
+                {"form": "sànto", "tags": ["masculine", "singular"]},
+                {"form": "sànti", "tags": ["masculine", "plural"]},
+            ],
+            "senses": [{"glosses": ["saint"]}],
+        }
+
+        # Parent noun: cuore (with head_templates for gender info)
+        cuore = {
+            "pos": "noun",
+            "word": "cuore",
+            "head_templates": [{"args": {"1": "it", "2": "m"}, "name": "it-noun"}],
+            "forms": [
+                {"form": "cuòre", "tags": ["masculine", "singular"]},
+                {"form": "cuòri", "tags": ["masculine", "plural"]},
+            ],
+            "senses": [{"glosses": ["heart"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([santo, cuore])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_noun_allomorphs(conn, jsonl_path)
+
+            # Should have added hardcoded forms: san -> santo, cor -> cuore
+            assert stats["hardcoded_added"] == 2
+
+            with get_connection(db_path) as conn:
+                # Check san was added to santo
+                santo_lemma = conn.execute(
+                    select(lemmas).where(lemmas.c.normalized == "santo")
+                ).fetchone()
+                assert santo_lemma is not None
+
+                santo_forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == santo_lemma.id)
+                ).fetchall()
+
+                san_forms = [f for f in santo_forms if f.written == "san"]
+                assert len(san_forms) == 1
+                san_form = san_forms[0]
+                assert san_form.gender == "m"
+                assert san_form.number == "singular"
+                assert san_form.labels == "apocopic"
+                assert san_form.form_origin == "hardcoded"
+
+                # Check cor was added to cuore
+                cuore_lemma = conn.execute(
+                    select(lemmas).where(lemmas.c.normalized == "cuore")
+                ).fetchone()
+                assert cuore_lemma is not None
+
+                cuore_forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == cuore_lemma.id)
+                ).fetchall()
+
+                cor_forms = [f for f in cuore_forms if f.written == "cor"]
+                assert len(cor_forms) == 1
+                cor_form = cor_forms[0]
+                assert cor_form.gender == "m"
+                assert cor_form.labels == "apocopic"
+                assert cor_form.form_origin == "hardcoded"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_non_apocopic_alt_of_ignored(self) -> None:
+        """Non-apocopic alt_of entries should be ignored."""
+        # Parent noun (with head_templates for gender info)
+        te_entry = {
+            "pos": "noun",
+            "word": "tè",
+            "head_templates": [{"args": {"1": "it", "2": "m"}, "name": "it-noun"}],
+            "forms": [
+                {"form": "tè", "tags": ["masculine", "singular"]},
+            ],
+            "senses": [{"glosses": ["tea"]}],
+        }
+
+        # Alternative spelling (NOT apocopic)
+        the_entry = {
+            "pos": "noun",
+            "word": "the",
+            "senses": [
+                {
+                    "tags": ["alt-of", "misspelling"],  # No apocopic tag
+                    "alt_of": [{"word": "tè"}],
+                    "glosses": ["misspelling of tè"],
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([te_entry, the_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_noun_allomorphs(conn, jsonl_path)
+
+            # Should not have added any allomorphs from the_entry (no apocopic tag)
+            assert stats["allomorphs_added"] == 0
 
         finally:
             db_path.unlink()
