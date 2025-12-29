@@ -14,7 +14,7 @@ Generate Anki flashcard decks for learning Italian using linguistic databases.
 ## Engineering Principles
 
 - **Database schema integrity and consistency.** The schema should be linguistically sound. Where possible, it should be consistent across different parts of speech.
-- **Data corectness.** If at all possible, NEVER 'synthesize' or 'infer' ANYTHING. For example: NEVER assume that because a singlar ends in `-e`, there must be a plural ending in `-i`. If at all possible, NEVER rely on ANY heuristics.
+- **Data correctness.** Prefer NEVER to 'synthesize' or 'infer' ANYTHING. For example: do NOT assume that because a singular ends in `-e`, there must be a plural ending in `-i`. We can ONLY rely on heuristics when they are 100% accurate, or can be supplemented by a SMALL and COMPLETE list of hardcoded exceptions.
 - **Thoroughness.** NEVER EVER, under ANY circumstances, take ANY shortcuts.
 - **Code readability, organization, and documentation.** These are critical, both for humans and AIs.
 - **Types and dataclasses.** Favor static typechecking, dataclasses, and enums.
