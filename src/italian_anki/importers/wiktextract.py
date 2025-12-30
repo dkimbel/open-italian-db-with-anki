@@ -1219,6 +1219,11 @@ def _extract_lemma_stressed(entry: dict[str, Any]) -> str:
     # that Wiktextract sometimes includes in canonical forms
     stressed = _BRACKET_ANNOTATION_RE.sub("", stressed)
 
+    # Strip metadata patterns from malformed canonical forms
+    # e.g., "ottimo superlative of buono" -> fall back to entry["word"]
+    if re.search(r"\b(superlative|comparative) of \w+\b", stressed, re.IGNORECASE):
+        stressed = entry["word"]
+
     # Apply known overrides for Wiktionary inconsistencies
     stressed = LEMMA_STRESSED_OVERRIDES.get(stressed, stressed)
 
