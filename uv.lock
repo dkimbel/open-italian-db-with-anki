@@ -276,7 +276,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1" },
     { name = "requests", specifier = ">=2.31" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.14.10" },
     { name = "sqlalchemy", specifier = ">=2.0" },
 ]
 provides-extras = ["dev"]

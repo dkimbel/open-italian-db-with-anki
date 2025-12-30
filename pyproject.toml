@@ -15,7 +15,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",
     "pre-commit>=3.6",
-    "ruff>=0.8",
+    "ruff==0.14.10",  # pinned to match pre-commit config
     "pyright>=1.1",
 ]
 
