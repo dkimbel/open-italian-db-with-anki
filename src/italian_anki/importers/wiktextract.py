@@ -75,15 +75,52 @@ LEMMA_STRESSED_OVERRIDES: dict[str, str] = {
     "sùggere": "suggére",  # Wiktionary lemma has wrong stress position vs forms
 }
 
+# Known elision particles that should have space removed after apostrophe.
+# These are words that undergo elision before vowel-initial words in Italian.
+# Truncated imperatives (va', fa', da', sta') are NOT in this list because
+# the apostrophe marks truncation, not elision, and the following word is separate.
+ELISION_PARTICLES = frozenset(
+    {
+        "d",
+        "l",
+        "dell",
+        "dall",
+        "nell",
+        "all",
+        "sull",
+        "coll",
+        "un",
+        "quest",
+        "quell",
+        "bell",
+        "sant",
+        "buon",
+    }
+)
+
 
 def _normalize_apostrophe_spacing(text: str) -> str:
-    """Remove spaces after apostrophes in Italian contractions.
+    """Remove spaces after apostrophes in Italian elisions (not truncations).
 
-    Wiktionary sometimes has inconsistent spacing after apostrophes in
-    multi-word expressions (e.g., "d' occhio" vs "d'occhio"). This normalizes
-    them to the standard form without space.
+    Elision: "d' occhio" → "d'occhio" (space removed, words connect)
+    Truncation: "và' giù" → "và' giù" (space preserved, words separate)
+
+    Only removes space when the word before the apostrophe is a known
+    elision particle (d', l', dell', etc.). Truncated imperatives like
+    va', fa', da', sta' keep the space because the apostrophe marks
+    truncation, not elision.
     """
-    return re.sub(r"'\s+", "'", text)
+
+    def replace_if_elision(match: re.Match[str]) -> str:
+        before = match.group(1)  # word before apostrophe
+        after_char = match.group(2)  # first char after space
+
+        if before.lower() in ELISION_PARTICLES:
+            return f"{before}'{after_char}"  # Remove space
+        return match.group(0)  # Keep original (with space)
+
+    # Pattern: word + apostrophe + space(s) + next character
+    return re.sub(r"(\w+)'\s+(\w)", replace_if_elision, text)
 
 
 def _is_invariable_adjective(entry: dict[str, Any]) -> bool:

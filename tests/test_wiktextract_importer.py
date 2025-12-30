@@ -2507,6 +2507,30 @@ class TestNormalizationsAndOverrides:
             db_path.unlink()
             jsonl_path.unlink()
 
+    def test_apostrophe_spacing_elision_vs_truncation(self):
+        """Test that elision removes space but truncation keeps it."""
+        from italian_anki.importers.wiktextract import (
+            _normalize_apostrophe_spacing,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        # Elision cases - space should be removed
+        assert _normalize_apostrophe_spacing("d' occhio") == "d'occhio"
+        assert _normalize_apostrophe_spacing("l' amica") == "l'amica"
+        assert _normalize_apostrophe_spacing("dell' anno") == "dell'anno"
+        assert _normalize_apostrophe_spacing("un' altra") == "un'altra"
+
+        # Truncation cases - space should be kept
+        assert _normalize_apostrophe_spacing("và' giù") == "và' giù"
+        assert _normalize_apostrophe_spacing("fà' il") == "fà' il"
+        assert _normalize_apostrophe_spacing("dà' la") == "dà' la"
+        assert _normalize_apostrophe_spacing("stà' a") == "stà' a"
+
+        # Truncation before vowel - still keep space (it's not elision)
+        assert _normalize_apostrophe_spacing("và' a") == "và' a"
+
+        # Mixed - only elision parts fixed
+        assert _normalize_apostrophe_spacing("tenére d' occhio") == "tenére d'occhio"
+
     def test_lemma_stressed_override_applied(self):
         """LEMMA_STRESSED_OVERRIDES should correct Wiktionary inconsistencies."""
         # Create a verb with the wrong stress position in lemma
