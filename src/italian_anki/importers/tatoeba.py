@@ -1,5 +1,6 @@
 """Import Tatoeba sentences with FTS5 search index."""
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +85,7 @@ def import_tatoeba(
     links_path: Path,
     *,
     batch_size: int = 1000,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Import Tatoeba sentences and build FTS5 search index.
 
@@ -95,6 +97,7 @@ def import_tatoeba(
         eng_sentences_path: Path to English sentences TSV
         links_path: Path to Italian-English links TSV
         batch_size: Number of rows to insert per batch
+        progress_callback: Optional callback for progress reporting (current, total)
 
     Returns:
         Statistics dict with counts
@@ -126,6 +129,10 @@ def import_tatoeba(
     eng_ids_we_have = set(eng_sentences.keys())
     translation_pairs = [(ita, eng) for ita, eng in translation_pairs if eng in eng_ids_we_have]
 
+    # Calculate total items for progress reporting
+    total_items = len(ita_sentences) + len(eng_sentences) + len(translation_pairs)
+    processed_items = 0
+
     # Step 4: Insert Italian sentences
     ita_batch: list[dict[str, Any]] = []
     for sentence_id, sent_text in ita_sentences.items():
@@ -133,10 +140,14 @@ def import_tatoeba(
         if len(ita_batch) >= batch_size:
             conn.execute(sentences.insert(), ita_batch)
             stats["ita_sentences"] += len(ita_batch)
+            processed_items += len(ita_batch)
+            if progress_callback:
+                progress_callback(processed_items, total_items)
             ita_batch = []
     if ita_batch:
         conn.execute(sentences.insert(), ita_batch)
         stats["ita_sentences"] += len(ita_batch)
+        processed_items += len(ita_batch)
 
     # Step 5: Insert English sentences
     eng_batch: list[dict[str, Any]] = []
@@ -145,10 +156,14 @@ def import_tatoeba(
         if len(eng_batch) >= batch_size:
             conn.execute(sentences.insert(), eng_batch)
             stats["eng_sentences"] += len(eng_batch)
+            processed_items += len(eng_batch)
+            if progress_callback:
+                progress_callback(processed_items, total_items)
             eng_batch = []
     if eng_batch:
         conn.execute(sentences.insert(), eng_batch)
         stats["eng_sentences"] += len(eng_batch)
+        processed_items += len(eng_batch)
 
     # Step 6: Insert translation pairs
     trans_batch: list[dict[str, int]] = []
@@ -157,10 +172,18 @@ def import_tatoeba(
         if len(trans_batch) >= batch_size:
             conn.execute(translations.insert().prefix_with("OR IGNORE"), trans_batch)
             stats["translations"] += len(trans_batch)
+            processed_items += len(trans_batch)
+            if progress_callback:
+                progress_callback(processed_items, total_items)
             trans_batch = []
     if trans_batch:
         conn.execute(translations.insert().prefix_with("OR IGNORE"), trans_batch)
         stats["translations"] += len(trans_batch)
+        processed_items += len(trans_batch)
+
+    # Final progress callback
+    if progress_callback:
+        progress_callback(total_items, total_items)
 
     # Step 7: Populate FTS5 index for Italian sentences
     conn.execute(

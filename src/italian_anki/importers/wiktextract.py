@@ -238,6 +238,7 @@ HARDCODED_DEGREE_RELATIONSHIPS: dict[str, tuple[str, str]] = {
     "massimo": ("grande", "superlative_of"),
     "minore": ("piccolo", "comparative_of"),
     "minimo": ("piccolo", "superlative_of"),
+    "sommo": ("alto", "superlative_of"),
 }
 
 # Hardcoded allomorph forms not captured by normal import
@@ -266,16 +267,24 @@ def _extract_degree_relationship(entry: dict[str, Any]) -> tuple[str, str, str] 
     """Extract comparative/superlative relationship from Wiktextract data.
 
     Detection methods (in priority order):
-    1. Structured form entries: {"form": "of buono", "tags": ["comparative"]}
-    2. Canonical text pattern: "ottimo superlative of buono"
-    3. Hardcoded fallback for irregular forms
+    1. Hardcoded mapping for irregular forms (manually curated, takes priority)
+    2. Structured form entries: {"form": "of buono", "tags": ["comparative"]}
+    3. Canonical text pattern: "ottimo superlative of buono"
 
     Returns:
         Tuple of (base_word, relationship, source) or None.
         E.g., ("buono", "comparative_of", "wiktextract") for migliore.
-        Source is one of: 'wiktextract', 'wiktextract:canonical', 'hardcoded'
+        Source is one of: 'hardcoded', 'wiktextract', 'wiktextract:canonical'
     """
-    # Method 1: Structured form entries
+    # Method 1: Hardcoded mapping (priority - manually curated)
+    # These override Wiktextract data which can be incorrect (e.g., peggiore -> "male"
+    # when it should be cattivo, since "male" is an adverb, not an adjective)
+    word = entry.get("word", "")
+    if word in HARDCODED_DEGREE_RELATIONSHIPS:
+        base_word, relationship = HARDCODED_DEGREE_RELATIONSHIPS[word]
+        return (base_word, relationship, "hardcoded")
+
+    # Method 2: Structured form entries
     for form_data in entry.get("forms", []):
         form = form_data.get("form", "")
         tags = form_data.get("tags", [])
@@ -290,19 +299,13 @@ def _extract_degree_relationship(entry: dict[str, Any]) -> tuple[str, str, str] 
             if base_word:
                 return (base_word, "superlative_of", "wiktextract")
 
-        # Method 2: Canonical text pattern like "ottimo superlative of buono"
+        # Method 3: Canonical text pattern like "ottimo superlative of buono"
         if "canonical" in tags:
             match = re.search(r"\b(superlative|comparative) of (\w+)\b", form, re.IGNORECASE)
             if match:
                 degree_type = match.group(1).lower()
                 base_word = match.group(2)
                 return (base_word, f"{degree_type}_of", "wiktextract:canonical")
-
-    # Method 3: Hardcoded fallback
-    word = entry.get("word", "")
-    if word in HARDCODED_DEGREE_RELATIONSHIPS:
-        base_word, relationship = HARDCODED_DEGREE_RELATIONSHIPS[word]
-        return (base_word, relationship, "hardcoded")
 
     return None
 
@@ -536,7 +539,10 @@ def _build_counterpart_plurals(jsonl_path: Path) -> dict[str, str]:
     with jsonl_path.open(encoding="utf-8") as f:
         for line in f:
             entry = _parse_entry(line)
-            if entry is None or entry.get("pos") != "noun":
+            # Include both nouns and adjectives - many gender-variable nouns
+            # (like "albino", "pazzo", "ricco") are classified as adjectives
+            # in Wiktextract, but we need their plural forms for noun counterparts
+            if entry is None or entry.get("pos") not in ("noun", "adj"):
                 continue
 
             # Note: We intentionally do NOT skip form-of entries here
@@ -1823,6 +1829,8 @@ def import_wiktextract(
         "alt_forms_skipped": 0,
         "blocklisted_lemmas": 0,
         "skipped_plural_duplicate": 0,
+        "counterpart_no_plural": 0,  # Nouns where counterpart plural not found in lookup
+        "no_counterpart_no_gender": 0,  # Nouns with no counterpart AND no gender tag on plural
         "cleared": cleared,
     }
 
@@ -2287,11 +2295,8 @@ def import_wiktextract(
                                     continue
                                 else:
                                     # Case C: Counterpart exists but not in lookup
-                                    logger.warning(
-                                        f"Noun '{word}' ({own_gender}) has counterpart "
-                                        f"'{counterpart}' but no plural found in lookup. "
-                                        f"Skipping {other_gender} plural."
-                                    )
+                                    # (aggregated - logged at end of import)
+                                    stats["counterpart_no_plural"] += 1
                                     row = _build_noun_form_row(
                                         lemma_id,
                                         form_stressed,
@@ -2308,11 +2313,8 @@ def import_wiktextract(
                                     continue
 
                             # Case D: Plural but no counterpart info - use own gender only
-                            logger.warning(
-                                f"Noun '{word}' ({own_gender}) is common_gender_variable but "
-                                f"plural '{form_stressed}' has no gender tag and no "
-                                f"counterpart to look up. Using {own_gender} only."
-                            )
+                            # (aggregated - logged at end of import)
+                            stats["no_counterpart_no_gender"] += 1
                             row = _build_noun_form_row(
                                 lemma_id,
                                 form_stressed,
@@ -2629,6 +2631,20 @@ def import_wiktextract(
     # Final progress callback
     if progress_callback:
         progress_callback(total_lines, total_lines)
+
+    # Log aggregated noun gender/plural warnings (if any)
+    if pos_filter == "noun":
+        if stats.get("counterpart_no_plural", 0) > 0:
+            logger.info(
+                "Noun plurals: %d counterparts had no plural form in lookup (Wiktextract data gap)",
+                stats["counterpart_no_plural"],
+            )
+        if stats.get("no_counterpart_no_gender", 0) > 0:
+            logger.info(
+                "Noun plurals: %d common-gender-variable nouns had plural without "
+                "gender tag or counterpart",
+                stats["no_counterpart_no_gender"],
+            )
 
     return stats
 

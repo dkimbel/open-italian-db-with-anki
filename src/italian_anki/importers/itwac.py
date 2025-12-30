@@ -41,13 +41,18 @@ def _compute_zipf(freq: int, corpus_size: float = 1.9e9) -> float:
     return math.log10(fpmw) + 3  # Zipf = log10(fpmw) + 3
 
 
-def _parse_itwac_csv(csv_path: Path) -> dict[str, tuple[int, float]]:
+def _parse_itwac_csv(csv_path: Path) -> tuple[dict[str, tuple[int, float]], int]:
     """Parse ItWaC CSV and aggregate frequencies by lemma.
 
     Works for verbs, nouns, and adjectives (same CSV format).
-    Returns dict mapping written_lemma -> (total_freq, zipf_score)
+
+    Returns:
+        Tuple of:
+        - Dict mapping written_lemma -> (total_freq, zipf_score)
+        - Count of multi-accent entries (data quality issues in ItWaC)
     """
     lemma_freqs: dict[str, int] = defaultdict(int)
+    multi_accent_count = 0
 
     with csv_path.open(encoding="iso-8859-1") as f:
         reader = csv.DictReader(f)
@@ -62,7 +67,12 @@ def _parse_itwac_csv(csv_path: Path) -> dict[str, tuple[int, float]]:
                 continue
 
             # Derive written form for matching (preserves meaningful final accents)
-            written = derive_written_from_stressed(lemma) or lemma
+            # Use warn=False since ItWaC has known data quality issues
+            written = derive_written_from_stressed(lemma, warn=False)
+            if written is None:
+                # Derivation failed (likely multi-accent garbage from web corpus)
+                multi_accent_count += 1
+                written = lemma  # Use original as fallback
 
             # Aggregate frequency by lemma (sum all form frequencies)
             lemma_freqs[written] += freq
@@ -73,7 +83,7 @@ def _parse_itwac_csv(csv_path: Path) -> dict[str, tuple[int, float]]:
         zipf = _compute_zipf(total_freq)
         result[written] = (total_freq, zipf)
 
-    return result
+    return result, multi_accent_count
 
 
 def import_itwac(
@@ -94,10 +104,15 @@ def import_itwac(
     Returns:
         Statistics dict with counts
     """
-    stats = {"matched": 0, "not_found": 0}
+    stats: dict[str, int] = {"matched": 0, "not_found": 0, "multi_accent": 0}
 
     # Parse and aggregate ItWaC data
-    freq_data = _parse_itwac_csv(csv_path)
+    freq_data, multi_accent_count = _parse_itwac_csv(csv_path)
+    stats["multi_accent"] = multi_accent_count
+
+    # Calculate total corpus frequency for percentage calculation
+    total_corpus_freq = sum(freq for freq, _ in freq_data.values())
+    matched_freq = 0
 
     # Get version for this POS
     corpus_version = ITWAC_VERSIONS.get(pos_filter, "unknown")
@@ -117,19 +132,24 @@ def import_itwac(
         written = derive_written_from_stressed(row.stressed) or row.stressed
 
         if written in freq_data:
-            total_freq, zipf = freq_data[written]
+            lemma_freq, zipf = freq_data[written]
             insert_batch.append(
                 {
                     "lemma_id": lemma_id,
                     "corpus": CORPUS_NAME,
-                    "freq_raw": total_freq,
+                    "freq_raw": lemma_freq,
                     "freq_zipf": zipf,
                     "corpus_version": corpus_version,
                 }
             )
             stats["matched"] += 1
+            matched_freq += lemma_freq
         else:
             stats["not_found"] += 1
+
+    # Store frequency-weighted stats
+    stats["matched_freq"] = matched_freq
+    stats["total_corpus_freq"] = total_corpus_freq
 
     # Insert all frequency data
     if insert_batch:

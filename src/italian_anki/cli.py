@@ -373,10 +373,17 @@ def _run_wiktextract_import(
     print(f"{indent}Forms:       {stats['forms']:,}")
     print(f"{indent}Definitions: {stats['definitions']:,}")
     print(f"{indent}Skipped:     {stats['skipped']:,}")
-    if stats.get("nouns_skipped_no_gender", 0) > 0:
-        print(f"{indent}  No gender: {stats['nouns_skipped_no_gender']:,}")
+    # Show skip reason breakdown (only non-zero counts)
     if stats.get("blocklisted_lemmas", 0) > 0:
         print(f"{indent}  Blocklisted: {stats['blocklisted_lemmas']:,}")
+    if stats.get("misspellings_skipped", 0) > 0:
+        print(f"{indent}  Misspellings: {stats['misspellings_skipped']:,}")
+    if stats.get("alt_forms_skipped", 0) > 0:
+        print(f"{indent}  Alt-forms: {stats['alt_forms_skipped']:,}")
+    if stats.get("skipped_plural_duplicate", 0) > 0:
+        print(f"{indent}  Duplicate plurals: {stats['skipped_plural_duplicate']:,}")
+    if stats.get("nouns_skipped_no_gender", 0) > 0:
+        print(f"{indent}  No gender: {stats['nouns_skipped_no_gender']:,}")
     return stats
 
 
@@ -433,8 +440,14 @@ def _run_itwac_import(
         conn, csv_path, pos_filter=pos, progress_callback=_make_progress_callback()
     )
     print()
-    print(f"{indent}Lemmas matched:     {stats['matched']:,}")
+    # Calculate frequency-weighted match percentage
+    total_freq = stats.get("total_corpus_freq", 0)
+    matched_freq = stats.get("matched_freq", 0)
+    freq_pct = (matched_freq / total_freq * 100) if total_freq > 0 else 0
+    print(f"{indent}Lemmas matched:     {stats['matched']:,} ({freq_pct:.0f}% of corpus frequency)")
     print(f"{indent}Lemmas not found:   {stats['not_found']:,}")
+    if stats.get("multi_accent", 0) > 0:
+        print(f"{indent}  Multi-accent: {stats['multi_accent']:,}")
     return stats
 
 
@@ -442,7 +455,9 @@ def _run_tatoeba_import(
     conn: Connection, ita_path: Path, eng_path: Path, links_path: Path, indent: str = "  "
 ) -> dict[str, Any]:
     """Run Tatoeba import and print stats."""
-    stats = import_tatoeba(conn, ita_path, eng_path, links_path)
+    stats = import_tatoeba(
+        conn, ita_path, eng_path, links_path, progress_callback=_make_progress_callback()
+    )
     print()
     if stats["cleared"] > 0:
         print(f"{indent}Cleared:          {stats['cleared']:,} existing sentences")

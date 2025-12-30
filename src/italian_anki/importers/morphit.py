@@ -153,7 +153,8 @@ def _build_form_lookup(
         exact_lookup[form] = form
 
         # Also store written form for fallback (preserves meaningful final accents)
-        written = derive_written_from_stressed(form) or form
+        # Use warn=False since Morphit contains French loanwords with multi-accents
+        written = derive_written_from_stressed(form, warn=False) or form
         if written not in normalized_lookup:
             normalized_lookup[written] = form
 
@@ -190,7 +191,8 @@ def _build_adjective_lookup(morphit_path: Path) -> dict[str, list[MorphitEntry]]
         )
 
         # Use written form as key (preserves meaningful final accents)
-        written_lemma = derive_written_from_stressed(lemma) or lemma
+        # Use warn=False since Morphit contains French loanwords with multi-accents
+        written_lemma = derive_written_from_stressed(lemma, warn=False) or lemma
         if written_lemma not in lookup:
             lookup[written_lemma] = []
         lookup[written_lemma].append(entry)
@@ -277,8 +279,9 @@ def import_morphit(
             # Only use written-form fallback if the form has accent marks to strip.
             # Unaccented forms (e.g., "eta") should not acquire accents via fallback,
             # as this conflates homographs (Greek letter eta vs Italian età).
+            # Use warn=False since French loanwords may have multiple accents.
             if _has_accents(stressed_form):
-                written = derive_written_from_stressed(stressed_form) or stressed_form
+                written = derive_written_from_stressed(stressed_form, warn=False) or stressed_form
                 real_form = normalized_lookup.get(written)
 
         if real_form:
@@ -353,9 +356,11 @@ def fill_missing_adjective_forms(
 
     # Get ALL adjectives (not just incomplete ones)
     # The existing_combos logic prevents duplicate insertions
+    # Use warn=False since French loanwords may have multiple accents
     result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "adjective"))
     all_adjectives = [
-        (row.id, derive_written_from_stressed(row.stressed) or row.stressed) for row in result
+        (row.id, derive_written_from_stressed(row.stressed, warn=False) or row.stressed)
+        for row in result
     ]
     stats["adjectives_checked"] = len(all_adjectives)
 
@@ -579,7 +584,8 @@ def apply_orthography_fallback(
             continue
 
         # Try to derive written form
-        written = derive_written_from_stressed(stressed_form)
+        # Use warn=False since French loanwords may have multiple accents
+        written = derive_written_from_stressed(stressed_form, warn=False)
         if written is None:
             stats["failed"] += 1
             continue
@@ -675,7 +681,8 @@ def enrich_lemma_written(
             stats["from_form"] += 1
         elif stressed_lemma != "-":
             # Fallback: apply orthography rules
-            written = derive_written_from_stressed(stressed_lemma)
+            # Use warn=False since French loanwords may have multiple accents
+            written = derive_written_from_stressed(stressed_lemma, warn=False)
             if written is not None:
                 if stressed_lemma in FRENCH_LOANWORD_WHITELIST:
                     written_source = "hardcoded:loanword"

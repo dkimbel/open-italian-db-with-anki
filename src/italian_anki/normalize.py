@@ -207,11 +207,15 @@ ACCENTED_FINAL = frozenset("àèéìòóù")
 VOWELS = frozenset("aeiouAEIOU")
 
 
-def _derive_single_word(word: str) -> str | None:
+def _derive_single_word(word: str, *, warn: bool = True) -> str | None:
     """Derive written form for a single word (no spaces).
 
     Returns the written form, or None if derivation fails (e.g., multiple accents).
-    Logs a warning for single words with multiple accents (unless whitelisted).
+
+    Args:
+        word: Single word to derive written form for
+        warn: If True (default), log warning for multi-accent words. Set False
+            when processing external corpora (like ItWaC) with known data quality issues.
     """
     if not word:
         return None
@@ -224,8 +228,9 @@ def _derive_single_word(word: str) -> str | None:
     accent_count = sum(1 for c in word if c in ACCENTED_CHARS)
 
     if accent_count > 1:
-        # Multiple accents in a single word is unusual - log warning
-        logger.warning(f"Multiple accents in single word: {word!r}")
+        # Multiple accents in a single word is unusual
+        if warn:
+            logger.warning(f"Multiple accents in single word: {word!r}")
         return None
 
     if accent_count == 0:
@@ -261,7 +266,7 @@ def _derive_single_word(word: str) -> str | None:
         return normalized
 
 
-def derive_written_from_stressed(stressed: str) -> str | None:
+def derive_written_from_stressed(stressed: str, *, warn: bool = True) -> str | None:
     """Derive written form from stressed form using Italian orthography rules.
 
     Italian orthography only requires accents in specific cases:
@@ -276,6 +281,8 @@ def derive_written_from_stressed(stressed: str) -> str | None:
     Args:
         stressed: Form with pedagogical stress marks (e.g., "pàrlo", "parlò",
             or multi-word like "volùto dìre")
+        warn: If True (default), log warning for multi-accent words. Set False
+            when processing external corpora (like ItWaC) with known data quality issues.
 
     Returns:
         The correct written form, or None if derivation is not confident
@@ -301,11 +308,11 @@ def derive_written_from_stressed(stressed: str) -> str | None:
     # Handle multi-word phrases by applying rule to each word
     if " " in stressed:
         words = stressed.split()
-        derived_words = [_derive_single_word(w) for w in words]
+        derived_words = [_derive_single_word(w, warn=warn) for w in words]
         # If any word fails, the whole phrase fails
         if any(w is None for w in derived_words):
             return None
         return " ".join(derived_words)  # type: ignore[arg-type]
 
     # Single word
-    return _derive_single_word(stressed)
+    return _derive_single_word(stressed, warn=warn)
