@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import Connection, select
 
 from italian_anki.db.schema import frequencies, lemmas
-from italian_anki.normalize import normalize
+from italian_anki.normalize import derive_written_from_stressed
 
 # Default CSV filenames by POS (relative to data/itwac/)
 ITWAC_CSV_FILES = {
@@ -45,7 +45,7 @@ def _parse_itwac_csv(csv_path: Path) -> dict[str, tuple[int, float]]:
     """Parse ItWaC CSV and aggregate frequencies by lemma.
 
     Works for verbs, nouns, and adjectives (same CSV format).
-    Returns dict mapping normalized_lemma -> (total_freq, zipf_score)
+    Returns dict mapping written_lemma -> (total_freq, zipf_score)
     """
     lemma_freqs: dict[str, int] = defaultdict(int)
 
@@ -61,17 +61,17 @@ def _parse_itwac_csv(csv_path: Path) -> dict[str, tuple[int, float]]:
             except ValueError:
                 continue
 
-            # Normalize the lemma for matching
-            normalized = normalize(lemma)
+            # Derive written form for matching (preserves meaningful final accents)
+            written = derive_written_from_stressed(lemma) or lemma
 
             # Aggregate frequency by lemma (sum all form frequencies)
-            lemma_freqs[normalized] += freq
+            lemma_freqs[written] += freq
 
     # Compute Zipf scores for aggregated frequencies
     result: dict[str, tuple[int, float]] = {}
-    for normalized, total_freq in lemma_freqs.items():
+    for written, total_freq in lemma_freqs.items():
         zipf = _compute_zipf(total_freq)
-        result[normalized] = (total_freq, zipf)
+        result[written] = (total_freq, zipf)
 
     return result
 
@@ -113,10 +113,11 @@ def import_itwac(
         if progress_callback and idx % 5000 == 0:
             progress_callback(idx, total_lemmas)
         lemma_id = row.id
-        normalized = normalize(row.stressed)
+        # Derive written form for matching (preserves meaningful final accents)
+        written = derive_written_from_stressed(row.stressed) or row.stressed
 
-        if normalized in freq_data:
-            total_freq, zipf = freq_data[normalized]
+        if written in freq_data:
+            total_freq, zipf = freq_data[written]
             insert_batch.append(
                 {
                     "lemma_id": lemma_id,

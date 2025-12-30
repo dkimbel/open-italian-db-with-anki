@@ -15,7 +15,10 @@ from italian_anki.db.schema import (
     noun_forms,
     verb_forms,
 )
-from italian_anki.normalize import FRENCH_LOANWORD_WHITELIST, normalize
+from italian_anki.normalize import (
+    FRENCH_LOANWORD_WHITELIST,
+    derive_written_from_stressed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -149,10 +152,10 @@ def _build_form_lookup(
         # Store exact form (with accents intact)
         exact_lookup[form] = form
 
-        # Also store normalized for fallback
-        normalized = normalize(form)
-        if normalized not in normalized_lookup:
-            normalized_lookup[normalized] = form
+        # Also store written form for fallback (preserves meaningful final accents)
+        written = derive_written_from_stressed(form) or form
+        if written not in normalized_lookup:
+            normalized_lookup[written] = form
 
     return exact_lookup, normalized_lookup
 
@@ -186,10 +189,11 @@ def _build_adjective_lookup(morphit_path: Path) -> dict[str, list[MorphitEntry]]
             number=number,
         )
 
-        normalized_lemma = normalize(lemma)
-        if normalized_lemma not in lookup:
-            lookup[normalized_lemma] = []
-        lookup[normalized_lemma].append(entry)
+        # Use written form as key (preserves meaningful final accents)
+        written_lemma = derive_written_from_stressed(lemma) or lemma
+        if written_lemma not in lookup:
+            lookup[written_lemma] = []
+        lookup[written_lemma].append(entry)
 
     return lookup
 
@@ -270,12 +274,12 @@ def import_morphit(
         if real_form:
             stats["exact_matched"] += 1
         else:
-            # Only use normalized fallback if the form has accent marks to strip.
+            # Only use written-form fallback if the form has accent marks to strip.
             # Unaccented forms (e.g., "eta") should not acquire accents via fallback,
             # as this conflates homographs (Greek letter eta vs Italian età).
             if _has_accents(stressed_form):
-                normalized = normalize(stressed_form)
-                real_form = normalized_lookup.get(normalized)
+                written = derive_written_from_stressed(stressed_form) or stressed_form
+                real_form = normalized_lookup.get(written)
 
         if real_form:
             # Check if this is a French loanword that should preserve its accent
@@ -350,7 +354,9 @@ def fill_missing_adjective_forms(
     # Get ALL adjectives (not just incomplete ones)
     # The existing_combos logic prevents duplicate insertions
     result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "adjective"))
-    all_adjectives = [(row.id, normalize(row.stressed)) for row in result]
+    all_adjectives = [
+        (row.id, derive_written_from_stressed(row.stressed) or row.stressed) for row in result
+    ]
     stats["adjectives_checked"] = len(all_adjectives)
 
     if progress_callback:
