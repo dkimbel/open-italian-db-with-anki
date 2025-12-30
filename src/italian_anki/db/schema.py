@@ -57,6 +57,9 @@ verb_forms = Table(
         "mood", Text, nullable=False
     ),  # indicative, subjunctive, conditional, imperative, infinitive, participle, gerund
     Column("tense", Text),  # present, imperfect, remote, future (NULL for non-finite)
+    Column(
+        "aspect", Text
+    ),  # 'perfective' (past participle), 'imperfective' (present participle), NULL
     Column("person", Integer),  # 1, 2, 3 (NULL for non-finite)
     Column("number", Text),  # singular, plural (NULL for some non-finite)
     Column("gender", Text),  # 'm', 'f' (for participles only)
@@ -71,20 +74,9 @@ verb_forms = Table(
     Column("form_origin", Text),  # 'wiktextract', 'inferred:singular', etc.
     # Citation form marker - True for the canonical/dictionary form (infinitive for verbs)
     Column("is_citation_form", Boolean, default=False),
-    # Unique constraint to prevent duplicate forms
-    UniqueConstraint(
-        "lemma_id",
-        "stressed",
-        "mood",
-        "tense",
-        "person",
-        "number",
-        "gender",
-        "is_formal",
-        "is_negative",
-        "labels",
-        name="uq_verb_forms_entry",
-    ),
+    # Note: No UNIQUE constraint. SQLite treats NULL != NULL, so constraints with nullable
+    # columns (tense, aspect, person, number, gender) don't prevent duplicates for non-finite
+    # forms. Deduplication is handled at app level via seen_verb_forms dict in wiktextract.py.
 )
 
 # Noun forms with grammatical features
@@ -201,13 +193,33 @@ translations = Table(
     sqlite_with_rowid=False,
 )
 
-# Verb-specific metadata (auxiliary and transitivity)
+# Verb-specific metadata (auxiliary, transitivity, and pronominal verb links)
+#
+# Pronominal verbs (ending in -si/-rsi like lavarsi, pentirsi) have a relationship
+# to their non-pronominal base verb. This relationship is tracked via:
+#
+# - base_verb_lemma_id: Links pronominal verb to its non-pronominal base (lavarsi → lavare).
+#   NULL for verbs that are inherently pronominal (e.g., pentirsi has no *pentire).
+#
+# - pronominal_type: Classifies the type of pronominal construction:
+#   - 'reflexive': Subject acts on itself (lavarsi = wash oneself)
+#   - 'reciprocal': Subjects act on each other (incontrarsi = meet each other)
+#   - 'inherent': Verb only exists in pronominal form (pentirsi, accorgersi)
+#   - NULL: Not a pronominal verb
+#
+# Note: Both base verb and pronominal verb keep their full conjugations, since
+# pronominal forms include clitics (mi lavo, ti lavi) and may use different
+# auxiliaries (avere vs essere).
+#
 verb_metadata = Table(
     "verb_metadata",
     metadata,
     Column("lemma_id", Integer, ForeignKey("lemmas.id"), primary_key=True),
     Column("auxiliary", String(20)),  # 'avere', 'essere', 'both', NULL
     Column("transitivity", String(20)),  # 'transitive', 'intransitive', 'both', NULL
+    # Pronominal verb linking
+    Column("base_verb_lemma_id", Integer, ForeignKey("lemmas.id")),  # lavarsi → lavare
+    Column("pronominal_type", Text),  # 'reflexive', 'reciprocal', 'inherent', NULL
 )
 
 # Noun-specific metadata (gender classification, number behavior, and links)
@@ -278,6 +290,7 @@ Index(
     "idx_lemmas_stressed_pos", lemmas.c.stressed, lemmas.c.pos
 )  # For lookups by stressed form+POS
 Index("idx_verb_metadata_auxiliary", verb_metadata.c.auxiliary)
+Index("idx_verb_metadata_base", verb_metadata.c.base_verb_lemma_id)
 # noun_metadata indexes
 Index("idx_noun_metadata_gender_class", noun_metadata.c.gender_class)
 Index("idx_noun_metadata_counterpart", noun_metadata.c.counterpart_lemma_id)

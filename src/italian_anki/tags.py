@@ -116,6 +116,7 @@ class VerbFormFeatures:
 
     mood: str | None = None
     tense: str | None = None
+    aspect: str | None = None  # 'perfective' (past participle), 'imperfective' (present participle)
     person: int | None = None
     number: str | None = None
     gender: str | None = None  # for participles
@@ -171,22 +172,50 @@ def _extract_labels(tags: set[str]) -> list[str] | None:
 
 
 def _extract_tense(tags: set[str], mood: str | None) -> str | None:
-    """Extract tense from tags, handling passato remoto specially."""
-    if mood in ("infinitive", "gerund"):
+    """Extract tense from tags, handling passato remoto specially.
+
+    For participles, tense is NULL - the "past"/"present" distinction is
+    captured in the aspect column instead (perfective/imperfective).
+
+    For subjunctive forms without an explicit tense tag, defaults to 'present'
+    since Italian subjunctive only has present and imperfect tenses.
+    """
+    if mood in ("infinitive", "gerund", "participle"):
         return None
 
     if "past" in tags and "historic" in tags:
         return "remote"  # passato remoto
 
-    if "past" in tags:
-        # Linguistically, "past" in participles refers to aspect (perfective/completed)
-        # rather than time. But we store it as tense='past' for consistency with
-        # present participles (tense='present') and queryability.
-        return "past"
-
     for tag in ("present", "imperfect", "future"):
         if tag in tags:
             return tag
+
+    # Default subjunctive to 'present' if no tense tag found.
+    # This handles ~241 forms in Wiktextract that are missing the 'present' tag.
+    # Italian subjunctive only has present and imperfect; if it were imperfect,
+    # it would have the 'imperfect' tag.
+    if mood == "subjunctive":
+        return "present"
+
+    return None
+
+
+def _extract_aspect(tags: set[str], mood: str | None) -> str | None:
+    """Extract aspect from tags for participles.
+
+    Participles have aspect rather than tense:
+    - "past participle" (e.g., parlato) = perfective aspect (completed action)
+    - "present participle" (e.g., parlante) = imperfective aspect (ongoing action)
+
+    For all other moods, aspect is NULL.
+    """
+    if mood != "participle":
+        return None
+
+    if "past" in tags:
+        return "perfective"
+    if "present" in tags:
+        return "imperfective"
 
     return None
 
@@ -232,8 +261,9 @@ def parse_verb_tags(tags: list[str]) -> VerbFormFeatures:
         result.should_filter = True
         return result
 
-    # Extract tense
+    # Extract tense and aspect
     result.tense = _extract_tense(tag_set, result.mood)
+    result.aspect = _extract_aspect(tag_set, result.mood)
 
     # Extract person
     for tag, person in PERSON_MAP.items():

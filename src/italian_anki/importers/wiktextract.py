@@ -872,6 +872,98 @@ def _extract_transitivity(entry: dict[str, Any]) -> str | None:
     return None
 
 
+# Pronominal verb suffixes - includes double clitics like andarsene, cavarsela.
+# These end in -rsi or -rsì (pronominal) plus an additional object clitic (ne, la, etc.).
+PRONOMINAL_SUFFIXES = (
+    "rsi",
+    "rsì",
+    "rsene",
+    "rsela",
+    "rselo",
+    "rseli",
+    "rsele",
+    "rseci",
+    "rsevi",
+)
+
+# Double clitic suffixes that need to be stripped to get the base pronominal form.
+# e.g., andarsene → andarsi, cavarsela → cavarsi
+DOUBLE_CLITIC_SUFFIXES = ("sene", "sela", "selo", "seli", "sele", "seci", "sevi")
+
+
+def _is_pronominal_verb(stressed: str) -> bool:
+    """Check if a verb is pronominal (ends in -rsi/-rsì or double clitic).
+
+    Italian pronominal verbs are verbs that conjugate with reflexive pronouns.
+    Their infinitive ends in -rsi, -rsì, or a double clitic form (-rsene, -rsela, etc.).
+
+    Multi-word phrases are skipped entirely. Some phrases contain pronominal verbs
+    (e.g., "dàrsi da fare") but detecting and linking them is complex. For now,
+    we only handle single-word pronominal verbs.
+
+    Examples:
+        lavarsi → True (reflexive)
+        pentirsi → True (inherent pronominal)
+        andarsene → True (double clitic)
+        parlare → False (non-pronominal)
+        "fàre ipotesi" → False (multi-word phrase, skipped)
+    """
+    # Skip multi-word phrases entirely
+    if " " in stressed:
+        return False
+    return any(stressed.endswith(suffix) for suffix in PRONOMINAL_SUFFIXES)
+
+
+def _get_pronominal_base_form(stressed: str) -> str | None:
+    """Get the base (non-pronominal) form of a pronominal verb.
+
+    Strips the -si suffix (and any double clitic) and converts to regular infinitive:
+    - lavarsi → lavare (-arsi → -are)
+    - vedersi → vedere (-ersi → -ere)
+    - sentirsi → sentire (-irsi → -ire)
+    - condursi → condurre (-ursi → -urre)
+    - andarsene → andare (-arsene → -are, double clitic stripped)
+
+    Returns None if not a recognizable pronominal form.
+    """
+    if not _is_pronominal_verb(stressed):
+        return None
+
+    # Convert to written form (strips non-final accents).
+    # e.g., abbronzàrsi → abbronzarsi
+    # This avoids needing to enumerate accented vowel variants (àr, èr, ìr).
+    written = derive_written_from_stressed(stressed)
+    if written is None:
+        return None
+
+    # Handle double clitics first: strip -sene/-sela/etc to get base pronominal form
+    # e.g., andarsene → andarsi, cavarsela → cavarsi
+    for suffix in DOUBLE_CLITIC_SUFFIXES:
+        if written.endswith(suffix):
+            written = written[: -len(suffix)] + "si"
+            break
+
+    # Handle accented final vowel (e.g., imbufalìrsi keeps accent on final -e)
+    if written.endswith("sì"):
+        stem = written[:-2]
+        final_vowel = "é"
+    else:
+        stem = written[:-2]  # Strip -si
+        final_vowel = "e"
+
+    # Determine conjugation class from (now unaccented) stem ending
+    if stem.endswith("ar"):
+        return stem + final_vowel  # -arsi → -are
+    elif stem.endswith("er"):
+        return stem + final_vowel  # -ersi → -ere
+    elif stem.endswith("ir"):
+        return stem + final_vowel  # -irsi → -ire
+    elif stem.endswith("ur"):
+        return stem + "re"  # -ursi → -urre (condursi → condurre)
+
+    return None
+
+
 def _extract_ipa(entry: dict[str, Any]) -> str | None:
     """Extract IPA pronunciation for the infinitive."""
     for sound in entry.get("sounds", []):
@@ -1418,6 +1510,7 @@ def _build_verb_form_row(
         "stressed": form_stressed,
         "mood": features.mood,
         "tense": features.tense,
+        "aspect": features.aspect,
         "person": features.person,
         "number": number,
         "gender": gender,
@@ -1707,47 +1800,110 @@ def import_wiktextract(
     form_batch: list[dict[str, Any]] = []
     definition_batch: list[dict[str, Any]] = []
 
-    # Track unique verb forms to avoid duplicates (Wiktextract source sometimes has duplicates)
-    seen_verb_forms: set[tuple[Any, ...]] = set()
+    # Track unique verb forms to avoid duplicates (Wiktextract source sometimes has duplicates).
+    # Two structures handle cross-batch deduplication:
+    # - seen_verb_keys: All keys ever seen (never cleared) - prevents cross-batch duplicates
+    # - current_batch_map: Keys in current batch with indices - enables replacement logic
+    seen_verb_keys: set[tuple[Any, ...]] = set()
+    current_batch_map: dict[tuple[Any, ...], tuple[dict[str, Any], int]] = {}
 
-    def _verb_form_key(row: dict[str, Any]) -> tuple[Any, ...]:
-        """Create a key tuple for deduplication matching the unique constraint columns."""
-        # Convert labels list to tuple for hashability
-        labels = row.get("labels")
-        labels_key = tuple(labels) if labels else None
+    def _verb_form_key_normalized(row: dict[str, Any]) -> tuple[Any, ...]:
+        """Create a grammatical key for verb form deduplication.
+
+        Returns a tuple of grammatical attributes that uniquely identify a verb
+        form slot. The key excludes 'stressed' and 'labels' since:
+        - Forms with different stress notation (accòrgo vs accórgo) are duplicates
+        - Forms with/without labels in the same slot are duplicates
+
+        When conflicts exist, add_form() applies these preferences:
+        1. Prefer unlabeled over labeled versions
+        2. Prefer grave over acute accents
+        """
         return (
             row["lemma_id"],
-            row["stressed"],
             row["mood"],
             row.get("tense"),
+            row.get("aspect"),
             row.get("person"),
             row.get("number"),
             row.get("gender"),
             row.get("is_formal", False),
             row.get("is_negative", False),
-            labels_key,
         )
+
+    def _has_acute_accent(stressed: str) -> bool:
+        """Check if a stressed form contains acute accents (ó, é)."""
+        return "ó" in stressed or "é" in stressed or "Ó" in stressed or "É" in stressed
 
     def add_form(row: dict[str, Any]) -> bool:
         """Add a form to the batch, with deduplication for verbs.
 
         Returns True if the form was added, False if it was a duplicate.
+
+        For verbs, implements deduplication preferences:
+        1. Prefer unlabeled over labeled (when same grammatical slot exists
+           with and without labels, keep unlabeled)
+        2. Prefer grave over acute accents (when same slot exists with both
+           accent types like accòrgo vs accórgo, keep grave)
+
+        This handles inconsistent Wiktionary source data where the same form
+        may appear multiple times with different annotations.
         """
         if pos_filter == "verb":
-            key = _verb_form_key(row)
-            if key in seen_verb_forms:
-                # Duplicate found - skip (source data has some duplicates)
+            key = _verb_form_key_normalized(row)
+
+            # Case 1: Already seen in a PREVIOUS batch - skip entirely
+            # (Can't do replacement logic since old batch is already committed)
+            if key in seen_verb_keys and key not in current_batch_map:
                 return False
-            seen_verb_forms.add(key)
+
+            # Case 2: Already seen in CURRENT batch - use replacement logic
+            if key in current_batch_map:
+                old_row, old_idx = current_batch_map[key]
+                old_labels = old_row.get("labels")
+                new_labels = row.get("labels")
+                old_stressed = old_row["stressed"]
+                new_stressed = row["stressed"]
+
+                # Priority 1: Prefer unlabeled over labeled
+                old_is_labeled = old_labels is not None
+                new_is_labeled = new_labels is not None
+
+                if old_is_labeled and not new_is_labeled:
+                    # New is unlabeled, old is labeled → replace with new
+                    form_batch[old_idx] = row
+                    current_batch_map[key] = (row, old_idx)
+                    return True
+                elif not old_is_labeled and new_is_labeled:
+                    # Old is unlabeled, new is labeled → keep old, skip new
+                    return False
+
+                # Priority 2: Both same label status → prefer grave over acute
+                if _has_acute_accent(old_stressed) and not _has_acute_accent(new_stressed):
+                    # New is grave, old is acute → replace with new
+                    form_batch[old_idx] = row
+                    current_batch_map[key] = (row, old_idx)
+                    return True
+
+                # Otherwise skip the new form (old is already better or same)
+                return False
+
+            # Case 3: New form - add to both tracking structures
+            seen_verb_keys.add(key)
+            current_batch_map[key] = (row, len(form_batch))
+
         form_batch.append(row)
         return True
 
     def flush_batches() -> None:
-        nonlocal form_batch, definition_batch
+        nonlocal form_batch, definition_batch, current_batch_map
         if form_batch:
             conn.execute(pos_form_table.insert(), form_batch)
             stats["forms"] += len(form_batch)
             form_batch = []
+            # Clear current_batch_map since indices pointed into the old batch.
+            # seen_verb_keys is NOT cleared - it prevents cross-batch duplicates.
+            current_batch_map = {}
 
         if definition_batch:
             conn.execute(definitions.insert(), definition_batch)
@@ -1912,14 +2068,17 @@ def import_wiktextract(
             elif pos_filter == "verb":
                 auxiliary = _extract_auxiliary(entry)
                 transitivity = _extract_transitivity(entry)
-                if auxiliary or transitivity:
-                    conn.execute(
-                        verb_metadata.insert().values(
-                            lemma_id=lemma_id,
-                            auxiliary=auxiliary,
-                            transitivity=transitivity,
-                        )
+                # Always insert verb_metadata so we have a row to update
+                # for pronominal verb linking in post-processing
+                conn.execute(
+                    verb_metadata.insert().values(
+                        lemma_id=lemma_id,
+                        auxiliary=auxiliary,
+                        transitivity=transitivity,
+                        # base_verb_lemma_id and pronominal_type are populated
+                        # in post-processing after all verbs are inserted
                     )
+                )
 
             elif pos_filter == "adjective":
                 # Insert adjective metadata with inflection class
@@ -2384,7 +2543,7 @@ def import_wiktextract(
     # Final flush
     flush_batches()
 
-    # Post-processing: Link adjective relationships
+    # Post-processing: Link relationships
     # (must happen after all lemmas are inserted so we can resolve lemma IDs)
     if pos_filter == "adjective":
         degree_stats = link_comparative_superlative(conn, degree_links)
@@ -2392,6 +2551,15 @@ def import_wiktextract(
         # Add linking stats to main stats dict
         stats["degree_linked"] = degree_stats["linked"]
         stats["degree_base_not_found"] = degree_stats["base_not_found"]
+
+    if pos_filter == "verb":
+        pronominal_stats = link_pronominal_verbs(conn)
+
+        # Add pronominal linking stats to main stats dict
+        stats["pronominal_verbs"] = pronominal_stats["pronominal_verbs"]
+        stats["pronominal_linked"] = pronominal_stats["linked_to_base"]
+        stats["pronominal_inherent"] = pronominal_stats["inherent_pronominal"]
+        stats["pronominal_parse_failed"] = pronominal_stats["base_form_parse_failed"]
 
     # Final progress callback
     if progress_callback:
@@ -2728,6 +2896,80 @@ def link_comparative_superlative(
             )
         )
         stats["linked"] += 1
+
+    return stats
+
+
+def link_pronominal_verbs(conn: Connection) -> dict[str, int]:
+    """Link pronominal verbs to their non-pronominal base verbs.
+
+    For verbs ending in -si/-rsi (pronominal verbs), attempts to find the
+    non-pronominal base verb and updates verb_metadata with:
+    - base_verb_lemma_id: Points to the base verb (lavarsi → lavare)
+    - pronominal_type: 'reflexive' if base exists, 'inherent' if not
+
+    Returns:
+        Statistics dict with counts for each operation.
+    """
+    stats = {
+        "pronominal_verbs": 0,
+        "linked_to_base": 0,
+        "inherent_pronominal": 0,
+        "base_form_parse_failed": 0,
+    }
+
+    # Build lookup: normalized stressed form → lemma_id for all verbs
+    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "verb"))
+    lemma_lookup = {normalize(row.stressed): row.id for row in result}
+
+    # Also get stressed forms for pronominal detection
+    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "verb"))
+
+    for row in result:
+        lemma_id = row.id
+        stressed = row.stressed
+
+        if not _is_pronominal_verb(stressed):
+            continue
+
+        stats["pronominal_verbs"] += 1
+
+        # Try to find the base form
+        base_form = _get_pronominal_base_form(stressed)
+        if base_form is None:
+            stats["base_form_parse_failed"] += 1
+            # Still mark as pronominal, but can't link
+            conn.execute(
+                update(verb_metadata)
+                .where(verb_metadata.c.lemma_id == lemma_id)
+                .values(pronominal_type="inherent")
+            )
+            stats["inherent_pronominal"] += 1
+            continue
+
+        # Look up the base verb
+        base_normalized = normalize(base_form)
+        base_lemma_id = lemma_lookup.get(base_normalized)
+
+        if base_lemma_id is not None:
+            # Base verb exists - this is a reflexive/reciprocal pronominal
+            conn.execute(
+                update(verb_metadata)
+                .where(verb_metadata.c.lemma_id == lemma_id)
+                .values(
+                    base_verb_lemma_id=base_lemma_id,
+                    pronominal_type="reflexive",
+                )
+            )
+            stats["linked_to_base"] += 1
+        else:
+            # Base verb doesn't exist - this is an inherent pronominal
+            conn.execute(
+                update(verb_metadata)
+                .where(verb_metadata.c.lemma_id == lemma_id)
+                .values(pronominal_type="inherent")
+            )
+            stats["inherent_pronominal"] += 1
 
     return stats
 
@@ -3125,7 +3367,7 @@ def generate_gendered_participles(
         "duplicates_skipped": 0,
     }
 
-    # Get all masculine singular past participles
+    # Get all masculine singular past (perfective) participles
     participles = conn.execute(
         select(
             verb_forms.c.lemma_id,
@@ -3134,7 +3376,7 @@ def generate_gendered_participles(
             verb_forms.c.labels,
         ).where(
             verb_forms.c.mood == "participle",
-            verb_forms.c.tense == "past",
+            verb_forms.c.aspect == "perfective",
             verb_forms.c.gender == "m",
             verb_forms.c.number == "singular",
         )
@@ -3171,7 +3413,8 @@ def generate_gendered_participles(
                         written_source=new_written_source,
                         stressed=new_stressed,
                         mood="participle",
-                        tense="past",
+                        tense=None,  # Participles have aspect, not tense
+                        aspect="perfective",  # Past participles are perfective
                         person=None,
                         number=new_number,
                         gender=new_gender,

@@ -122,12 +122,27 @@ class TestParseVerbTagsBasic:
         result = parse_verb_tags(tags)
         assert result.number == "singular"
 
-    def test_participle_past_tense(self) -> None:
-        """Test that past participles have tense='past' for queryability."""
+    def test_participle_aspect(self) -> None:
+        """Test that participles use aspect instead of tense.
+
+        Past participles have perfective aspect (completed action).
+        Present participles have imperfective aspect (ongoing action).
+        Tense is NULL for participles since the 'past/present' distinction
+        is aspectual, not temporal.
+        """
+        # Past participle = perfective aspect
         tags = ["participle", "past"]
         result = parse_verb_tags(tags)
         assert result.mood == "participle"
-        assert result.tense == "past"
+        assert result.tense is None
+        assert result.aspect == "perfective"
+
+        # Present participle = imperfective aspect
+        tags = ["participle", "present"]
+        result = parse_verb_tags(tags)
+        assert result.mood == "participle"
+        assert result.tense is None
+        assert result.aspect == "imperfective"
 
     def test_extracts_gender_for_participle(self) -> None:
         """Test that gender can be extracted for participles."""
@@ -141,3 +156,23 @@ class TestParseVerbTagsBasic:
         tags = ["indicative", "past", "historic", "first-person", "singular"]
         result = parse_verb_tags(tags)
         assert result.tense == "remote"
+
+    def test_subjunctive_defaults_to_present(self) -> None:
+        """Test that subjunctive without tense tag defaults to present.
+
+        Some Wiktextract forms have ['subjunctive', 'first-person', 'singular']
+        without a 'present' tag. Since Italian subjunctive only has present and
+        imperfect, and imperfect would have the 'imperfect' tag, we default to
+        'present'.
+        """
+        tags = ["subjunctive", "first-person", "singular"]
+        result = parse_verb_tags(tags)
+        assert result.mood == "subjunctive"
+        assert result.tense == "present"  # Defaulted, not from tags
+
+    def test_subjunctive_imperfect_not_defaulted(self) -> None:
+        """Test that subjunctive with 'imperfect' tag is correctly parsed."""
+        tags = ["subjunctive", "imperfect", "first-person", "singular"]
+        result = parse_verb_tags(tags)
+        assert result.mood == "subjunctive"
+        assert result.tense == "imperfect"
