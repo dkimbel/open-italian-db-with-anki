@@ -158,9 +158,8 @@ definitions = Table(
     Column("lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False),
     Column("gloss", Text, nullable=False),
     Column("tags", JSON(none_as_null=True)),  # JSON array (e.g., ["transitive"])
-    # Optional linkage to specific forms (for nouns with meaning-dependent gender/plurals)
-    Column("form_gender", Text),  # NULL (all), 'masculine', 'feminine'
-    Column("form_number", Text),  # NULL (all), 'singular', 'plural'
+    # Optional linkage to specific forms (for nouns with meaning-dependent plurals)
+    # e.g., "braccio" has different meanings for "braccia" (arms) vs "bracci" (crane arms)
     Column("form_meaning_hint", Text),  # matches noun_forms.meaning_hint
 )
 

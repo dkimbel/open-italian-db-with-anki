@@ -2561,6 +2561,23 @@ def import_wiktextract(
         stats["pronominal_inherent"] = pronominal_stats["inherent_pronominal"]
         stats["pronominal_parse_failed"] = pronominal_stats["base_form_parse_failed"]
 
+    if pos_filter == "noun":
+        # Link gender counterpart pairs (professore↔professoressa)
+        counterpart_stats = link_noun_counterparts(conn, jsonl_path)
+        stats["counterparts_found"] = counterpart_stats["counterparts_found"]
+        stats["counterparts_linked_bidirectional"] = counterpart_stats["linked_bidirectional"]
+        stats["counterparts_linked_unidirectional"] = counterpart_stats["linked_unidirectional"]
+        stats["counterparts_base_not_found"] = counterpart_stats["base_not_found"]
+
+        # Link derived nouns to their base (gattino→gatto)
+        derivation_stats = link_noun_derivations(conn, jsonl_path)
+        stats["derivations_found"] = derivation_stats["derivations_found"]
+        stats["derivations_linked"] = derivation_stats["linked"]
+        stats["derivations_diminutive"] = derivation_stats["diminutive"]
+        stats["derivations_augmentative"] = derivation_stats["augmentative"]
+        stats["derivations_pejorative"] = derivation_stats["pejorative"]
+        stats["derivations_base_not_found"] = derivation_stats["base_not_found"]
+
     # Final progress callback
     if progress_callback:
         progress_callback(total_lines, total_lines)
@@ -3031,6 +3048,317 @@ def link_pronominal_verbs(conn: Connection) -> dict[str, int]:
     return stats
 
 
+def link_noun_counterparts(
+    conn: Connection,
+    jsonl_path: Path,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
+    """Link gender counterpart noun pairs (professore↔professoressa).
+
+    Scans Wiktextract for entries with "female equivalent of" or "male equivalent of"
+    glosses and creates bidirectional links between the counterpart lemmas.
+
+    Data sources used:
+    1. form_of entries with "female/male equivalent of" glosses
+    2. forms array with "feminine" or "masculine" tags
+
+    Args:
+        conn: SQLAlchemy connection
+        jsonl_path: Path to Wiktextract JSONL file
+        progress_callback: Optional callback for progress reporting (current, total)
+
+    Returns:
+        Statistics dict with counts of processed entries
+    """
+    stats = {
+        "scanned": 0,
+        "counterparts_found": 0,
+        "linked_bidirectional": 0,
+        "linked_unidirectional": 0,
+        "base_not_found": 0,
+    }
+
+    # Build lookup: written_form -> lemma_id for nouns
+    # Use written form (not normalized stressed) to preserve orthographic distinctions.
+    result = conn.execute(
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == "noun")
+    )
+    noun_lookup: dict[str, int] = {}
+    for row in result:
+        written = row.written or derive_written_from_stressed(row.stressed)
+        if written is not None:
+            noun_lookup[written] = row.id
+
+    # Track counterpart relationships: (lemma_id, counterpart_lemma_id)
+    # We'll process these at the end to handle bidirectionality
+    counterpart_pairs: list[tuple[int, int]] = []
+
+    # Count lines for progress
+    total_lines = _count_lines(jsonl_path) if progress_callback else 0
+    current_line = 0
+
+    with jsonl_path.open(encoding="utf-8") as f:
+        for line in f:
+            current_line += 1
+            if progress_callback and current_line % 10000 == 0:
+                progress_callback(current_line, total_lines)
+
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            # Only process noun entries
+            if entry.get("pos") != "noun":
+                continue
+
+            stats["scanned"] += 1
+            word = entry.get("word", "")
+
+            # Look for "female equivalent of" or "male equivalent of" glosses
+            for sense in entry.get("senses", []):
+                glosses = sense.get("glosses", [])
+                if not glosses:
+                    continue
+
+                gloss = glosses[0] if glosses else ""
+                counterpart_word = None
+
+                # Check for "female equivalent of X" or "male equivalent of X"
+                if "female equivalent of " in gloss or "male equivalent of " in gloss:
+                    # Extract from form_of if available
+                    form_of_list = sense.get("form_of", [])
+                    if form_of_list:
+                        counterpart_word = form_of_list[0].get("word")
+                    else:
+                        # Try to extract from gloss text
+                        if "female equivalent of " in gloss:
+                            counterpart_word = gloss.split("female equivalent of ")[-1].strip()
+                        elif "male equivalent of " in gloss:
+                            counterpart_word = gloss.split("male equivalent of ")[-1].strip()
+                        # Clean up any trailing punctuation or extra text
+                        if counterpart_word:
+                            counterpart_word = counterpart_word.split(",")[0].strip()
+                            counterpart_word = counterpart_word.split(";")[0].strip()
+
+                if counterpart_word:
+                    stats["counterparts_found"] += 1
+
+                    # Look up both lemmas
+                    word_written = derive_written_from_stressed(word)
+                    counterpart_written = derive_written_from_stressed(counterpart_word)
+
+                    if word_written is None or counterpart_written is None:
+                        stats["base_not_found"] += 1
+                        continue
+
+                    word_id = noun_lookup.get(word_written)
+                    counterpart_id = noun_lookup.get(counterpart_written)
+
+                    if word_id is None or counterpart_id is None:
+                        stats["base_not_found"] += 1
+                        continue
+
+                    # Record the pair (in both directions for bidirectional linking)
+                    counterpart_pairs.append((word_id, counterpart_id))
+                    break  # Only process first counterpart relationship per entry
+
+    if progress_callback:
+        progress_callback(total_lines, total_lines)
+
+    # Process counterpart pairs and update database
+    # Build a set of all pairs for bidirectional checking
+    pair_set: set[tuple[int, int]] = set()
+    for a, b in counterpart_pairs:
+        pair_set.add((a, b))
+
+    # Update database with counterpart links
+    updated_ids: set[int] = set()
+    for word_id, counterpart_id in counterpart_pairs:
+        if word_id in updated_ids:
+            continue
+
+        # Check if reverse exists (bidirectional)
+        is_bidirectional = (counterpart_id, word_id) in pair_set
+
+        # Update this lemma's counterpart
+        conn.execute(
+            update(noun_metadata)
+            .where(noun_metadata.c.lemma_id == word_id)
+            .values(counterpart_lemma_id=counterpart_id)
+        )
+        updated_ids.add(word_id)
+
+        # Update counterpart's counterpart (for bidirectional links)
+        if is_bidirectional and counterpart_id not in updated_ids:
+            conn.execute(
+                update(noun_metadata)
+                .where(noun_metadata.c.lemma_id == counterpart_id)
+                .values(counterpart_lemma_id=word_id)
+            )
+            updated_ids.add(counterpart_id)
+            stats["linked_bidirectional"] += 1
+        else:
+            stats["linked_unidirectional"] += 1
+
+    return stats
+
+
+def link_noun_derivations(
+    conn: Connection,
+    jsonl_path: Path,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
+    """Link derived nouns to their base lemmas (gattino→gatto).
+
+    Scans Wiktextract for entries with diminutive/augmentative/pejorative tags
+    and creates links to their base lemmas. Also updates derivation_type in
+    noun_metadata.
+
+    Data sources used:
+    1. form_of entries with "diminutive", "augmentative", or "pejorative" tags
+    2. Glosses like "diminutive of gatto"
+
+    Args:
+        conn: SQLAlchemy connection
+        jsonl_path: Path to Wiktextract JSONL file
+        progress_callback: Optional callback for progress reporting (current, total)
+
+    Returns:
+        Statistics dict with counts by derivation type
+    """
+    stats = {
+        "scanned": 0,
+        "derivations_found": 0,
+        "linked": 0,
+        "base_not_found": 0,
+        "diminutive": 0,
+        "augmentative": 0,
+        "pejorative": 0,
+    }
+
+    # Build lookup: written_form -> lemma_id for nouns
+    result = conn.execute(
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == "noun")
+    )
+    noun_lookup: dict[str, int] = {}
+    for row in result:
+        written = row.written or derive_written_from_stressed(row.stressed)
+        if written is not None:
+            noun_lookup[written] = row.id
+
+    # Count lines for progress
+    total_lines = _count_lines(jsonl_path) if progress_callback else 0
+    current_line = 0
+
+    with jsonl_path.open(encoding="utf-8") as f:
+        for line in f:
+            current_line += 1
+            if progress_callback and current_line % 10000 == 0:
+                progress_callback(current_line, total_lines)
+
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            # Only process noun entries
+            if entry.get("pos") != "noun":
+                continue
+
+            stats["scanned"] += 1
+            word = entry.get("word", "")
+
+            # Look for derivation relationships in senses
+            for sense in entry.get("senses", []):
+                tags = sense.get("tags", [])
+                glosses = sense.get("glosses", [])
+                gloss = glosses[0] if glosses else ""
+
+                # Determine derivation type from tags
+                derivation_type = None
+                if "diminutive" in tags:
+                    derivation_type = "diminutive"
+                elif "augmentative" in tags:
+                    derivation_type = "augmentative"
+                elif "pejorative" in tags:
+                    derivation_type = "pejorative"
+
+                # Also check gloss patterns if no tag
+                if derivation_type is None:
+                    if "diminutive of " in gloss.lower():
+                        derivation_type = "diminutive"
+                    elif "augmentative of " in gloss.lower():
+                        derivation_type = "augmentative"
+                    elif "pejorative of " in gloss.lower():
+                        derivation_type = "pejorative"
+
+                if derivation_type is None:
+                    continue
+
+                # Extract base word from form_of or gloss
+                base_word = None
+                form_of_list = sense.get("form_of", [])
+                if form_of_list:
+                    base_word = form_of_list[0].get("word")
+
+                if base_word is None:
+                    # Try to extract from gloss
+                    for pattern in [
+                        "diminutive of ",
+                        "augmentative of ",
+                        "pejorative of ",
+                    ]:
+                        if pattern in gloss.lower():
+                            idx = gloss.lower().find(pattern)
+                            base_word = gloss[idx + len(pattern) :].strip()
+                            # Clean up
+                            base_word = base_word.split(",")[0].strip()
+                            base_word = base_word.split(";")[0].strip()
+                            base_word = base_word.split(" ")[0].strip()
+                            break
+
+                if base_word is None:
+                    continue
+
+                stats["derivations_found"] += 1
+
+                # Look up both lemmas
+                word_written = derive_written_from_stressed(word)
+                base_written = derive_written_from_stressed(base_word)
+
+                if word_written is None or base_written is None:
+                    stats["base_not_found"] += 1
+                    continue
+
+                word_id = noun_lookup.get(word_written)
+                base_id = noun_lookup.get(base_written)
+
+                if word_id is None or base_id is None:
+                    stats["base_not_found"] += 1
+                    continue
+
+                # Update noun_metadata
+                conn.execute(
+                    update(noun_metadata)
+                    .where(noun_metadata.c.lemma_id == word_id)
+                    .values(
+                        base_lemma_id=base_id,
+                        derivation_type=derivation_type,
+                    )
+                )
+                stats["linked"] += 1
+                stats[derivation_type] += 1
+                break  # Only process first derivation relationship per entry
+
+    if progress_callback:
+        progress_callback(total_lines, total_lines)
+
+    return stats
+
+
 def import_adjective_allomorphs(
     conn: Connection,
     jsonl_path: Path,
@@ -3064,9 +3392,17 @@ def import_adjective_allomorphs(
         "hardcoded_added": 0,
     }
 
-    # Build lookup: normalized lemma -> lemma_id for adjectives
-    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "adjective"))
-    adj_lookup = {normalize(row.stressed): row.id for row in result}
+    # Build lookup: written_form -> lemma_id for adjectives
+    # Use written form (not normalized stressed) to preserve orthographic distinctions.
+    # Fall back to derive_written_from_stressed() if written is not yet populated.
+    result = conn.execute(
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == "adjective")
+    )
+    adj_lookup: dict[str, int] = {}
+    for row in result:
+        written = row.written or derive_written_from_stressed(row.stressed)
+        if written is not None:
+            adj_lookup[written] = row.id
 
     # Count lines for progress
     total_lines = _count_lines(jsonl_path) if progress_callback else 0
@@ -3137,7 +3473,12 @@ def import_adjective_allomorphs(
             if not parent_word:
                 continue
 
-            parent_id = adj_lookup.get(normalize(parent_word))
+            # Look up parent by written form
+            parent_written = derive_written_from_stressed(parent_word)
+            if parent_written is None:
+                stats["parent_not_found"] += 1
+                continue
+            parent_id = adj_lookup.get(parent_written)
             if parent_id is None:
                 stats["parent_not_found"] += 1
                 continue
@@ -3186,7 +3527,9 @@ def import_adjective_allomorphs(
 
     # Import hardcoded allomorph forms (not in Wiktextract or Morphit adjective data)
     for form, parent_lemma, gender, number, label in HARDCODED_ALLOMORPH_FORMS:
-        parent_id = adj_lookup.get(normalize(parent_lemma))
+        # Look up parent by written form
+        parent_written = derive_written_from_stressed(parent_lemma)
+        parent_id = adj_lookup.get(parent_written) if parent_written else None
         if parent_id is None:
             continue
 
@@ -3261,9 +3604,17 @@ def import_noun_allomorphs(
         "hardcoded_added": 0,
     }
 
-    # Build lookup: normalized lemma -> lemma_id for nouns
-    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "noun"))
-    noun_lookup = {normalize(row.stressed): row.id for row in result}
+    # Build lookup: written_form -> lemma_id for nouns
+    # Use written form (not normalized stressed) to preserve orthographic distinctions.
+    # Fall back to derive_written_from_stressed() if written is not yet populated.
+    result = conn.execute(
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == "noun")
+    )
+    noun_lookup: dict[str, int] = {}
+    for row in result:
+        written = row.written or derive_written_from_stressed(row.stressed)
+        if written is not None:
+            noun_lookup[written] = row.id
 
     # Count lines for progress
     total_lines = _count_lines(jsonl_path) if progress_callback else 0
@@ -3312,7 +3663,12 @@ def import_noun_allomorphs(
             if not parent_word or not gender:
                 continue
 
-            parent_id = noun_lookup.get(normalize(parent_word))
+            # Look up parent by written form
+            parent_written = derive_written_from_stressed(parent_word)
+            if parent_written is None:
+                stats["parent_not_found"] += 1
+                continue
+            parent_id = noun_lookup.get(parent_written)
             if parent_id is None:
                 stats["parent_not_found"] += 1
                 continue
@@ -3356,7 +3712,9 @@ def import_noun_allomorphs(
 
     # Import hardcoded noun allomorphs
     for form, parent_lemma, gender, number in HARDCODED_NOUN_ALLOMORPHS:
-        parent_id = noun_lookup.get(normalize(parent_lemma))
+        # Look up parent by written form
+        parent_written = derive_written_from_stressed(parent_lemma)
+        parent_id = noun_lookup.get(parent_written) if parent_written else None
         if parent_id is None:
             continue
 
