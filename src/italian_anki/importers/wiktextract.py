@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Connection, func, select, update
+from sqlalchemy.exc import IntegrityError
 
 from italian_anki.articles import get_definite
 from italian_anki.db.schema import (
@@ -3953,5 +3954,306 @@ def generate_gendered_participles(
 
     if progress_callback:
         progress_callback(total, total)
+
+    return stats
+
+
+def _synthesize_feminine_plural(f_sg: str) -> str | None:
+    """Synthesize the feminine plural form from the feminine singular.
+
+    Applies Italian morphological rules for feminine noun pluralization.
+    These rules are 100% regular for derived feminines (gender-variable nouns).
+
+    Rules (in priority order):
+    - -trice → -trici (attrice → attrici)
+    - -essa → -esse (professoressa → professoresse)
+    - vowel + -cia → -cie (lucia → lucie)
+    - consonant + -cia → -ce (guercia → guerce)
+    - vowel + -gia → -gie (frigia → frigie)
+    - consonant + -gia → -ge (carolingia → carolinge)
+    - -ca → -che (ricca → ricche)
+    - -ga → -ghe (collega → colleghe)
+    - -ia → -ie (usuaria → usuarie)
+    - -a → -e (default: pazza → pazze)
+
+    Args:
+        f_sg: The feminine singular form
+
+    Returns:
+        The feminine plural form, or None if synthesis fails
+    """
+    if not f_sg:
+        return None
+
+    # Skip multi-word expressions (contain space)
+    if " " in f_sg:
+        return None
+
+    # Skip invariables (same as m.sg) - handle at caller level
+    # Skip typos ending in -tice/-trive - handle at caller level
+
+    # -trice → -trici
+    if f_sg.endswith("trice"):
+        return f_sg[:-1] + "i"  # trice → trici
+
+    # -essa → -esse
+    if f_sg.endswith("essa"):
+        return f_sg[:-1] + "e"  # essa → esse
+
+    # -cia / -gia (tricky - depends on preceding letter)
+    if f_sg.endswith("cia") and len(f_sg) > 3:
+        preceding = f_sg[-4]
+        if preceding.lower() in "aeiouàèéìòóù":
+            return f_sg[:-1] + "e"  # vowel + cia → cie
+        else:
+            return f_sg[:-2] + "e"  # consonant + cia → ce
+
+    if f_sg.endswith("gia") and len(f_sg) > 3:
+        preceding = f_sg[-4]
+        if preceding.lower() in "aeiouàèéìòóù":
+            return f_sg[:-1] + "e"  # vowel + gia → gie
+        else:
+            return f_sg[:-2] + "e"  # consonant + gia → ge
+
+    # -ca → -che
+    if f_sg.endswith("ca"):
+        return f_sg[:-2] + "che"
+
+    # -ga → -ghe
+    if f_sg.endswith("ga"):
+        return f_sg[:-2] + "ghe"
+
+    # -ia → -ie
+    if f_sg.endswith("ia"):
+        return f_sg[:-1] + "e"
+
+    # Default: -a → -e
+    if f_sg.endswith("a"):
+        return f_sg[:-1] + "e"
+
+    # Non -a endings (rare: -e like -trice handled above)
+    # For safety, return None
+    return None
+
+
+def enrich_missing_feminine_plurals(
+    conn: Connection,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
+    """Add missing feminine plural forms to common_gender_variable nouns.
+
+    This enrichment phase:
+    1. Finds nouns with f.sg but missing f.pl
+    2. First tries to copy f.pl from matching adjective forms (verified data)
+    3. For remaining nouns, synthesizes f.pl using Italian pluralization rules
+
+    The synthesis is safe because:
+    - Italian feminine plurals are 100% regular
+    - The affected nouns are gender-variable (derived forms), not standalone feminines
+    - Known irregulars (mano, ala, arma, etc.) are standalone feminines, not in this set
+
+    Args:
+        conn: SQLAlchemy connection
+        progress_callback: Optional callback for progress reporting (current, total)
+
+    Returns:
+        Statistics dict with counts
+    """
+    stats = {
+        "total_missing": 0,
+        "copied_from_adjective": 0,
+        "synthesized": 0,
+        "skipped_invariable": 0,
+        "skipped_multiword": 0,
+        "skipped_typo": 0,
+        "skipped_synthesis_failed": 0,
+    }
+
+    # Phase 1: Find all nouns with missing f.pl
+    # Query: common_gender_variable nouns with f.sg but no f.pl
+    missing_query = (
+        select(
+            lemmas.c.id.label("noun_lemma_id"),
+            lemmas.c.written.label("lemma_written"),
+            noun_forms.c.written.label("f_sg_written"),
+            noun_forms.c.stressed.label("f_sg_stressed"),
+        )
+        .select_from(
+            noun_metadata.join(lemmas, noun_metadata.c.lemma_id == lemmas.c.id).join(
+                noun_forms, noun_forms.c.lemma_id == lemmas.c.id
+            )
+        )
+        .where(
+            noun_metadata.c.gender_class == "common_gender_variable",
+            noun_forms.c.gender == "f",
+            noun_forms.c.number == "singular",
+        )
+        .distinct()
+    )
+
+    # Get all candidates
+    candidates: list[Any] = []
+    for row in conn.execute(missing_query):
+        # Check if f.pl already exists
+        exists = conn.execute(
+            select(func.count())
+            .select_from(noun_forms)
+            .where(
+                noun_forms.c.lemma_id == row.noun_lemma_id,
+                noun_forms.c.gender == "f",
+                noun_forms.c.number == "plural",
+            )
+        ).scalar()
+        if exists == 0:
+            candidates.append(row)
+
+    stats["total_missing"] = len(candidates)
+
+    if progress_callback:
+        progress_callback(0, len(candidates))
+
+    # Phase 2: Build adjective f.pl lookup
+    # Map: lemma_written -> (written, stressed) from adjective_forms
+    adj_f_pl_lookup: dict[str, tuple[str | None, str]] = {}
+    adj_query = (
+        select(
+            lemmas.c.written.label("lemma_written"),
+            adjective_forms.c.written,
+            adjective_forms.c.stressed,
+        )
+        .select_from(lemmas.join(adjective_forms, adjective_forms.c.lemma_id == lemmas.c.id))
+        .where(
+            adjective_forms.c.gender == "f",
+            adjective_forms.c.number == "plural",
+            adjective_forms.c.degree == "positive",  # Only base forms
+        )
+    )
+    for row in conn.execute(adj_query):
+        # Use first match if multiple (shouldn't happen for well-formed data)
+        if row.lemma_written not in adj_f_pl_lookup:
+            adj_f_pl_lookup[row.lemma_written] = (row.written, row.stressed)
+
+    # Phase 3: Process each candidate
+    for i, candidate in enumerate(candidates):
+        if progress_callback and i % 100 == 0:
+            progress_callback(i, len(candidates))
+
+        noun_lemma_id: int = candidate.noun_lemma_id
+        lemma_written: str = candidate.lemma_written
+        f_sg_written: str | None = candidate.f_sg_written
+        f_sg_stressed: str = candidate.f_sg_stressed
+
+        # Try to copy from adjective first
+        if lemma_written in adj_f_pl_lookup:
+            adj_written, adj_stressed = adj_f_pl_lookup[lemma_written]
+
+            # Compute article
+            def_article, article_source = get_definite(adj_stressed, "f", "plural")
+
+            # Derive written form if not available
+            written = adj_written
+            written_source = None
+            if written is None:
+                written = derive_written_from_stressed(adj_stressed)
+                if written is not None:
+                    written_source = "derived:orthography_rule"
+
+            # Insert the form
+            try:
+                conn.execute(
+                    noun_forms.insert().values(
+                        lemma_id=noun_lemma_id,
+                        written=written,
+                        written_source=written_source,
+                        stressed=adj_stressed,
+                        gender="f",
+                        number="plural",
+                        labels=None,
+                        derivation_type=None,
+                        meaning_hint=None,
+                        def_article=def_article,
+                        article_source=article_source,
+                        form_origin="copied:adjective_f_pl",
+                        is_citation_form=False,
+                    )
+                )
+                stats["copied_from_adjective"] += 1
+            except IntegrityError:
+                # Duplicate form already exists (constraint violation)
+                pass
+            continue
+
+        # No adjective form - try to synthesize
+        # Use stressed form for synthesis (may have accents)
+        f_sg: str | None = f_sg_stressed or f_sg_written
+        if not f_sg:
+            stats["skipped_synthesis_failed"] += 1
+            continue
+
+        # Skip multi-word expressions
+        if " " in f_sg:
+            stats["skipped_multiword"] += 1
+            continue
+
+        # Skip typos ending in -tice/-trive (should be -trice)
+        if f_sg.endswith("tice") or f_sg.endswith("trive"):
+            stats["skipped_typo"] += 1
+            continue
+
+        # Skip invariables (f.sg = m.sg would mean same form for both)
+        # Check by looking for m.sg with same form
+        m_sg_result = conn.execute(
+            select(noun_forms.c.stressed)
+            .where(
+                noun_forms.c.lemma_id == noun_lemma_id,
+                noun_forms.c.gender == "m",
+                noun_forms.c.number == "singular",
+            )
+            .limit(1)
+        ).first()
+        if m_sg_result and m_sg_result.stressed == f_sg:
+            stats["skipped_invariable"] += 1
+            continue
+
+        # Synthesize f.pl
+        f_pl_stressed = _synthesize_feminine_plural(f_sg)
+        if f_pl_stressed is None:
+            stats["skipped_synthesis_failed"] += 1
+            continue
+
+        # Derive written form
+        f_pl_written = derive_written_from_stressed(f_pl_stressed)
+        written_source = "derived:orthography_rule" if f_pl_written is not None else None
+
+        # Compute article
+        def_article, article_source = get_definite(f_pl_stressed, "f", "plural")
+
+        # Insert the synthesized form
+        try:
+            conn.execute(
+                noun_forms.insert().values(
+                    lemma_id=noun_lemma_id,
+                    written=f_pl_written,
+                    written_source=written_source,
+                    stressed=f_pl_stressed,
+                    gender="f",
+                    number="plural",
+                    labels=None,
+                    derivation_type=None,
+                    meaning_hint=None,
+                    def_article=def_article,
+                    article_source=article_source,
+                    form_origin="inferred:f_pl_from_f_sg",
+                    is_citation_form=False,
+                )
+            )
+            stats["synthesized"] += 1
+        except IntegrityError:
+            # Duplicate form already exists (constraint violation)
+            pass
+
+    if progress_callback:
+        progress_callback(len(candidates), len(candidates))
 
     return stats

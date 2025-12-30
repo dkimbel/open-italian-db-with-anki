@@ -41,6 +41,7 @@ from italian_anki.importers.morphit import (
 from italian_anki.importers.wiktextract import (
     enrich_form_spelling_from_form_of,
     enrich_from_form_of,
+    enrich_missing_feminine_plurals,
     generate_gendered_participles,
     import_adjective_allomorphs,
     import_noun_allomorphs,
@@ -496,14 +497,14 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     print()
 
     pos_list = ["verb", "noun", "adjective"]
-    total_pos = len(pos_list)
+    total_phases = 5  # 3 POS + post-processing + Tatoeba
     indent = "    "
 
     # Import each POS
     for pos_idx, pos in enumerate(pos_list, 1):
         pos_plural = POS_PLURAL[pos]
         print("=" * 80)
-        print(f"Importing {pos_plural} (Step {pos_idx} of {total_pos})")
+        print(f"Importing {pos_plural} (Step {pos_idx} of {total_phases})")
         print("=" * 80)
         print()
 
@@ -605,20 +606,20 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Hardcoded added:      {stats['hardcoded_added']:,}")
                 print()
 
-            # Step 6 (noun/verb), Step 7 (adjective): Form-of spelling fallback
+            # Step 6 (verb/noun), Step 7 (adjective): Form-of spelling fallback
             step_formof = 7 if pos == "adjective" else 6
             print(f"[{step_formof}/{total_steps}] Enriching form spelling from form-of entries...")
             _run_formof_spelling_enrichment(conn, jsonl_path, pos, indent=indent)
             print()
 
-            # Step 7 (noun/verb), Step 8 (adjective): Unstressed fallback (for all POS)
+            # Step 7 (verb/noun), Step 8 (adjective): Unstressed fallback (for all POS)
             step_unstressed = 8 if pos == "adjective" else 7
             print(f"[{step_unstressed}/{total_steps}] Applying unstressed form fallback...")
             stats = apply_unstressed_fallback(conn, pos_filter=pos)
             print(f"{indent}Forms updated: {stats['updated']:,}")
             print()
 
-            # Step 8 (noun/verb), Step 9 (adjective): Orthography-based written derivation
+            # Step 8 (verb/noun), Step 9 (adjective): Orthography-based written derivation
             step_ortho = 9 if pos == "adjective" else 8
             print(f"[{step_ortho}/{total_steps}] Applying orthography-based written derivation...")
             stats = apply_orthography_fallback(conn, pos_filter=pos)
@@ -628,7 +629,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Failed:        {stats['failed']:,}")
             print()
 
-            # Step 9 (noun/verb), Step 10 (adjective): ItWaC frequency import
+            # Step 9 (verb/noun), Step 10 (adjective): ItWaC frequency import
             step_itwac = 10 if pos == "adjective" else 9
             csv_filename = ITWAC_CSV_FILES.get(pos)
             if csv_filename:
@@ -641,9 +642,28 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"[{step_itwac}/{total_steps}] Skipped: No ItWaC file for this POS")
             print()
 
+    # Post-processing: Cross-POS enrichments
+    print("=" * 80)
+    print("Post-processing enrichments (Step 4 of 5)")
+    print("=" * 80)
+    print()
+
+    with get_connection(db_path) as conn:
+        # Enrich missing feminine plurals (needs adjective forms to exist first)
+        print("Enriching missing feminine plural forms...")
+        stats = enrich_missing_feminine_plurals(conn, progress_callback=_make_progress_callback())
+        print()
+        print(f"  Missing f.pl found:    {stats['total_missing']:,}")
+        print(f"  Copied from adjective: {stats['copied_from_adjective']:,}")
+        print(f"  Synthesized:           {stats['synthesized']:,}")
+        print(f"  Skipped (multi-word):  {stats['skipped_multiword']:,}")
+        print(f"  Skipped (invariable):  {stats['skipped_invariable']:,}")
+        print(f"  Skipped (typo):        {stats['skipped_typo']:,}")
+    print()
+
     # Final step: Tatoeba sentences (for all POS)
     print("=" * 80)
-    print("Importing Tatoeba sentences")
+    print("Importing Tatoeba sentences (Step 5 of 5)")
     print("=" * 80)
     print()
     print("Importing sentences...")
