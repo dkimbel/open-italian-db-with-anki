@@ -715,9 +715,9 @@ class TestUnstressedFallback:
                 for row in form_rows:
                     # Accented forms should NOT have been updated
                     # (fallback should skip forms with accents in stressed)
-                    assert (
-                        row.written_source != "fallback:no_accent"
-                    ), "Accented form should not get fallback"
+                    assert row.written_source != "fallback:no_accent", (
+                        "Accented form should not get fallback"
+                    )
 
         finally:
             db_path.unlink()

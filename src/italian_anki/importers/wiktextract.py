@@ -2642,11 +2642,18 @@ def enrich_from_form_of(
         msg = f"Unsupported POS: {pos_filter}"
         raise ValueError(msg)
 
-    # Build lemma lookup: normalized_lemma -> lemma_id
+    # Build lemma lookup: written_form -> lemma_id
+    # Use written form (not normalized stressed) to preserve orthographic distinctions
+    # like metà (half) vs meta (goal). Fall back to derive_written_from_stressed()
+    # if written column is not yet populated (e.g., during early import stages).
     lemma_result = conn.execute(
-        select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == pos_filter)
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == pos_filter)
     )
-    lemma_lookup: dict[str, int] = {normalize(row.stressed): row.id for row in lemma_result}
+    lemma_lookup: dict[str, int] = {}
+    for row in lemma_result:
+        written = row.written or derive_written_from_stressed(row.stressed)
+        if written is not None:
+            lemma_lookup[written] = row.id
 
     # Build form lookup: (lemma_id, normalized_form) -> list of form_ids
     form_result = conn.execute(
@@ -2690,9 +2697,13 @@ def enrich_from_form_of(
 
                 stats["with_labels"] += 1
 
-                # Look up lemma
-                lemma_normalized = normalize(lemma_word)
-                lemma_id = lemma_lookup.get(lemma_normalized)
+                # Look up lemma by its written form
+                # Wiktextract may use stressed forms, so derive written form first
+                lemma_written = derive_written_from_stressed(lemma_word)
+                if lemma_written is None:
+                    stats["not_found"] += 1
+                    continue
+                lemma_id = lemma_lookup.get(lemma_written)
                 if lemma_id is None:
                     stats["not_found"] += 1
                     continue
@@ -2754,11 +2765,18 @@ def enrich_form_spelling_from_form_of(
         msg = f"Unsupported POS: {pos_filter}"
         raise ValueError(msg)
 
-    # Build lemma lookup: normalized_lemma -> lemma_id
+    # Build lemma lookup: written_form -> lemma_id
+    # Use written form (not normalized stressed) to preserve orthographic distinctions
+    # like metà (half) vs meta (goal). Fall back to derive_written_from_stressed()
+    # if written column is not yet populated (e.g., during early import stages).
     lemma_result = conn.execute(
-        select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == pos_filter)
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == pos_filter)
     )
-    lemma_lookup: dict[str, int] = {normalize(row.stressed): row.id for row in lemma_result}
+    lemma_lookup: dict[str, int] = {}
+    for row in lemma_result:
+        written = row.written or derive_written_from_stressed(row.stressed)
+        if written is not None:
+            lemma_lookup[written] = row.id
 
     # Build form lookup: (lemma_id, normalized_form) -> list of form_ids
     # Only include forms where written IS NULL (not already filled by Morph-it!)
@@ -2814,9 +2832,13 @@ def enrich_form_spelling_from_form_of(
                     if not lemma_word:
                         continue
 
-                    # Look up lemma
-                    lemma_normalized = normalize(lemma_word)
-                    lemma_id = lemma_lookup.get(lemma_normalized)
+                    # Look up lemma by its written form
+                    # Wiktextract may use stressed forms, so derive written form first
+                    lemma_written = derive_written_from_stressed(lemma_word)
+                    if lemma_written is None:
+                        stats["not_found"] += 1
+                        continue
+                    lemma_id = lemma_lookup.get(lemma_written)
                     if lemma_id is None:
                         stats["not_found"] += 1
                         continue
@@ -2869,13 +2891,30 @@ def link_comparative_superlative(
     if not degree_links:
         return stats
 
-    # Build lookup: normalized lemma -> lemma_id for adjectives
-    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "adjective"))
-    lemma_lookup = {normalize(row.stressed): row.id for row in result}
+    # Build lookup: written_form -> lemma_id for adjectives
+    # Use written form (not normalized stressed) to preserve orthographic distinctions.
+    # Fall back to derive_written_from_stressed() if written is not yet populated.
+    result = conn.execute(
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == "adjective")
+    )
+    lemma_lookup: dict[str, int] = {}
+    for row in result:
+        written = row.written or derive_written_from_stressed(row.stressed)
+        if written is not None:
+            lemma_lookup[written] = row.id
 
     for lemma_id, base_word, relationship, source in degree_links:
-        base_normalized = normalize(base_word)
-        base_lemma_id = lemma_lookup.get(base_normalized)
+        # Derive written form from base_word (which may have pedagogical stress)
+        base_written = derive_written_from_stressed(base_word)
+        if base_written is None:
+            logger.warning(
+                "Failed to derive written form for base lemma '%s' (source: %s)",
+                base_word,
+                source,
+            )
+            stats["base_not_found"] += 1
+            continue
+        base_lemma_id = lemma_lookup.get(base_written)
 
         if base_lemma_id is None:
             logger.warning(
@@ -2918,11 +2957,19 @@ def link_pronominal_verbs(conn: Connection) -> dict[str, int]:
         "base_form_parse_failed": 0,
     }
 
-    # Build lookup: normalized stressed form → lemma_id for all verbs
-    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "verb"))
-    lemma_lookup = {normalize(row.stressed): row.id for row in result}
+    # Build lookup: written_form → lemma_id for all verbs
+    # Use written form (not normalized stressed) to preserve orthographic distinctions.
+    # Fall back to derive_written_from_stressed() if written is not yet populated.
+    result = conn.execute(
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == "verb")
+    )
+    lemma_lookup: dict[str, int] = {}
+    for row in result:
+        written = row.written or derive_written_from_stressed(row.stressed)
+        if written is not None:
+            lemma_lookup[written] = row.id
 
-    # Also get stressed forms for pronominal detection
+    # Get stressed forms for pronominal detection
     result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "verb"))
 
     for row in result:
@@ -2947,9 +2994,19 @@ def link_pronominal_verbs(conn: Connection) -> dict[str, int]:
             stats["inherent_pronominal"] += 1
             continue
 
-        # Look up the base verb
-        base_normalized = normalize(base_form)
-        base_lemma_id = lemma_lookup.get(base_normalized)
+        # Look up the base verb by its written form
+        # base_form comes from _get_pronominal_base_form and may have pedagogical stress
+        base_written = derive_written_from_stressed(base_form)
+        if base_written is None:
+            # Failed to derive written form - treat as inherent pronominal
+            conn.execute(
+                update(verb_metadata)
+                .where(verb_metadata.c.lemma_id == lemma_id)
+                .values(pronominal_type="inherent")
+            )
+            stats["inherent_pronominal"] += 1
+            continue
+        base_lemma_id = lemma_lookup.get(base_written)
 
         if base_lemma_id is not None:
             # Base verb exists - this is a reflexive/reciprocal pronominal
