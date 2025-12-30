@@ -798,6 +798,43 @@ LEMMA_BLOCKLIST: frozenset[str] = frozenset(
     }
 )
 
+# Noun lemmas to skip because they are just plural forms of existing nouns.
+# Wiktionary has separate entries for some plurals, but we don't want them as
+# separate lemmas since they're already covered by the base noun's forms.
+# Each entry was verified to have definitions that are just pluralized versions
+# with no unique meaning beyond the singular.
+# NOTE: NOT blocked (verified homonyms with different meanings):
+# - malti (Maltese language ≠ plural of malto/malt)
+# - pali (Pali language ≠ plural of palo/pole)
+# - tele (TV/telly ≠ plural of tela/canvas)
+# - ditali (type of pasta with unique definition)
+SKIP_PLURAL_NOUN_LEMMAS: frozenset[str] = frozenset(
+    {
+        "antipasti",  # "starters" = plural of antipasto
+        "arrivi",  # "arrivals" = plural of arrivo
+        "bovini",  # "cattle, bovines" = plural of bovino
+        "ceneri",  # "ashes, cinders" = plural of cenere
+        "crostini",  # literally says "plural of crostino"
+        "dati",  # literally says "plural of dato"
+        "melasse",  # literally says "The plural of melassa"
+        "nodi",  # literally says "plural of nodo"
+        "polveri",  # "dusts, powders" = plural of polvere
+        "rispetti",  # "respects" = plural of rispetto
+        "ristoranti",  # "restaurants" = plural of ristorante
+        "salumi",  # just plural of salume
+        "zii",  # literally says "plural of zio"
+        "alcelafini",  # just plural of alcelafino
+    }
+)
+
+# Apocopic forms to skip due to ambiguous/incorrect gender tags in Wiktionary.
+# These are blocked (not imported) rather than corrected because:
+# - "final" (apocopic of "finale") is tagged masculine but parent is feminine
+# - "fin" (apocopic of "fine") is tagged feminine but parent is masculine
+# The Wiktionary data is unreliable for these specific forms.
+# NOTE: This ONLY blocks the apocopic allomorph forms, not any homonyms.
+SKIP_APOCOPIC_ALLOMORPHS: frozenset[str] = frozenset({"final", "fin"})
+
 
 def _parse_entry(line: str) -> dict[str, Any] | None:
     """Parse a JSONL line, returning None if invalid."""
@@ -1780,6 +1817,7 @@ def import_wiktextract(
         "misspellings_skipped": 0,
         "alt_forms_skipped": 0,
         "blocklisted_lemmas": 0,
+        "skipped_plural_duplicate": 0,
         "cleared": cleared,
     }
 
@@ -1969,6 +2007,11 @@ def import_wiktextract(
             # Extract lemma data
             word = entry["word"]
             lemma_stressed = _extract_lemma_stressed(entry)
+
+            # For nouns: skip known duplicate plural lemmas
+            if pos_filter == "noun" and lemma_stressed in SKIP_PLURAL_NOUN_LEMMAS:
+                stats["skipped_plural_duplicate"] += 1
+                continue
 
             # For nouns: pre-check gender info before inserting lemma
             # Skip entries that would result in zero forms (incomplete Wiktionary entries)
@@ -3602,6 +3645,7 @@ def import_noun_allomorphs(
         "parent_not_found": 0,
         "already_in_parent": 0,
         "hardcoded_added": 0,
+        "skipped_apocopic_blocklist": 0,
     }
 
     # Build lookup: written_form -> lemma_id for nouns
@@ -3661,6 +3705,11 @@ def import_noun_allomorphs(
                     break
 
             if not parent_word or not gender:
+                continue
+
+            # Skip blocklisted apocopic forms (incorrect gender tags in source data)
+            if allomorph_word in SKIP_APOCOPIC_ALLOMORPHS:
+                stats["skipped_apocopic_blocklist"] += 1
                 continue
 
             # Look up parent by written form
