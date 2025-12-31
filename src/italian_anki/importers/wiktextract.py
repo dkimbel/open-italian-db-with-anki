@@ -3804,18 +3804,52 @@ def import_adjective_allomorphs(
                 stats["already_in_parent"] += 1
                 continue
 
-            # Add form for all 4 gender/number combinations
-            for gender in ("m", "f"):
+            # Check gender restrictions from the alt-of entry
+            # e.g., moltipara (fonly:1) should only add feminine forms to multipara
+            is_feminine_only = _is_feminine_only_adjective(entry)
+            is_masculine_only = _is_masculine_only_adjective(entry)
+
+            if is_feminine_only:
+                genders: tuple[str, ...] = ("f",)
+            elif is_masculine_only:
+                genders = ("m",)
+            else:
+                genders = ("m", "f")
+
+            # Build form lookup from entry's forms array
+            # e.g., secreto has forms=[secreta (f), secreti (m/p), secrete (f/p)]
+            # The entry word (secreto) is used for m/s; other forms from the array
+            # Note: In Wiktextract, singular forms often lack 'singular' tag - just have gender
+            form_lookup: dict[tuple[str, str], str] = {}
+            for form_entry in entry.get("forms", []):
+                form_text = form_entry.get("form")
+                form_tags = form_entry.get("tags", [])
+                if not form_text:
+                    continue
+                # Determine gender and number from tags
+                form_gender = (
+                    "m" if "masculine" in form_tags else "f" if "feminine" in form_tags else None
+                )
+                # Default to singular if 'plural' not present (common Wiktextract pattern)
+                form_number = "plural" if "plural" in form_tags else "singular"
+                if form_gender and form_number:
+                    form_lookup[(form_gender, form_number)] = form_text
+
+            # Add forms for appropriate gender(s)
+            for gender in genders:
                 for number in ("singular", "plural"):
-                    def_article, article_source = get_definite(allomorph_word, gender, number)
+                    # Use form from lookup if available, otherwise use entry word
+                    # (entry word is typically the m/s citation form)
+                    form_text = form_lookup.get((gender, number), allomorph_word)
+                    def_article, article_source = get_definite(form_text, gender, number)
 
                     try:
                         conn.execute(
                             adjective_forms.insert().values(
                                 lemma_id=parent_id,
-                                written=allomorph_word,
+                                written=form_text,
                                 written_source="wiktionary",
-                                stressed=allomorph_word,
+                                stressed=form_text,
                                 gender=gender,
                                 number=number,
                                 degree="positive",
