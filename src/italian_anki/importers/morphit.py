@@ -215,6 +215,10 @@ def import_morphit(
     2. Updates written (currently NULL) with real spelling in verb_forms/noun_forms/adjective_forms
     3. Adds new entries to form_lookup for Morph-it! normalized forms
 
+    Note: For verbs, Morph-it! has no accented forms, so written values are derived
+    directly from stressed forms during enrich_lemma_written(). This function is
+    a no-op for verbs.
+
     Args:
         conn: SQLAlchemy connection
         morphit_path: Path to morph-it.txt file
@@ -494,6 +498,9 @@ def apply_unstressed_fallback(
 
     Sets written_source='fallback:no_accent' to track provenance.
 
+    Note: For verbs, all written values are derived during enrich_lemma_written(),
+    so there are no NULL values to fill. This function is a no-op for verbs.
+
     Args:
         conn: SQLAlchemy connection
         pos_filter: Part of speech to process (default: "adjective")
@@ -544,6 +551,9 @@ def apply_orthography_fallback(
     Sets written_source to either:
     - 'derived:orthography_rule' for standard derivation
     - 'hardcoded:loanword' for French loanword whitelist matches
+
+    Note: For verbs, all written values are derived during enrich_lemma_written(),
+    so there are no NULL values to fill. This function is a no-op for verbs.
 
     Args:
         conn: SQLAlchemy connection

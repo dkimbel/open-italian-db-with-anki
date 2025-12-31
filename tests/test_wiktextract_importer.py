@@ -22,8 +22,7 @@ from italian_anki.db import (
 )
 from italian_anki.importers.tatoeba import import_tatoeba
 from italian_anki.importers.wiktextract import (
-    enrich_form_spelling_from_form_of,
-    enrich_from_form_of,
+    enrich_from_form_of_entries,
     import_adjective_allomorphs,
     import_noun_allomorphs,
     import_wiktextract,
@@ -1088,12 +1087,12 @@ class TestWiktextractImporter:
                 assert form_row is not None
                 assert form_row.labels is None  # No labels yet
 
-            # Now enrich from form-of entries
+            # Now enrich from form-of entries (combined function)
             with get_connection(db_path) as conn:
-                stats = enrich_from_form_of(conn, jsonl_path)
+                stats = enrich_from_form_of_entries(conn, jsonl_path)
 
             assert stats["scanned"] >= 1
-            assert stats["updated"] >= 1
+            assert stats["labels_updated"] >= 1
 
             # Verify labels was applied
             with get_connection(db_path) as conn:
@@ -1254,13 +1253,13 @@ class TestEnrichFormSpellingFromFormOf:
                 assert form_row.written == "parlo"
                 assert form_row.written_source == "derived:orthography_rule"
 
-            # Run form-of spelling enrichment - should skip since already filled
+            # Run form-of enrichment - spelling should skip since already filled
             with get_connection(db_path) as conn:
-                stats = enrich_form_spelling_from_form_of(conn, jsonl_path)
+                stats = enrich_from_form_of_entries(conn, jsonl_path)
 
-            # Should not update anything since orthography rule already filled it
-            assert stats["updated"] == 0
-            assert stats["already_filled"] > 0
+            # Should not update spelling since orthography rule already filled it
+            assert stats["spelling_updated"] == 0
+            assert stats["spelling_already_filled"] > 0
 
             # Verify written_source is still from orthography rule
             with get_connection(db_path) as conn:
@@ -1320,11 +1319,11 @@ class TestEnrichFormSpellingFromFormOf:
 
             # Run form-of enrichment
             with get_connection(db_path) as conn:
-                stats = enrich_form_spelling_from_form_of(conn, jsonl_path)
+                stats = enrich_from_form_of_entries(conn, jsonl_path)
 
-            # Should not have updated anything (already filled by orthography rule)
-            assert stats["updated"] == 0
-            assert stats["already_filled"] > 0
+            # Should not have updated spelling (already filled by orthography rule)
+            assert stats["spelling_updated"] == 0
+            assert stats["spelling_already_filled"] > 0
 
             # Verify written_source is still from orthography rule
             with get_connection(db_path) as conn:
@@ -1365,11 +1364,11 @@ class TestEnrichFormSpellingFromFormOf:
                 import_wiktextract(conn, jsonl_path)
 
             with get_connection(db_path) as conn:
-                stats = enrich_form_spelling_from_form_of(conn, jsonl_path)
+                stats = enrich_from_form_of_entries(conn, jsonl_path)
 
             # Should count as not found since lemma doesn't exist
-            assert stats["not_found"] > 0
-            assert stats["updated"] == 0
+            assert stats["spelling_not_found"] > 0
+            assert stats["spelling_updated"] == 0
 
         finally:
             db_path.unlink()

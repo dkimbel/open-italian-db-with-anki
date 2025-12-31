@@ -35,6 +35,9 @@ from italian_anki.tags import (
 
 logger = logging.getLogger(__name__)
 
+# Cache for line counts - avoids re-reading large files multiple times
+_line_count_cache: dict[Path, int] = {}
+
 # Mapping from our POS names to Wiktextract's abbreviated names
 WIKTEXTRACT_POS = {
     "verb": "verb",
@@ -1850,9 +1853,16 @@ POS_FORM_BUILDERS = {
 
 
 def _count_lines(path: Path) -> int:
-    """Count lines in a file efficiently."""
-    with path.open(encoding="utf-8") as f:
-        return sum(1 for _ in f)
+    """Count lines in a file efficiently (cached).
+
+    Results are cached by resolved path to avoid re-reading large files
+    multiple times during the import pipeline.
+    """
+    resolved = path.resolve()
+    if resolved not in _line_count_cache:
+        with path.open(encoding="utf-8") as f:
+            _line_count_cache[resolved] = sum(1 for _ in f)
+    return _line_count_cache[resolved]
 
 
 def import_wiktextract(
@@ -2755,18 +2765,25 @@ def _extract_form_of_info(
                 yield form_word, lemma_word, labels
 
 
-def enrich_from_form_of(
+def enrich_from_form_of_entries(
     conn: Connection,
     jsonl_path: Path,
     *,
     pos_filter: str = "verb",
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
-    """Enrich forms with labels from form-of entries.
+    """Extract labels and spelling from form-of entries in a single pass.
 
-    This second pass scans form-of entries (which we skip during main import)
-    to extract labels (literary, archaic, regional, etc.) and apply
-    them to existing forms in the database.
+    This combined function scans form-of entries (which we skip during main import)
+    and performs two enrichments in a single pass:
+
+    1. Labels: Extract usage labels (literary, archaic, regional, etc.) and apply
+       them to existing forms where labels IS NULL.
+
+    2. Spelling: Use the entry's 'word' field as the written form for forms
+       where written IS NULL (fallback after Morph-it!).
+
+    By combining these operations, we avoid scanning the 620k-line JSONL file twice.
 
     Args:
         conn: SQLAlchemy connection
@@ -2775,11 +2792,26 @@ def enrich_from_form_of(
         progress_callback: Optional callback for progress reporting (current, total)
 
     Returns:
-        Statistics dict with counts
+        Statistics dict with counts for both operations:
+        - scanned: form-of entries examined
+        - labels_with_tags: entries with valid label tags
+        - labels_updated: forms updated with labels
+        - labels_not_found: entries where form not found for labels
+        - spelling_updated: forms updated with written spelling
+        - spelling_already_filled: entries where spelling already set
+        - spelling_not_found: entries where form not found for spelling
     """
     from sqlalchemy import update
 
-    stats = {"scanned": 0, "with_labels": 0, "updated": 0, "not_found": 0}
+    stats = {
+        "scanned": 0,
+        "labels_with_tags": 0,
+        "labels_updated": 0,
+        "labels_not_found": 0,
+        "spelling_updated": 0,
+        "spelling_already_filled": 0,
+        "spelling_not_found": 0,
+    }
 
     # Get POS-specific table
     pos_form_table = POS_FORM_TABLES.get(pos_filter)
@@ -2800,143 +2832,45 @@ def enrich_from_form_of(
         if written is not None:
             lemma_lookup[written] = row.id
 
-    # Build form lookup: (lemma_id, normalized_form) -> list of form_ids
-    form_result = conn.execute(
-        select(pos_form_table.c.id, pos_form_table.c.lemma_id, pos_form_table.c.stressed)
+    # Build TWO form lookups with different criteria:
+    #
+    # 1. labels_lookup: ALL forms where labels IS NULL
+    #    Used to apply usage labels from form-of entries
+    #
+    # 2. spelling_lookup: Only forms where written IS NULL
+    #    Used to fill spelling from form-of entries as fallback after Morph-it!
+    #
+    # We need separate lookups because:
+    # - Labels can be applied to any form that doesn't have them yet
+    # - Spelling should only be applied to forms not already filled by Morph-it!
+
+    # Labels lookup: all forms where labels IS NULL
+    labels_result = conn.execute(
+        select(pos_form_table.c.id, pos_form_table.c.lemma_id, pos_form_table.c.stressed).where(
+            pos_form_table.c.labels.is_(None)
+        )
     )
-    form_lookup: dict[tuple[int, str], list[int]] = {}
-    for row in form_result:
+    labels_lookup: dict[tuple[int, str], list[int]] = {}
+    for row in labels_result:
         normalized = normalize(row.stressed)
         key = (row.lemma_id, normalized)
-        if key not in form_lookup:
-            form_lookup[key] = []
-        form_lookup[key].append(row.id)
+        if key not in labels_lookup:
+            labels_lookup[key] = []
+        labels_lookup[key].append(row.id)
 
-    # Map to Wiktextract's POS naming
-    wiktextract_pos = WIKTEXTRACT_POS.get(pos_filter, pos_filter)
-
-    # Count lines for progress if callback provided
-    total_lines = _count_lines(jsonl_path) if progress_callback else 0
-    current_line = 0
-
-    with jsonl_path.open(encoding="utf-8") as f:
-        for line in f:
-            current_line += 1
-            if progress_callback and current_line % 10000 == 0:
-                progress_callback(current_line, total_lines)
-
-            entry = _parse_entry(line)
-            if entry is None:
-                continue
-
-            # Only process form-of entries for our POS
-            if not _is_form_of_entry(entry, wiktextract_pos):
-                continue
-
-            stats["scanned"] += 1
-
-            # Extract form-of info and apply labels
-            for form_word, lemma_word, labels in _extract_form_of_info(entry):
-                if labels is None:
-                    continue
-
-                stats["with_labels"] += 1
-
-                # Look up lemma by its written form
-                # Wiktextract may use stressed forms, so derive written form first
-                lemma_written = derive_written_from_stressed(lemma_word)
-                if lemma_written is None:
-                    stats["not_found"] += 1
-                    continue
-                lemma_id = lemma_lookup.get(lemma_written)
-                if lemma_id is None:
-                    stats["not_found"] += 1
-                    continue
-
-                # Look up form
-                form_normalized = normalize(form_word)
-                key = (lemma_id, form_normalized)
-                form_ids = form_lookup.get(key)
-                if not form_ids:
-                    stats["not_found"] += 1
-                    continue
-
-                # Update labels for all matching forms (where labels is NULL)
-                for form_id in form_ids:
-                    result = conn.execute(
-                        update(pos_form_table)
-                        .where(pos_form_table.c.id == form_id)
-                        .where(pos_form_table.c.labels.is_(None))
-                        .values(labels=labels)
-                    )
-                    if result.rowcount > 0:
-                        stats["updated"] += 1
-
-    # Final progress callback
-    if progress_callback:
-        progress_callback(total_lines, total_lines)
-
-    return stats
-
-
-def enrich_form_spelling_from_form_of(
-    conn: Connection,
-    jsonl_path: Path,
-    *,
-    pos_filter: str = "verb",
-    progress_callback: Callable[[int, int], None] | None = None,
-) -> dict[str, int]:
-    """Fill form column from form-of entries where Morph-it! didn't have it.
-
-    This is a fallback enrichment that runs after Morph-it! to fill
-    the 'form' column using the spelling from Wiktionary form-of entries.
-
-    Args:
-        conn: SQLAlchemy connection
-        jsonl_path: Path to the Wiktextract JSONL file
-        pos_filter: Part of speech to enrich (default: "verb")
-        progress_callback: Optional callback for progress reporting (current, total)
-
-    Returns:
-        Statistics dict with counts
-    """
-    from sqlalchemy import update
-
-    stats = {"scanned": 0, "updated": 0, "already_filled": 0, "not_found": 0}
-
-    # Get POS-specific table
-    pos_form_table = POS_FORM_TABLES.get(pos_filter)
-    if pos_form_table is None:
-        msg = f"Unsupported POS: {pos_filter}"
-        raise ValueError(msg)
-
-    # Build lemma lookup: written_form -> lemma_id
-    # Use written form (not normalized stressed) to preserve orthographic distinctions
-    # like metà (half) vs meta (goal). Fall back to derive_written_from_stressed()
-    # if written column is not yet populated (e.g., during early import stages).
-    lemma_result = conn.execute(
-        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == pos_filter)
-    )
-    lemma_lookup: dict[str, int] = {}
-    for row in lemma_result:
-        written = row.written or derive_written_from_stressed(row.stressed)
-        if written is not None:
-            lemma_lookup[written] = row.id
-
-    # Build form lookup: (lemma_id, normalized_form) -> list of form_ids
-    # Only include forms where written IS NULL (not already filled by Morph-it!)
-    form_result = conn.execute(
+    # Spelling lookup: only forms where written IS NULL
+    spelling_result = conn.execute(
         select(pos_form_table.c.id, pos_form_table.c.lemma_id, pos_form_table.c.stressed).where(
             pos_form_table.c.written.is_(None)
         )
     )
-    form_lookup: dict[tuple[int, str], list[int]] = {}
-    for row in form_result:
+    spelling_lookup: dict[tuple[int, str], list[int]] = {}
+    for row in spelling_result:
         normalized = normalize(row.stressed)
         key = (row.lemma_id, normalized)
-        if key not in form_lookup:
-            form_lookup[key] = []
-        form_lookup[key].append(row.id)
+        if key not in spelling_lookup:
+            spelling_lookup[key] = []
+        spelling_lookup[key].append(row.id)
 
     # Map to Wiktextract's POS naming
     wiktextract_pos = WIKTEXTRACT_POS.get(pos_filter, pos_filter)
@@ -2966,7 +2900,47 @@ def enrich_form_spelling_from_form_of(
             if not form_word:
                 continue
 
-            # Process each sense's form_of references
+            # =========================================================
+            # PART 1: Extract and apply labels using _extract_form_of_info()
+            # =========================================================
+            for extracted_form, lemma_word, labels in _extract_form_of_info(entry):
+                if labels is None:
+                    continue
+
+                stats["labels_with_tags"] += 1
+
+                # Look up lemma by its written form
+                lemma_written = derive_written_from_stressed(lemma_word)
+                if lemma_written is None:
+                    stats["labels_not_found"] += 1
+                    continue
+                lemma_id = lemma_lookup.get(lemma_written)
+                if lemma_id is None:
+                    stats["labels_not_found"] += 1
+                    continue
+
+                # Look up form
+                form_normalized = normalize(extracted_form)
+                key = (lemma_id, form_normalized)
+                form_ids = labels_lookup.get(key)
+                if not form_ids:
+                    stats["labels_not_found"] += 1
+                    continue
+
+                # Update labels for all matching forms (where labels is NULL)
+                for form_id in form_ids:
+                    result = conn.execute(
+                        update(pos_form_table)
+                        .where(pos_form_table.c.id == form_id)
+                        .where(pos_form_table.c.labels.is_(None))
+                        .values(labels=labels)
+                    )
+                    if result.rowcount > 0:
+                        stats["labels_updated"] += 1
+
+            # =========================================================
+            # PART 2: Extract and apply spelling from form_of references
+            # =========================================================
             for sense in entry.get("senses", []):
                 form_of_list = sense.get("form_of", [])
                 if not form_of_list:
@@ -2978,23 +2952,22 @@ def enrich_form_spelling_from_form_of(
                         continue
 
                     # Look up lemma by its written form
-                    # Wiktextract may use stressed forms, so derive written form first
                     lemma_written = derive_written_from_stressed(lemma_word)
                     if lemma_written is None:
-                        stats["not_found"] += 1
+                        stats["spelling_not_found"] += 1
                         continue
                     lemma_id = lemma_lookup.get(lemma_written)
                     if lemma_id is None:
-                        stats["not_found"] += 1
+                        stats["spelling_not_found"] += 1
                         continue
 
-                    # Look up form (only forms with NULL 'form' are in the lookup)
+                    # Look up form (only forms with NULL written are in the lookup)
                     form_normalized = normalize(form_word)
                     key = (lemma_id, form_normalized)
-                    form_ids = form_lookup.get(key)
+                    form_ids = spelling_lookup.get(key)
                     if not form_ids:
                         # Either already filled by Morph-it! or not found
-                        stats["already_filled"] += 1
+                        stats["spelling_already_filled"] += 1
                         continue
 
                     # Update written and written_source for all matching forms
@@ -3004,10 +2977,10 @@ def enrich_form_spelling_from_form_of(
                             .where(pos_form_table.c.id == form_id)
                             .values(written=form_word, written_source="wiktionary")
                         )
-                        stats["updated"] += 1
+                        stats["spelling_updated"] += 1
 
                     # Remove from lookup to avoid duplicate updates
-                    del form_lookup[key]
+                    del spelling_lookup[key]
 
     # Final progress callback
     if progress_callback:
