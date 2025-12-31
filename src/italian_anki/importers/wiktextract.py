@@ -2285,26 +2285,21 @@ def import_wiktextract(
                     stats["nouns_skipped_no_gender"] += 1
                     continue
 
-            # Insert lemma
-            try:
-                result = conn.execute(
-                    lemmas.insert().values(
-                        written=None,  # Will be filled by enrich_lemma_written()
-                        written_source=None,
-                        stressed=lemma_stressed,
-                        pos=pos_filter,
-                        ipa=_extract_ipa(entry),
-                    )
+            # Insert lemma (no unique constraint - homographs create separate entries)
+            result = conn.execute(
+                lemmas.insert().values(
+                    written=None,  # Will be filled by enrich_lemma_written()
+                    written_source=None,
+                    stressed=lemma_stressed,
+                    pos=pos_filter,
+                    ipa=_extract_ipa(entry),
                 )
-                pk = result.inserted_primary_key
-                if pk is None:
-                    continue
-                lemma_id: int = pk[0]
-                stats["lemmas"] += 1
-            except Exception:
-                # Duplicate lemma - skip
-                stats["skipped"] += 1
+            )
+            pk = result.inserted_primary_key
+            if pk is None:
                 continue
+            lemma_id: int = pk[0]
+            stats["lemmas"] += 1
 
             # Insert POS-specific metadata
             lemma_gender: str | None = None
@@ -4211,7 +4206,7 @@ def generate_gendered_participles(
                     )
                 )
                 stats["forms_generated"] += 1
-            except Exception:
+            except IntegrityError:
                 # Duplicate form (unique constraint violation)
                 stats["duplicates_skipped"] += 1
 

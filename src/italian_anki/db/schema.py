@@ -74,9 +74,9 @@ verb_forms = Table(
     Column("form_origin", Text),  # 'wiktextract', 'inferred:singular', etc.
     # Citation form marker - True for the canonical/dictionary form (infinitive for verbs)
     Column("is_citation_form", Boolean, default=False),
-    # Note: No UNIQUE constraint. SQLite treats NULL != NULL, so constraints with nullable
-    # columns (tense, aspect, person, number, gender) don't prevent duplicates for non-finite
-    # forms. Deduplication is handled at app level via seen_verb_forms dict in wiktextract.py.
+    # Unique constraint via expression index (created in init_db) handles NULLs by using
+    # COALESCE. App-level deduplication via seen_verb_forms still runs for performance,
+    # but the DB constraint ensures integrity.
 )
 
 # Noun forms with grammatical features
@@ -347,4 +347,18 @@ def init_db(engine: Engine) -> None:
                 )
             """)
         )
+
+        # Create unique index for verb_forms using COALESCE to handle NULLs
+        # (SQLAlchemy Index doesn't support expression-based unique constraints)
+        conn.execute(
+            text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_verb_forms_entry ON verb_forms(
+                    lemma_id, stressed, mood,
+                    COALESCE(tense, ''), COALESCE(aspect, ''),
+                    COALESCE(person, 0), COALESCE(number, ''),
+                    COALESCE(gender, ''), is_formal, is_negative
+                )
+            """)
+        )
+
         conn.commit()
