@@ -249,6 +249,12 @@ noun_metadata = Table(
     # 'singularia_tantum' = singular only/uncountable (latte),
     # 'invariable' = same form for both (città)
     Column("number_class", Text, default="standard"),
+    # How number_class was determined:
+    # 'wiktextract' = detected via # marker, category, or identical forms
+    # 'inferred:accented_ending' = word ends in accented vowel (à, è, ì, ò, ù)
+    # 'inferred:greek_si' = word ends in -si (Greek-origin invariables)
+    # 'default' = no signal, defaulted to 'standard'
+    Column("number_class_source", Text),
     # Links to related lemmas
     Column("counterpart_lemma_id", Integer, ForeignKey("lemmas.id")),  # professore↔professoressa
     Column("base_lemma_id", Integer, ForeignKey("lemmas.id")),  # tavolino→tavola

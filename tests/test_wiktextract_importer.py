@@ -1611,6 +1611,167 @@ class TestNounClassification:
                 assert meta is not None
                 assert meta.gender_class == "f"
                 assert meta.number_class == "invariable"
+                # Wiktextract has explicit # marker and category, so source is 'wiktextract'
+                assert meta.number_class_source == "wiktextract"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_invariable_inferred_from_accented_ending(self) -> None:
+        """Test that nouns ending in accented vowel are inferred as invariable."""
+        # Noun without explicit invariable marker, but ends in -tà
+        sample_accessibilita = {
+            "pos": "noun",
+            "word": "accessibilità",
+            "head_templates": [{"args": {"1": "f"}}],  # No # marker!
+            "categories": ["Italian lemmas", "Italian feminine nouns"],
+            "forms": [],  # No forms array
+            "senses": [{"glosses": ["accessibility"], "tags": ["feminine"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([sample_accessibilita])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            assert stats["lemmas"] == 1
+
+            with get_connection(db_path) as conn:
+                lemma = conn.execute(
+                    select(lemmas).where(lemmas.c.stressed == "accessibilità")
+                ).fetchone()
+                assert lemma is not None
+
+                meta = conn.execute(
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == lemma.id)
+                ).fetchone()
+                assert meta is not None
+                assert meta.number_class == "invariable"
+                assert meta.number_class_source == "inferred:accented_ending"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_invariable_inferred_from_greek_si_ending(self) -> None:
+        """Test that nouns ending in -si (Greek origin) are inferred as invariable."""
+        # Noun without explicit invariable marker, but ends in -si
+        sample_analisi = {
+            "pos": "noun",
+            "word": "analisi",
+            "head_templates": [{"args": {"1": "f"}}],  # No # marker!
+            "categories": ["Italian lemmas", "Italian feminine nouns"],
+            "forms": [],  # No forms array
+            "senses": [{"glosses": ["analysis"], "tags": ["feminine"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([sample_analisi])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            assert stats["lemmas"] == 1
+
+            with get_connection(db_path) as conn:
+                lemma = conn.execute(
+                    select(lemmas).where(lemmas.c.stressed == "analisi")
+                ).fetchone()
+                assert lemma is not None
+
+                meta = conn.execute(
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == lemma.id)
+                ).fetchone()
+                assert meta is not None
+                assert meta.number_class == "invariable"
+                assert meta.number_class_source == "inferred:greek_si"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_standard_noun_has_default_source(self) -> None:
+        """Test that regular nouns have 'default' as number_class_source."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_NOUN_MASCULINE])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            assert stats["lemmas"] == 1
+
+            with get_connection(db_path) as conn:
+                lemma = conn.execute(select(lemmas).where(lemmas.c.stressed == "libro")).fetchone()
+                assert lemma is not None
+
+                meta = conn.execute(
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == lemma.id)
+                ).fetchone()
+                assert meta is not None
+                assert meta.number_class == "standard"
+                assert meta.number_class_source == "default"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_ssi_ending_not_treated_as_greek_si(self) -> None:
+        """Test that nouns ending in -ssi are NOT treated as Greek -si invariables."""
+        # A word ending in -ssi should be standard, not invariable
+        sample_rossi = {
+            "pos": "noun",
+            "word": "rossi",  # Ends in -ssi, NOT -si
+            "head_templates": [{"args": {"1": "m"}}],
+            "categories": ["Italian lemmas"],
+            "forms": [],
+            "senses": [{"glosses": ["reds"], "tags": ["masculine"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([sample_rossi])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+
+            assert stats["lemmas"] == 1
+
+            with get_connection(db_path) as conn:
+                lemma = conn.execute(select(lemmas).where(lemmas.c.stressed == "rossi")).fetchone()
+                assert lemma is not None
+
+                meta = conn.execute(
+                    select(noun_metadata).where(noun_metadata.c.lemma_id == lemma.id)
+                ).fetchone()
+                assert meta is not None
+                # Should NOT be invariable - -ssi is excluded from the heuristic
+                assert meta.number_class == "standard"
+                assert meta.number_class_source == "default"
 
         finally:
             db_path.unlink()

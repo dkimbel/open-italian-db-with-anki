@@ -1120,11 +1120,13 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
     Returns a dict with:
     - gender_class: 'm', 'f', 'common_gender_fixed', 'common_gender_variable'
     - number_class: 'standard', 'pluralia_tantum', 'singularia_tantum', 'invariable'
+    - number_class_source: how number_class was determined
     - genders: list of genders present in the forms
     """
     result: dict[str, Any] = {
         "gender_class": None,
         "number_class": "standard",
+        "number_class_source": "default",
         "genders": [],
     }
 
@@ -1134,6 +1136,7 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
     has_counterpart_marker = False  # "f": "+" or "m": "+" indicates forms differ by gender
     is_mfbysense = False  # Different meanings per gender (fine)
     is_invariable = False
+    is_invariable_from_wiktextract = False  # Track if Wiktextract explicitly marked invariable
     is_pluralia_tantum = False
     is_singularia_tantum = False
 
@@ -1146,6 +1149,7 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
             # Check for invariable marker (# in Wiktextract) even without gender
             if "#" in str(args):
                 is_invariable = True
+                is_invariable_from_wiktextract = True
             continue
 
         # Check for common gender markers
@@ -1173,6 +1177,7 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
         # Check for invariable marker (# in Wiktextract)
         if "#" in str(args):
             is_invariable = True
+            is_invariable_from_wiktextract = True
 
         # Check for pluralia tantum (f-p, m-p)
         if gender_arg in ("m-p", "f-p"):
@@ -1191,6 +1196,7 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
             is_singularia_tantum = True
         if "Italian indeclinable nouns" in cat_name:
             is_invariable = True
+            is_invariable_from_wiktextract = True
 
     # Check forms to see if singular/plural have the same text (invariable)
     forms_by_number: dict[str, set[str]] = {"singular": set(), "plural": set()}
@@ -1209,6 +1215,23 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
         and forms_by_number["singular"] == forms_by_number["plural"]
     ):
         is_invariable = True
+        is_invariable_from_wiktextract = True
+
+    # Morphological heuristics for invariable nouns (Italian rules)
+    # These apply only to single words (no spaces/hyphens) and only if
+    # Wiktextract didn't already detect invariability
+    word = entry.get("word", "")
+    if not is_invariable and " " not in word and "-" not in word:
+        # Rule 1: Words ending in accented vowel are always invariable
+        # This is a fundamental rule of Italian morphology with no exceptions
+        if word and word[-1] in "àèìòù":
+            is_invariable = True
+            result["number_class_source"] = "inferred:accented_ending"
+        # Rule 2: Words ending in -si (not -ssi) are Greek-origin invariables
+        # Examples: analisi, crisi, ipotesi, sintesi, tesi
+        elif word.endswith("si") and not word.endswith("ssi"):
+            is_invariable = True
+            result["number_class_source"] = "inferred:greek_si"
 
     # Determine gender_class
     if has_masculine and has_feminine:
@@ -1249,15 +1272,20 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
             result["gender_class"] = simple_gender
             result["genders"] = [simple_gender]
 
-    # Determine number_class
+    # Determine number_class and its source
     if is_pluralia_tantum:
         result["number_class"] = "pluralia_tantum"
+        result["number_class_source"] = "wiktextract"
     elif is_singularia_tantum:
         result["number_class"] = "singularia_tantum"
+        result["number_class_source"] = "wiktextract"
     elif is_invariable:
         result["number_class"] = "invariable"
-    else:
-        result["number_class"] = "standard"
+        # Source was already set by heuristics if applicable, otherwise it's from Wiktextract
+        if is_invariable_from_wiktextract:
+            result["number_class_source"] = "wiktextract"
+        # else: source was already set by the heuristic (accented_ending or greek_si)
+    # else: number_class stays "standard" and source stays "default"
 
     return result
 
@@ -2139,6 +2167,7 @@ def import_wiktextract(
                 assert noun_class is not None
                 gender_class = noun_class.get("gender_class")
                 number_class = noun_class.get("number_class", "standard")
+                number_class_source = noun_class.get("number_class_source", "default")
 
                 if gender_class is None:
                     # No structured classification, but we have gender from fallback extraction
@@ -2151,6 +2180,7 @@ def import_wiktextract(
                             lemma_id=lemma_id,
                             gender_class=gender_class,
                             number_class=number_class,
+                            number_class_source=number_class_source,
                         )
                     )
                     # Set lemma_gender for form generation (fallback for forms without explicit gender)
