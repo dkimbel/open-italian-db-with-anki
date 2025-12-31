@@ -3832,8 +3832,15 @@ def import_adjective_allomorphs(
                 )
                 # Default to singular if 'plural' not present (common Wiktextract pattern)
                 form_number = "plural" if "plural" in form_tags else "singular"
-                if form_gender and form_number:
+
+                # Gender-neutral forms (e.g., 2-form adjective plurals like 'suavi')
+                # apply to both masculine and feminine
+                if form_gender:
                     form_lookup[(form_gender, form_number)] = form_text
+                else:
+                    # No gender specified - form applies to both genders
+                    form_lookup[("m", form_number)] = form_text
+                    form_lookup[("f", form_number)] = form_text
 
             # Add forms for appropriate gender(s)
             for gender in genders:
