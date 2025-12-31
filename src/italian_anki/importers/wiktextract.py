@@ -3568,9 +3568,7 @@ def import_adjective_allomorphs(
                     if parent_word:
                         # Determine label from tags
                         tags = sense.get("tags", [])
-                        if allomorph_word.endswith("'"):
-                            label = "elided"
-                        elif "apocopic" in tags:
+                        if "apocopic" in tags:
                             label = "apocopic"
                         break
                 if parent_word:

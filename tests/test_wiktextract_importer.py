@@ -1977,8 +1977,8 @@ class TestImportAdjAllomorphs:
             db_path.unlink()
             jsonl_path.unlink()
 
-    def test_elided_form_gets_elided_label(self) -> None:
-        """Elided forms (ending with ') should get labels='elided'."""
+    def test_apostrophe_form_without_apocopic_tag_gets_no_label(self) -> None:
+        """Apostrophe forms without 'apocopic' tag should get labels=None."""
         grande_entry = {
             "pos": "adj",
             "word": "grande",
@@ -1986,7 +1986,7 @@ class TestImportAdjAllomorphs:
             "senses": [{"glosses": ["big", "large"]}],
         }
 
-        # Elided form
+        # Apostrophe form without apocopic tag - should get no label
         grand_prime_entry = {
             "pos": "adj",
             "word": "grand'",
@@ -1994,6 +1994,7 @@ class TestImportAdjAllomorphs:
                 {
                     "alt_of": [{"word": "grande"}],
                     "glosses": ["elided form of grande"],
+                    # No "apocopic" in tags
                 }
             ],
         }
@@ -2021,11 +2022,13 @@ class TestImportAdjAllomorphs:
                     select(adjective_forms).where(adjective_forms.c.lemma_id == grande.id)
                 ).fetchall()
 
-                elided_forms = [f for f in forms if f.labels == "elided"]
-                assert len(elided_forms) == 4
+                # Forms from alt_of without apocopic tag get no label
+                apostrophe_forms = [f for f in forms if f.written == "grand'"]
+                assert len(apostrophe_forms) == 4
 
-                for f in elided_forms:
-                    assert f.written == "grand'"
+                for f in apostrophe_forms:
+                    # No synthesized label - only use actual Wiktionary tags
+                    assert f.labels is None
 
         finally:
             db_path.unlink()

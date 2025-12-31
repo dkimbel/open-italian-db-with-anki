@@ -339,7 +339,6 @@ def fill_missing_adjective_forms(
         - forms_added: Number of new forms inserted from Morphit
         - adjectives_completed: Adjectives that gained forms
         - not_in_morphit: Adjectives not found in Morphit
-        - elided_added: Elided forms (ending with ') added
         - combos_skipped: Forms skipped because they already exist
     """
     stats = {
@@ -347,7 +346,6 @@ def fill_missing_adjective_forms(
         "forms_added": 0,
         "adjectives_completed": 0,
         "not_in_morphit": 0,
-        "elided_added": 0,
         "combos_skipped": 0,
     }
 
@@ -407,9 +405,6 @@ def fill_missing_adjective_forms(
             if entry.degree != "positive":
                 continue  # Only fill base forms, not superlatives/comparatives
 
-            # Track elided forms (ending with ') - they get labels='elided'
-            is_elided = entry.form.endswith("'")
-
             # Key includes form to allow multiple forms per (gender, number)
             combo = (entry.form, entry.gender, entry.number)
 
@@ -450,7 +445,7 @@ def fill_missing_adjective_forms(
                     gender=entry.gender,
                     number=entry.number,
                     degree="positive",
-                    labels="elided" if is_elided else None,
+                    labels=None,
                     def_article=def_article,
                     article_source=article_source,
                     form_origin="morphit",
@@ -463,8 +458,6 @@ def fill_missing_adjective_forms(
             existing_combos.add(combo)
             forms_added_for_lemma += 1
             stats["forms_added"] += 1
-            if is_elided:
-                stats["elided_added"] += 1
 
         # Check if now complete (4 positive-degree forms)
         # existing_combos now includes forms we just added
