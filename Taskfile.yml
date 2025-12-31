@@ -99,6 +99,11 @@ tasks:
     cmds:
       - uv run italian-anki stats
 
+  verify-db:
+    desc: Verify database integrity and consistency
+    cmds:
+      - uv run italian-anki verify {{if .VERBOSE}}-v{{end}}
+
   download-wiktextract:
     desc: Download Wiktextract Italian dictionary
     cmds:

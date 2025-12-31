@@ -185,6 +185,16 @@ def _is_masculine_only_adjective(entry: dict[str, Any]) -> bool:
     return False
 
 
+def _is_whitelisted_invariable_adjective(entry: dict[str, Any]) -> bool:
+    """Check if adjective is in the invariable whitelist.
+
+    Some common invariable adjectives (phrases, loanwords) use the generic "head"
+    template instead of "it-adj" and lack explicit inv:1 flags. This whitelist
+    ensures they're correctly classified as invariable.
+    """
+    return entry.get("word", "") in INVARIABLE_ADJECTIVE_WHITELIST
+
+
 def _is_misspelling(entry: dict[str, Any]) -> bool:
     """Check if entry is marked as a misspelling.
 
@@ -251,12 +261,26 @@ def _get_adjective_inflection_class(entry: dict[str, Any]) -> str:
     Returns:
         'invariable': Same form for all gender/number (blu, rosa)
         '2-form': Same form for m/f, different for singular/plural (facile/facili)
+                  OR gender-restricted (feminine-only like incinta)
         '4-form': Different form for each gender/number (bello/bella/belli/belle)
     """
+    # Check explicit invariable markers (inv:1 flag or "invariable" in expansion)
     if _is_invariable_adjective(entry):
         return "invariable"
+
+    # Check whitelisted invariable adjectives (common phrases/loanwords)
+    if _is_whitelisted_invariable_adjective(entry):
+        return "invariable"
+
+    # Check feminine-only adjectives (2-form: f/sg and f/pl only)
+    # Bad entries are blocklisted, so this only matches good ones (incinta, nullipara)
+    if _is_feminine_only_adjective(entry):
+        return "2-form"
+
+    # Check standard 2-form patterns (genderless number tags, "m or f by sense")
     if _is_two_form_adjective(entry):
         return "2-form"
+
     return "4-form"
 
 
@@ -681,6 +705,27 @@ DEFINITION_TAG_BLOCKLIST = frozenset(
     }
 )
 
+# Invariable adjective phrases/loanwords with generic head template.
+# These lack it-adj inflection data but are common/useful vocabulary.
+# Without this whitelist, they'd default to "4-form" (wrong).
+INVARIABLE_ADJECTIVE_WHITELIST: frozenset[str] = frozenset(
+    {
+        # Loanwords (genuinely invariable)
+        "minimal",
+        "plastic free",
+        # Common adjectival phrases (invariable prepositional phrases)
+        "in voga",
+        "di moda",
+        "di fiducia",
+        "di fortuna",
+        "di ruolo",
+        "di spicco",
+        "senza pari",
+        "di sempre",
+        "in carne",
+    }
+)
+
 # Lemmas with malformed Wiktextract data that cause incorrect inferences.
 # These are filtered out entirely during import.
 # NOTE: Use the exact Wiktextract word spelling (entry["word"]), not normalized form.
@@ -691,6 +736,86 @@ LEMMA_BLOCKLIST: frozenset[str] = frozenset(
         "antiterremoto",  # Plural variants lack gender tags, causes m/f duplication
         "eslege",  # Plural variants lack gender tags, causes m/f duplication
         "reggifiaccola",  # Plural variants lack gender tags, causes m/f duplication
+        # === Garbage adjective entries ===
+        "ITA",  # Acronym, not a real adjective
+        "daun",  # Typo/nonsense entry
+        "1ª",  # Ordinal notation, not an adjective lemma
+        "12º",  # Ordinal notation, not an adjective lemma
+        # === Feminine-only adjectives - bad data (names, botanical, rare) ===
+        "aurica",
+        "beatrice",
+        "consorella",
+        "durona",
+        "innuba",
+        "isochimena",
+        "metterza",
+        "occhiona",
+        "piperita",
+        "raffaella",
+        "renella",
+        "roberta",
+        "spadona",
+        "vescicaria",
+        # === Masculine-only adjectives - bad data ===
+        "ficaio",
+        "pannegro",
+        # === Generic head template adjectives - incomplete data ===
+        "al sacco",
+        "babbo",
+        "bello come il sole",
+        "con le pive nel sacco",
+        "crusco",
+        "d'aiuto",
+        "d'assalto",
+        "d'obbligo",
+        "da asporto",
+        "da cani",
+        "da parata",
+        "del cavolo",
+        "della madonna",
+        "della prima ora",
+        "di circostanza",
+        "di lunga durata",
+        "di nicchia",
+        "di ordinaria amministrazione",
+        "di parata",
+        "di peso",
+        "di punta",
+        "di rigore",
+        "di rilievo",
+        "di sasso",
+        "di serie B",
+        "di tutti i giorni",
+        "di tutto rispetto",
+        "di vetta",
+        "esoftalmico",
+        "filoegizia",
+        "filosocialista",
+        "impatto zero",
+        "in seconda",
+        "magro come un chiodo",
+        "matriciana",
+        "nicotino",
+        "pieno di vita",
+        "più di là che di qua",
+        "poco ma sicuro",
+        "portaincenso",
+        "punto e a capo",
+        "sciupo",
+        "secondo a nessuno",
+        "senza confronto",
+        "squallarato",
+        "tagliamargherite",
+        "usurato",
+        # === Additional adjectives with incomplete form data ===
+        "bel",  # Apocopated form of "bello", only m/sg
+        "di vecchia data",  # Multi-word phrase, only m/sg
+        "disfattista",  # Missing forms, only m/sg
+        "distrutto",  # Past participle, missing other forms
+        "falecio",  # Missing feminine forms
+        "minore",  # Comparative, missing forms
+        "uno sì e uno no",  # Multi-word phrase, missing plurals
+        "uno sì, l'altro no",  # Multi-word phrase, missing plurals
         # === Nouns with corrupted Wiktionary data (wrong gender) ===
         "verseggiatore",  # Wiktionary incorrectly marks as feminine
         "pischelletto",  # Wiktionary incorrectly marks as feminine
@@ -2025,6 +2150,9 @@ def import_wiktextract(
 
                 if old_is_labeled and not new_is_labeled:
                     # New is unlabeled, old is labeled → replace with new
+                    # Preserve is_citation_form from old row (bug fix for accent variants)
+                    if old_row.get("is_citation_form"):
+                        row["is_citation_form"] = True
                     form_batch[old_idx] = row
                     current_batch_map[key] = (row, old_idx)
                     return True
@@ -2035,6 +2163,9 @@ def import_wiktextract(
                 # Priority 2: Both same label status → prefer grave over acute
                 if _has_acute_accent(old_stressed) and not _has_acute_accent(new_stressed):
                     # New is grave, old is acute → replace with new
+                    # Preserve is_citation_form from old row (bug fix for accent variants)
+                    if old_row.get("is_citation_form"):
+                        row["is_citation_form"] = True
                     form_batch[old_idx] = row
                     current_batch_map[key] = (row, old_idx)
                     return True

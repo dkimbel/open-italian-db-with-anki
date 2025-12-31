@@ -46,6 +46,7 @@ from italian_anki.importers.wiktextract import (
     import_adjective_allomorphs,
     import_noun_allomorphs,
 )
+from italian_anki.verify import verify_database
 
 DEFAULT_WIKTEXTRACT_PATH = Path("data/wiktextract/kaikki.org-dictionary-Italian.jsonl")
 DEFAULT_MORPHIT_PATH = Path("data/morphit/morph-it.txt")
@@ -295,6 +296,24 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print(f"  English:     {eng_sentences:,}")
 
     return 0
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Verify database integrity and consistency."""
+    db_path = Path(args.database)
+
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        return 1
+
+    print(f"Database Verification: {db_path}")
+
+    with get_connection(db_path) as conn:
+        report = verify_database(conn, verbose=args.verbose)
+
+    print(report.summary(verbose=args.verbose))
+
+    return 0 if report.all_passed else 1
 
 
 def cmd_download_wiktextract(args: argparse.Namespace) -> int:
@@ -862,6 +881,26 @@ def main() -> int:
         help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
     )
     stats_parser.set_defaults(func=cmd_stats)
+
+    # verify subcommand
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="Verify database integrity and consistency",
+    )
+    verify_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    verify_parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show detailed breakdown and metrics",
+    )
+    verify_parser.set_defaults(func=cmd_verify)
 
     # download-wiktextract subcommand
     dl_wikt_parser = subparsers.add_parser(
