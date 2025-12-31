@@ -401,6 +401,8 @@ def _run_wiktextract_import(
         print(f"{indent}  Duplicate plurals: {stats['skipped_plural_duplicate']:,}")
     if stats.get("nouns_skipped_no_gender", 0) > 0:
         print(f"{indent}  No gender: {stats['nouns_skipped_no_gender']:,}")
+    if pos == POS.VERB:
+        print(f"{indent}Stress synced: {stats.get('lemma_stress_synced', 0):,}")
     return stats
 
 
