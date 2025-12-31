@@ -656,8 +656,8 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print(f"  Missing f.pl found:    {stats['total_missing']:,}")
         print(f"  Copied from adjective: {stats['copied_from_adjective']:,}")
         print(f"  Synthesized:           {stats['synthesized']:,}")
+        print(f"  Added (invariable):    {stats['added_invariable']:,}")
         print(f"  Skipped (multi-word):  {stats['skipped_multiword']:,}")
-        print(f"  Skipped (invariable):  {stats['skipped_invariable']:,}")
         print(f"  Skipped (typo):        {stats['skipped_typo']:,}")
     print()
 

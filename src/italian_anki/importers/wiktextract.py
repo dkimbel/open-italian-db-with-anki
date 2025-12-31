@@ -76,6 +76,19 @@ LEMMA_STRESSED_OVERRIDES: dict[str, str] = {
     "sùggere": "suggére",  # Wiktionary lemma has wrong stress position vs forms
 }
 
+# Typo corrections for feminine noun forms in Wiktextract data.
+# These are -trice endings that are misspelled as -tice or -trive.
+# Maps Wiktionary's typo form to the correct form.
+FEMININE_FORM_CORRECTIONS: dict[str, str] = {
+    "preconizzatice": "preconizzatrice",
+    "propalatice": "propalatrice",
+    "pulimentatice": "pulimentatrice",
+    "respingitice": "respingitrice",
+    "sbatacchiatice": "sbatacchiatrice",
+    "tenzonatice": "tenzonatrice",
+    "scannatrive": "scannatrice",
+}
+
 # Known elision particles that should have space removed after apostrophe.
 # These are words that undergo elision before vowel-initial words in Italian.
 # Truncated imperatives (va', fa', da', sta') are NOT in this list because
@@ -839,6 +852,14 @@ LEMMA_BLOCKLIST: frozenset[str] = frozenset(
         # bruire: canonical form says [auxiliary avere] but auxiliary-tagged form is "-"
         # (defective verb). Obscure word, safe to exclude.
         "bruire",
+        # === Nouns with incorrect/problematic Wiktextract data ===
+        # offelliere: Wiktextract says "feminine invariable" but Hoepli says f.sg = "offelliera"
+        # The correct feminine follows standard -iere → -iera pattern (like cameriere → cameriera)
+        "offelliere",
+        # riscotitore: Archaic spelling (Machiavelli-era); modern form is "riscuotitore"
+        "riscotitore",
+        # sommelière: French word, not an Italian loanword; keep only "sommelier"
+        "sommelière",
     }
 )
 
@@ -1314,6 +1335,11 @@ def _iter_forms(
             key = normalize(form_stressed)
             if key in stressed_alternatives:
                 form_stressed = stressed_alternatives[key]
+
+        # Apply typo corrections for feminine noun forms (e.g., "preconizzatice" → "preconizzatrice")
+        if pos == "noun" and form_stressed in FEMININE_FORM_CORRECTIONS:
+            form_stressed = FEMININE_FORM_CORRECTIONS[form_stressed]
+
         tags = form_data.get("tags", [])
         tag_set = set(tags)
 
@@ -3966,6 +3992,7 @@ def _synthesize_feminine_plural(f_sg: str) -> str | None:
 
     Rules (in priority order):
     - -trice → -trici (attrice → attrici)
+    - -drice → -drici (mallevadrice → mallevadrici)
     - -essa → -esse (professoressa → professoresse)
     - vowel + -cia → -cie (lucia → lucie)
     - consonant + -cia → -ce (guercia → guerce)
@@ -3995,6 +4022,10 @@ def _synthesize_feminine_plural(f_sg: str) -> str | None:
     # -trice → -trici
     if f_sg.endswith("trice"):
         return f_sg[:-1] + "i"  # trice → trici
+
+    # -drice → -drici (e.g., mallevadrice → mallevadrici)
+    if f_sg.endswith("drice"):
+        return f_sg[:-1] + "i"  # drice → drici
 
     # -essa → -esse
     if f_sg.endswith("essa"):
@@ -4064,7 +4095,7 @@ def enrich_missing_feminine_plurals(
         "total_missing": 0,
         "copied_from_adjective": 0,
         "synthesized": 0,
-        "skipped_invariable": 0,
+        "added_invariable": 0,
         "skipped_multiword": 0,
         "skipped_typo": 0,
         "skipped_synthesis_failed": 0,
@@ -4201,7 +4232,7 @@ def enrich_missing_feminine_plurals(
             stats["skipped_typo"] += 1
             continue
 
-        # Skip invariables (f.sg = m.sg would mean same form for both)
+        # Handle invariables (f.sg = m.sg): add f.pl = f.sg (e.g., sommelier)
         # Check by looking for m.sg with same form
         m_sg_result = conn.execute(
             select(noun_forms.c.stressed)
@@ -4213,7 +4244,36 @@ def enrich_missing_feminine_plurals(
             .limit(1)
         ).first()
         if m_sg_result and m_sg_result.stressed == f_sg:
-            stats["skipped_invariable"] += 1
+            # Invariable: f.pl = f.sg
+            f_pl_stressed = f_sg
+            f_pl_written = f_sg_written
+
+            # Compute article
+            def_article, article_source = get_definite(f_pl_stressed, "f", "plural")
+
+            # Insert the invariable form
+            try:
+                conn.execute(
+                    noun_forms.insert().values(
+                        lemma_id=noun_lemma_id,
+                        written=f_pl_written,
+                        written_source=None,  # Same as f.sg, not derived
+                        stressed=f_pl_stressed,
+                        gender="f",
+                        number="plural",
+                        labels=None,
+                        derivation_type=None,
+                        meaning_hint=None,
+                        def_article=def_article,
+                        article_source=article_source,
+                        form_origin="inferred:f_pl_invariable",
+                        is_citation_form=False,
+                    )
+                )
+                stats["added_invariable"] += 1
+            except IntegrityError:
+                # Duplicate form already exists (constraint violation)
+                pass
             continue
 
         # Synthesize f.pl
