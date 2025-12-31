@@ -9,20 +9,21 @@ from pathlib import Path
 from sqlalchemy import Connection, select
 
 from italian_anki.db.schema import frequencies, lemmas
+from italian_anki.enums import POS
 from italian_anki.normalize import derive_written_from_stressed
 
 # Default CSV filenames by POS (relative to data/itwac/)
-ITWAC_CSV_FILES = {
-    "verb": "itwac_verbs_lemmas_notail_2_1_0.csv",
-    "noun": "itwac_nouns_lemmas_notail_2_0_0.csv",
-    "adjective": "itwac_adj_lemmas_notail_2_1_0.csv",
+ITWAC_CSV_FILES: dict[POS, str] = {
+    POS.VERB: "itwac_verbs_lemmas_notail_2_1_0.csv",
+    POS.NOUN: "itwac_nouns_lemmas_notail_2_0_0.csv",
+    POS.ADJECTIVE: "itwac_adj_lemmas_notail_2_1_0.csv",
 }
 
 # ItWaC versions by POS (extracted from filenames)
-ITWAC_VERSIONS = {
-    "verb": "2.1.0",
-    "noun": "2.0.0",
-    "adjective": "2.1.0",
+ITWAC_VERSIONS: dict[POS, str] = {
+    POS.VERB: "2.1.0",
+    POS.NOUN: "2.0.0",
+    POS.ADJECTIVE: "2.1.0",
 }
 
 CORPUS_NAME = "itwac"
@@ -90,7 +91,7 @@ def import_itwac(
     conn: Connection,
     csv_path: Path,
     *,
-    pos_filter: str = "verb",
+    pos_filter: POS = POS.VERB,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Import ItWaC frequency data into the database.
@@ -98,7 +99,7 @@ def import_itwac(
     Args:
         conn: SQLAlchemy connection
         csv_path: Path to ItWaC CSV file (verb, noun, or adjective)
-        pos_filter: Part of speech to import (default: "verb")
+        pos_filter: Part of speech to import
         progress_callback: Optional callback for progress reporting (current, total)
 
     Returns:

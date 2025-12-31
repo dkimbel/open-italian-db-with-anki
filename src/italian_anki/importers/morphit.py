@@ -15,6 +15,7 @@ from italian_anki.db.schema import (
     noun_forms,
     verb_forms,
 )
+from italian_anki.enums import POS
 from italian_anki.normalize import (
     FRENCH_LOANWORD_WHITELIST,
     derive_written_from_stressed,
@@ -23,17 +24,17 @@ from italian_anki.normalize import (
 logger = logging.getLogger(__name__)
 
 # Mapping of our POS names to Morph-it! tag prefixes
-POS_TAG_PREFIXES = {
-    "verb": "VER:",
-    "noun": "NOUN-",
-    "adjective": "ADJ:",
+POS_TAG_PREFIXES: dict[POS, str] = {
+    POS.VERB: "VER:",
+    POS.NOUN: "NOUN-",
+    POS.ADJECTIVE: "ADJ:",
 }
 
 # Mapping of our POS names to their form tables
-POS_FORM_TABLES: dict[str, Table] = {
-    "verb": verb_forms,
-    "noun": noun_forms,
-    "adjective": adjective_forms,
+POS_FORM_TABLES: dict[POS, Table] = {
+    POS.VERB: verb_forms,
+    POS.NOUN: noun_forms,
+    POS.ADJECTIVE: adjective_forms,
 }
 
 # Morphit adjective tag components
@@ -112,7 +113,7 @@ def _parse_morphit(
             yield form, lemma, tags
 
 
-def _matches_pos(tags: str, pos_filter: str) -> bool:
+def _matches_pos(tags: str, pos_filter: POS) -> bool:
     """Check if a Morph-it! tag matches the given POS filter.
 
     Tag formats:
@@ -127,7 +128,7 @@ def _matches_pos(tags: str, pos_filter: str) -> bool:
 
 
 def _build_form_lookup(
-    morphit_path: Path, pos_filter: str = "verb"
+    morphit_path: Path, pos_filter: POS = POS.VERB
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Build lookup dicts for Morphit forms.
 
@@ -204,7 +205,7 @@ def import_morphit(
     conn: Connection,
     morphit_path: Path,
     *,
-    pos_filter: str = "verb",
+    pos_filter: POS = POS.VERB,
     batch_size: int = 1000,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
@@ -295,7 +296,7 @@ def import_morphit(
                 real_form = FRENCH_LOANWORD_WHITELIST[stressed_form]
                 written_source = "hardcoded:loanword"
             # Check if this is a known Morphit error for nouns
-            elif pos_filter == "noun" and real_form in NOUN_WRITTEN_CORRECTIONS:
+            elif pos_filter == POS.NOUN and real_form in NOUN_WRITTEN_CORRECTIONS:
                 real_form = NOUN_WRITTEN_CORRECTIONS[real_form]
                 written_source = "hardcoded:correction"
             else:
@@ -359,7 +360,9 @@ def fill_missing_adjective_forms(
     # Get ALL adjectives (not just incomplete ones)
     # The existing_combos logic prevents duplicate insertions
     # Use warn=False since French loanwords may have multiple accents
-    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "adjective"))
+    result = conn.execute(
+        select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == POS.ADJECTIVE)
+    )
     all_adjectives = [
         (row.id, derive_written_from_stressed(row.stressed, warn=False) or row.stressed)
         for row in result
@@ -485,7 +488,7 @@ def _has_accents(text: str) -> bool:
 
 def apply_unstressed_fallback(
     conn: Connection,
-    pos_filter: str = "adjective",
+    pos_filter: POS = POS.ADJECTIVE,
 ) -> dict[str, int]:
     """Copy stressed to written where written is NULL and stressed has no accents.
 
@@ -537,7 +540,7 @@ def apply_unstressed_fallback(
 
 def apply_orthography_fallback(
     conn: Connection,
-    pos_filter: str = "noun",
+    pos_filter: POS = POS.NOUN,
 ) -> dict[str, int]:
     """Derive written from stressed for remaining NULL values using orthography rules.
 
@@ -613,7 +616,7 @@ def apply_orthography_fallback(
 def enrich_lemma_written(
     conn: Connection,
     *,
-    pos_filter: str = "verb",
+    pos_filter: POS = POS.VERB,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Update lemmas.written by copying from the citation form.

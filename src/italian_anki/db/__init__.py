@@ -16,8 +16,12 @@ from italian_anki.db.schema import (
     verb_forms,
     verb_metadata,
 )
+from italian_anki.enums import POS, DerivationType, GenderClass
 
 __all__ = [
+    "POS",
+    "DerivationType",
+    "GenderClass",
     "adjective_forms",
     "adjective_metadata",
     "definitions",

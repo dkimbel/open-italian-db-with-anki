@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from italian_anki.enums import DerivationType
+
 # Tags that indicate a form should be filtered out entirely.
 #
 # IMPORTANT: This filters FORMS (conjugations/spellings), NOT definitions (meanings).
@@ -107,7 +109,7 @@ LABEL_TAGS = frozenset(LABEL_CANONICAL.keys())
 DEGREE_TAGS = frozenset({"superlative", "comparative"})
 
 # Noun derivation tags (these modify the base form semantically)
-NOUN_DERIVATION_TAGS = frozenset({"diminutive", "augmentative", "pejorative"})
+NOUN_DERIVATION_TAGS = frozenset(d.value for d in DerivationType)
 
 
 @dataclass
@@ -132,7 +134,7 @@ class NounFormFeatures:
 
     number: str | None = None
     labels: list[str] | None = None  # e.g. ["archaic", "literary"]
-    derivation_type: str | None = None  # 'diminutive', 'augmentative', 'pejorative'
+    derivation_type: DerivationType | None = None
     should_filter: bool = False
 
 
@@ -325,9 +327,9 @@ def parse_noun_tags(tags: list[str]) -> NounFormFeatures:
             break
 
     # Extract derivation type (mutually exclusive)
-    for tag in ("diminutive", "augmentative", "pejorative"):
-        if tag in tag_set:
-            result.derivation_type = tag
+    for dtype in DerivationType:
+        if dtype.value in tag_set:
+            result.derivation_type = dtype
             break
 
     # Extract labels

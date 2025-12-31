@@ -25,6 +25,7 @@ from italian_anki.download import (
     download_tatoeba,
     download_wiktextract,
 )
+from italian_anki.enums import POS
 from italian_anki.importers import (
     import_itwac,
     import_morphit,
@@ -54,9 +55,6 @@ DEFAULT_ENG_SENTENCES_PATH = Path("data/tatoeba/eng_sentences.tsv")
 DEFAULT_LINKS_PATH = Path("data/tatoeba/ita_eng_links.tsv")
 DEFAULT_DB_PATH = Path("italian.db")
 
-# Mapping from singular POS values to plural forms for display
-POS_PLURAL = {"verb": "verbs", "noun": "nouns", "adjective": "adjectives", "adverb": "adverbs"}
-
 
 def cmd_import_wiktextract(args: argparse.Namespace) -> int:
     """Run the Wiktextract import command."""
@@ -72,7 +70,7 @@ def cmd_import_wiktextract(args: argparse.Namespace) -> int:
     init_db(engine)
 
     print(f"Importing from: {jsonl_path}")
-    print(f"Filtering to: {POS_PLURAL.get(args.pos, args.pos)}")
+    print(f"Filtering to: {POS(args.pos).plural}")
     print()
 
     with get_connection(db_path) as conn:
@@ -99,7 +97,7 @@ def cmd_enrich_formof(args: argparse.Namespace) -> int:
 
     print(f"Enriching forms from form-of entries: {db_path}")
     print(f"Using Wiktextract data from: {jsonl_path}")
-    print(f"Filtering to: {POS_PLURAL.get(args.pos, args.pos)}")
+    print(f"Filtering to: {POS(args.pos).plural}")
     print()
 
     with get_connection(db_path) as conn:
@@ -126,7 +124,7 @@ def cmd_import_morphit(args: argparse.Namespace) -> int:
 
     print(f"Enriching database: {db_path}")
     print(f"Using Morph-it! data from: {morphit_path}")
-    print(f"Filtering to: {POS_PLURAL.get(args.pos, args.pos)}")
+    print(f"Filtering to: {POS(args.pos).plural}")
     print()
 
     with get_connection(db_path) as conn:
@@ -162,7 +160,7 @@ def cmd_import_itwac(args: argparse.Namespace) -> int:
 
     print(f"Importing frequencies to: {db_path}")
     print(f"Using ItWaC data from: {csv_path}")
-    print(f"Filtering to: {POS_PLURAL.get(args.pos, args.pos)}")
+    print(f"Filtering to: {POS(args.pos).plural}")
     print()
 
     with get_connection(db_path) as conn:
@@ -222,13 +220,13 @@ def cmd_stats(args: argparse.Namespace) -> int:
         # Lemma counts
         total_lemmas = conn.execute(select(func.count()).select_from(lemmas)).scalar()
         n_verbs = conn.execute(
-            select(func.count()).select_from(lemmas).where(lemmas.c.pos == "verb")
+            select(func.count()).select_from(lemmas).where(lemmas.c.pos == POS.VERB)
         ).scalar()
         n_nouns = conn.execute(
-            select(func.count()).select_from(lemmas).where(lemmas.c.pos == "noun")
+            select(func.count()).select_from(lemmas).where(lemmas.c.pos == POS.NOUN)
         ).scalar()
         n_adjectives = conn.execute(
-            select(func.count()).select_from(lemmas).where(lemmas.c.pos == "adjective")
+            select(func.count()).select_from(lemmas).where(lemmas.c.pos == POS.ADJECTIVE)
         ).scalar()
 
         # Form counts (separate tables)
@@ -360,7 +358,7 @@ def _make_progress_callback(desc: str = "Processing"):
 
 
 def _run_wiktextract_import(
-    conn: Connection, jsonl_path: Path, pos: str, indent: str = "  "
+    conn: Connection, jsonl_path: Path, pos: POS, indent: str = "  "
 ) -> dict[str, Any]:
     """Run wiktextract import and print stats."""
     stats = import_wiktextract(
@@ -388,7 +386,7 @@ def _run_wiktextract_import(
 
 
 def _run_formof_combined_enrichment(
-    conn: Connection, jsonl_path: Path, pos: str, indent: str = "  "
+    conn: Connection, jsonl_path: Path, pos: POS, indent: str = "  "
 ) -> dict[str, Any]:
     """Run combined form-of enrichment (labels + spelling) and print stats."""
     stats = enrich_from_form_of_entries(
@@ -408,7 +406,7 @@ def _run_formof_combined_enrichment(
 
 
 def _run_morphit_import(
-    conn: Connection, morphit_path: Path, pos: str, indent: str = "  "
+    conn: Connection, morphit_path: Path, pos: POS, indent: str = "  "
 ) -> dict[str, Any]:
     """Run Morph-it! enrichment and print stats."""
     stats = import_morphit(
@@ -421,7 +419,7 @@ def _run_morphit_import(
 
 
 def _run_itwac_import(
-    conn: Connection, csv_path: Path, pos: str, indent: str = "  "
+    conn: Connection, csv_path: Path, pos: POS, indent: str = "  "
 ) -> dict[str, Any] | None:
     """Run ItWaC frequency import and print stats. Returns None if file doesn't exist."""
     if not csv_path.exists():
@@ -485,13 +483,13 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     init_db(engine)
     print()
 
-    pos_list = ["verb", "noun", "adjective"]
+    pos_list = list(POS)
     total_phases = 5  # 3 POS + post-processing + Tatoeba
     indent = "    "
 
     # Import each POS
     for pos_idx, pos in enumerate(pos_list, 1):
-        pos_plural = POS_PLURAL[pos]
+        pos_plural = pos.plural
         print("=" * 80)
         print(f"Importing {pos_plural} (Step {pos_idx} of {total_phases})")
         print("=" * 80)
@@ -504,9 +502,9 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         #                   form-of, unstressed, orthography, itwac)
         # - verbs: 5 steps (wiktextract, participles, lemma-written, form-of, itwac)
         #          Verbs skip morphit-forms/unstressed/orthography (produce 0 updates)
-        if pos == "adjective":
+        if pos == POS.ADJECTIVE:
             total_steps = 9
-        elif pos == "verb":
+        elif pos == POS.VERB:
             total_steps = 5
         else:
             total_steps = 8
@@ -518,7 +516,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             print()
 
             # Step 2 (verb only): Generate gendered participles
-            if pos == "verb":
+            if pos == POS.VERB:
                 print(f"[2/{total_steps}] Generating gendered participle forms...")
                 stats = generate_gendered_participles(
                     conn, progress_callback=_make_progress_callback()
@@ -531,7 +529,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
 
             # Step 2 (noun/adjective only): Morph-it! form enrichment
             # Verbs skip this - Morph-it! has no accented verb forms
-            if pos != "verb":
+            if pos != POS.VERB:
                 print(f"[2/{total_steps}] Enriching forms with Morph-it! spelling...")
                 _run_morphit_import(conn, morphit_path, pos, indent=indent)
                 print()
@@ -550,7 +548,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             print()
 
             # Step 4 (adjective only): Fill missing forms from Morphit
-            if pos == "adjective":
+            if pos == POS.ADJECTIVE:
                 print(f"[4/{total_steps}] Filling missing adjective forms from Morphit...")
                 stats = fill_missing_adjective_forms(
                     conn, morphit_path, progress_callback=_make_progress_callback()
@@ -564,7 +562,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print()
 
             # Step 4 (noun only): Import noun allomorphs from alt_of entries
-            if pos == "noun":
+            if pos == POS.NOUN:
                 print(f"[4/{total_steps}] Importing allomorphs (apocopic forms)...")
                 stats = import_noun_allomorphs(
                     conn, jsonl_path, progress_callback=_make_progress_callback()
@@ -580,7 +578,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
 
             # Step 5 (adjective only): Import allomorphs from alt_of entries
             # Must run AFTER fill_missing so allomorphs don't prevent grandi from being added
-            if pos == "adjective":
+            if pos == POS.ADJECTIVE:
                 print(f"[5/{total_steps}] Importing allomorphs (apocopic/elided forms)...")
                 stats = import_adjective_allomorphs(
                     conn, jsonl_path, progress_callback=_make_progress_callback()
@@ -597,9 +595,9 @@ def cmd_import_all(args: argparse.Namespace) -> int:
 
             # Form-of enrichment (labels + spelling) - combined single pass
             # verb: step 4, noun: step 5, adjective: step 6
-            if pos == "verb":
+            if pos == POS.VERB:
                 step_formof = 4
-            elif pos == "noun":
+            elif pos == POS.NOUN:
                 step_formof = 5
             else:
                 step_formof = 6
@@ -609,8 +607,8 @@ def cmd_import_all(args: argparse.Namespace) -> int:
 
             # Unstressed fallback (noun/adjective only)
             # Verbs skip this - all written values derived during lemma enrichment
-            if pos != "verb":
-                step_unstressed = 7 if pos == "adjective" else 6
+            if pos != POS.VERB:
+                step_unstressed = 7 if pos == POS.ADJECTIVE else 6
                 print(f"[{step_unstressed}/{total_steps}] Applying unstressed form fallback...")
                 stats = apply_unstressed_fallback(conn, pos_filter=pos)
                 print(f"{indent}Forms updated: {stats['updated']:,}")
@@ -618,8 +616,8 @@ def cmd_import_all(args: argparse.Namespace) -> int:
 
             # Orthography-based written derivation (noun/adjective only)
             # Verbs skip this - all written values derived during lemma enrichment
-            if pos != "verb":
-                step_ortho = 8 if pos == "adjective" else 7
+            if pos != POS.VERB:
+                step_ortho = 8 if pos == POS.ADJECTIVE else 7
                 print(
                     f"[{step_ortho}/{total_steps}] Applying orthography-based written derivation..."
                 )
@@ -631,9 +629,9 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print()
 
             # ItWaC frequency import - verb: step 5, noun: step 8, adjective: step 9
-            if pos == "verb":
+            if pos == POS.VERB:
                 step_itwac = 5
-            elif pos == "noun":
+            elif pos == POS.NOUN:
                 step_itwac = 8
             else:
                 step_itwac = 9
@@ -714,9 +712,9 @@ def main() -> int:
     )
     import_parser.add_argument(
         "--pos",
-        type=str,
-        default="verb",
-        choices=["verb", "noun", "adjective", "adverb"],
+        type=POS,
+        default=POS.VERB,
+        choices=list(POS),
         help="Part of speech to import (default: verb)",
     )
     import_parser.set_defaults(func=cmd_import_wiktextract)
@@ -742,9 +740,9 @@ def main() -> int:
     )
     enrich_parser.add_argument(
         "--pos",
-        type=str,
-        default="verb",
-        choices=["verb", "noun", "adjective"],
+        type=POS,
+        default=POS.VERB,
+        choices=list(POS),
         help="Part of speech to enrich (default: verb)",
     )
     enrich_parser.set_defaults(func=cmd_enrich_formof)
@@ -770,9 +768,9 @@ def main() -> int:
     )
     morphit_parser.add_argument(
         "--pos",
-        type=str,
-        default="verb",
-        choices=["verb", "noun", "adjective"],
+        type=POS,
+        default=POS.VERB,
+        choices=list(POS),
         help="Part of speech to enrich (default: verb)",
     )
     morphit_parser.set_defaults(func=cmd_import_morphit)
@@ -798,9 +796,9 @@ def main() -> int:
     )
     itwac_parser.add_argument(
         "--pos",
-        type=str,
-        default="verb",
-        choices=["verb", "noun", "adjective"],
+        type=POS,
+        default=POS.VERB,
+        choices=list(POS),
         help="Part of speech to import (default: verb)",
     )
     itwac_parser.set_defaults(func=cmd_import_itwac)

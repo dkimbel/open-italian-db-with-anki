@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import select
 
 from italian_anki.db import (
+    POS,
     adjective_forms,
     get_connection,
     get_engine,
@@ -375,7 +376,7 @@ class TestMorphitAdjectiveFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             # Check initial state - should have some forms
             with get_connection(db_path) as conn:
@@ -436,7 +437,7 @@ class TestMorphitAdjectiveFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             # Get initial form count
             with get_connection(db_path) as conn:
@@ -486,7 +487,7 @@ class TestMorphitAdjectiveFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             # Run Morphit fallback with logging enabled
             with caplog.at_level(logging.DEBUG), get_connection(db_path) as conn:
@@ -515,7 +516,7 @@ class TestMorphitAdjectiveFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             with get_connection(db_path) as conn:
                 stats = fill_missing_adjective_forms(conn, morphit_path)
@@ -554,7 +555,7 @@ class TestMorphitAdjectiveFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             with get_connection(db_path) as conn:
                 fill_missing_adjective_forms(conn, morphit_path)
@@ -593,7 +594,7 @@ class TestMorphitAdjectiveFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             with get_connection(db_path) as conn:
                 stats = fill_missing_adjective_forms(conn, morphit_path)
@@ -634,11 +635,11 @@ class TestUnstressedFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             # Run morphit import (will find nothing, leaving forms NULL)
             with get_connection(db_path) as conn:
-                import_morphit(conn, morphit_path, pos_filter="adjective")
+                import_morphit(conn, morphit_path, pos_filter=POS.ADJECTIVE)
 
             # Count NULL forms before fallback
             with get_connection(db_path) as conn:
@@ -648,7 +649,7 @@ class TestUnstressedFallback:
 
             # Apply unstressed fallback
             with get_connection(db_path) as conn:
-                stats = apply_unstressed_fallback(conn, pos_filter="adjective")
+                stats = apply_unstressed_fallback(conn, pos_filter=POS.ADJECTIVE)
 
             # Check forms were updated
             with get_connection(db_path) as conn:
@@ -696,15 +697,15 @@ class TestUnstressedFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             # Run morphit import (will find nothing)
             with get_connection(db_path) as conn:
-                import_morphit(conn, morphit_path, pos_filter="adjective")
+                import_morphit(conn, morphit_path, pos_filter=POS.ADJECTIVE)
 
             # Apply unstressed fallback
             with get_connection(db_path) as conn:
-                apply_unstressed_fallback(conn, pos_filter="adjective")
+                apply_unstressed_fallback(conn, pos_filter=POS.ADJECTIVE)
 
             # Check that accented forms still have NULL form
             with get_connection(db_path) as conn:
@@ -737,13 +738,13 @@ class TestUnstressedFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             with get_connection(db_path) as conn:
-                import_morphit(conn, morphit_path, pos_filter="adjective")
+                import_morphit(conn, morphit_path, pos_filter=POS.ADJECTIVE)
 
             with get_connection(db_path) as conn:
-                stats = apply_unstressed_fallback(conn, pos_filter="adjective")
+                stats = apply_unstressed_fallback(conn, pos_filter=POS.ADJECTIVE)
 
             if stats["updated"] > 0:
                 with get_connection(db_path) as conn:
@@ -806,7 +807,7 @@ class TestMorphitApostropheFormHandling:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             with get_connection(db_path) as conn:
                 stats = fill_missing_adjective_forms(conn, morphit_path)
@@ -881,15 +882,15 @@ class TestOrthographyFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             # Run morphit (finds nothing, forms stay NULL)
             with get_connection(db_path) as conn:
-                import_morphit(conn, morphit_path, pos_filter="noun")
+                import_morphit(conn, morphit_path, pos_filter=POS.NOUN)
 
             # Apply orthography fallback
             with get_connection(db_path) as conn:
-                stats = apply_orthography_fallback(conn, pos_filter="noun")
+                stats = apply_orthography_fallback(conn, pos_filter=POS.NOUN)
 
             assert stats["updated"] >= 1
 
@@ -924,13 +925,13 @@ class TestOrthographyFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             with get_connection(db_path) as conn:
-                import_morphit(conn, morphit_path, pos_filter="noun")
+                import_morphit(conn, morphit_path, pos_filter=POS.NOUN)
 
             with get_connection(db_path) as conn:
-                stats = apply_orthography_fallback(conn, pos_filter="noun")
+                stats = apply_orthography_fallback(conn, pos_filter=POS.NOUN)
 
             # Should have loanwords tracked
             assert stats["loanwords"] >= 1
@@ -972,11 +973,11 @@ class TestOrthographyFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             # Run morphit (fills written from morphit)
             with get_connection(db_path) as conn:
-                import_morphit(conn, morphit_path, pos_filter="adjective")
+                import_morphit(conn, morphit_path, pos_filter=POS.ADJECTIVE)
 
             # Get count of morphit-sourced forms
             with get_connection(db_path) as conn:
@@ -987,7 +988,7 @@ class TestOrthographyFallback:
 
             # Apply orthography fallback (should not modify morphit-sourced forms)
             with get_connection(db_path) as conn:
-                stats = apply_orthography_fallback(conn, pos_filter="adjective")
+                stats = apply_orthography_fallback(conn, pos_filter=POS.ADJECTIVE)
 
             # Should update 0 (all forms already have written)
             assert stats["updated"] == 0
@@ -1019,13 +1020,13 @@ class TestOrthographyFallback:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             with get_connection(db_path) as conn:
-                import_morphit(conn, morphit_path, pos_filter="noun")
+                import_morphit(conn, morphit_path, pos_filter=POS.NOUN)
 
             with get_connection(db_path) as conn:
-                stats = apply_orthography_fallback(conn, pos_filter="noun")
+                stats = apply_orthography_fallback(conn, pos_filter=POS.NOUN)
 
             # Should have both regular derivations and loanwords
             assert stats["updated"] > 0
@@ -1090,10 +1091,10 @@ class TestOptionEHomographFix:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             with get_connection(db_path) as conn:
-                import_morphit(conn, morphit_path, pos_filter="noun")
+                import_morphit(conn, morphit_path, pos_filter=POS.NOUN)
 
             # Verify that form with stressed="eta" did NOT get written="età"
             with get_connection(db_path) as conn:
@@ -1145,7 +1146,7 @@ class TestOptionEHomographFix:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="verb")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.VERB)
 
             # Verify that form with stressed="pàrlo" got written="parlo"
             with get_connection(db_path) as conn:

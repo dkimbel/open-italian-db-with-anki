@@ -23,6 +23,7 @@ from italian_anki.db.schema import (
     verb_metadata,
 )
 from italian_anki.derivation import derive_participle_forms
+from italian_anki.enums import POS, DerivationType, GenderClass
 from italian_anki.normalize import derive_written_from_stressed, normalize
 from italian_anki.tags import (
     LABEL_CANONICAL,
@@ -39,17 +40,17 @@ logger = logging.getLogger(__name__)
 _line_count_cache: dict[Path, int] = {}
 
 # Mapping from our POS names to Wiktextract's abbreviated names
-WIKTEXTRACT_POS = {
-    "verb": "verb",
-    "noun": "noun",
-    "adjective": "adj",  # Wiktextract uses "adj"
+WIKTEXTRACT_POS: dict[POS, str] = {
+    POS.VERB: "verb",
+    POS.NOUN: "noun",
+    POS.ADJECTIVE: "adj",  # Wiktextract uses "adj"
 }
 
 # POS-specific form tables
-POS_FORM_TABLES = {
-    "verb": verb_forms,
-    "noun": noun_forms,
-    "adjective": adjective_forms,
+POS_FORM_TABLES: dict[POS, Any] = {
+    POS.VERB: verb_forms,
+    POS.NOUN: noun_forms,
+    POS.ADJECTIVE: adjective_forms,
 }
 
 # Regex to strip bracket annotations from canonical forms
@@ -1118,7 +1119,7 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
     """Extract noun classification from Wiktextract entry.
 
     Returns a dict with:
-    - gender_class: 'm', 'f', 'common_gender_fixed', 'common_gender_variable'
+    - gender_class: 'm', 'f', 'GenderClass.COMMON_GENDER_FIXED', 'GenderClass.COMMON_GENDER_VARIABLE'
     - number_class: 'standard', 'pluralia_tantum', 'singularia_tantum', 'invariable'
     - number_class_source: how number_class was determined
     - genders: list of genders present in the forms
@@ -1237,11 +1238,11 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
     if has_masculine and has_feminine:
         if is_mfbysense:
             # Different meanings per gender - will create separate lemmas
-            result["gender_class"] = "by_sense"
+            result["gender_class"] = GenderClass.BY_SENSE
         elif has_counterpart_marker:
             # Counterpart marker (f: "+" or m: "+") means forms differ by gender
             # (e.g., amico/amica, professore/professoressa)
-            result["gender_class"] = "common_gender_variable"
+            result["gender_class"] = GenderClass.COMMON_GENDER_VARIABLE
         else:
             # Check if forms differ by gender
             masc_forms: set[str] = set()
@@ -1255,21 +1256,21 @@ def _extract_noun_classification(entry: dict[str, Any]) -> dict[str, Any]:
                     fem_forms.add(form_stressed)
 
             if masc_forms and fem_forms and masc_forms != fem_forms:
-                result["gender_class"] = "common_gender_variable"
+                result["gender_class"] = GenderClass.COMMON_GENDER_VARIABLE
             else:
-                result["gender_class"] = "common_gender_fixed"
+                result["gender_class"] = GenderClass.COMMON_GENDER_FIXED
         result["genders"] = ["m", "f"]
     elif has_masculine:
-        result["gender_class"] = "m"
+        result["gender_class"] = GenderClass.M
         result["genders"] = ["m"]
     elif has_feminine:
-        result["gender_class"] = "f"
+        result["gender_class"] = GenderClass.F
         result["genders"] = ["f"]
     else:
         # Fall back to _extract_gender for simple cases
         simple_gender = _extract_gender(entry)
         if simple_gender:
-            result["gender_class"] = simple_gender
+            result["gender_class"] = GenderClass(simple_gender)
             result["genders"] = [simple_gender]
 
     # Determine number_class and its source
@@ -1550,7 +1551,7 @@ def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | 
         yield gloss, tags
 
 
-def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
+def _clear_existing_data(conn: Connection, pos_filter: POS) -> int:
     """Clear all existing data for the given POS.
 
     Deletes in FK-safe order: POS form tables → definitions → frequencies
@@ -1582,11 +1583,11 @@ def _clear_existing_data(conn: Connection, pos_filter: str) -> int:
     # 3. frequencies (references lemmas)
     conn.execute(frequencies.delete().where(frequencies.c.lemma_id.in_(lemma_subq)))
     # 4. POS-specific metadata tables
-    if pos_filter == "verb":
+    if pos_filter == POS.VERB:
         conn.execute(verb_metadata.delete().where(verb_metadata.c.lemma_id.in_(lemma_subq)))
-    elif pos_filter == "noun":
+    elif pos_filter == POS.NOUN:
         conn.execute(noun_metadata.delete().where(noun_metadata.c.lemma_id.in_(lemma_subq)))
-    elif pos_filter == "adjective":
+    elif pos_filter == POS.ADJECTIVE:
         conn.execute(
             adjective_metadata.delete().where(adjective_metadata.c.lemma_id.in_(lemma_subq))
         )
@@ -1873,10 +1874,10 @@ def _build_adjective_form_row(
 
 
 # Mapping from POS to form row builder
-POS_FORM_BUILDERS = {
-    "verb": _build_verb_form_row,
-    "noun": _build_noun_form_row,
-    "adjective": _build_adjective_form_row,
+POS_FORM_BUILDERS: dict[POS, Any] = {
+    POS.VERB: _build_verb_form_row,
+    POS.NOUN: _build_noun_form_row,
+    POS.ADJECTIVE: _build_adjective_form_row,
 }
 
 
@@ -1897,7 +1898,7 @@ def import_wiktextract(
     conn: Connection,
     jsonl_path: Path,
     *,
-    pos_filter: str = "verb",
+    pos_filter: POS = POS.VERB,
     batch_size: int = 1000,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
@@ -1910,7 +1911,7 @@ def import_wiktextract(
     Args:
         conn: SQLAlchemy connection
         jsonl_path: Path to the Wiktextract JSONL file
-        pos_filter: Part of speech to import (default: "verb")
+        pos_filter: Part of speech to import
         batch_size: Number of forms to insert per batch
         progress_callback: Optional callback for progress reporting (current, total)
 
@@ -2002,7 +2003,7 @@ def import_wiktextract(
         This handles inconsistent Wiktionary source data where the same form
         may appear multiple times with different annotations.
         """
-        if pos_filter == "verb":
+        if pos_filter == POS.VERB:
             key = _verb_form_key_normalized(row)
 
             # Case 1: Already seen in a PREVIOUS batch - skip entirely
@@ -2069,13 +2070,13 @@ def import_wiktextract(
     # Build lookup of accented alternatives for nouns
     # (fixes bug where Wiktextract stores "dei" but correct spelling is "dèi")
     stressed_alternatives: dict[str, str] | None = None
-    if pos_filter == "noun":
+    if pos_filter == POS.NOUN:
         stressed_alternatives = _build_stressed_alternatives(jsonl_path)
 
     # Build lookup of counterpart plurals for nouns
     # (fixes bug where "amico" gets "amici" for both genders instead of "amiche" for f)
     counterpart_plurals: dict[str, str] | None = None
-    if pos_filter == "noun":
+    if pos_filter == POS.NOUN:
         counterpart_plurals = _build_counterpart_plurals(jsonl_path)
 
     # Count lines for progress if callback provided
@@ -2110,7 +2111,7 @@ def import_wiktextract(
             # These are alternative spellings, apocopic forms, archaic variants, etc.
             # that shouldn't be separate lemmas. Mixed entries (with regular senses too)
             # are preserved. Adjective allomorphs are later imported via import_adjective_allomorphs().
-            if pos_filter in ("adjective", "noun") and _is_pure_alt_form_entry(entry):
+            if pos_filter in (POS.ADJECTIVE, POS.NOUN) and _is_pure_alt_form_entry(entry):
                 stats["alt_forms_skipped"] += 1
                 continue
 
@@ -2124,14 +2125,14 @@ def import_wiktextract(
             lemma_stressed = _extract_lemma_stressed(entry)
 
             # For nouns: skip known duplicate plural lemmas
-            if pos_filter == "noun" and lemma_stressed in SKIP_PLURAL_NOUN_LEMMAS:
+            if pos_filter == POS.NOUN and lemma_stressed in SKIP_PLURAL_NOUN_LEMMAS:
                 stats["skipped_plural_duplicate"] += 1
                 continue
 
             # For nouns: pre-check gender info before inserting lemma
             # Skip entries that would result in zero forms (incomplete Wiktionary entries)
             noun_class: dict[str, Any] | None = None
-            if pos_filter == "noun":
+            if pos_filter == POS.NOUN:
                 noun_class = _extract_noun_classification(entry)
                 gender_class = noun_class.get("gender_class")
                 # If no gender from classification, try fallback extraction
@@ -2162,7 +2163,7 @@ def import_wiktextract(
 
             # Insert POS-specific metadata
             lemma_gender: str | None = None
-            if pos_filter == "noun":
+            if pos_filter == POS.NOUN:
                 # noun_class was already extracted in the pre-check above
                 assert noun_class is not None
                 gender_class = noun_class.get("gender_class")
@@ -2184,12 +2185,12 @@ def import_wiktextract(
                         )
                     )
                     # Set lemma_gender for form generation (fallback for forms without explicit gender)
-                    if gender_class in ("m", "f"):
+                    if gender_class in (GenderClass.M, GenderClass.F):
                         lemma_gender = gender_class
-                    elif gender_class == "common_gender_fixed":
-                        # For fixed common gender (by_sense), same form for both - no default needed
+                    elif gender_class == GenderClass.COMMON_GENDER_FIXED:
+                        # For fixed common gender (BY_SENSE), same form for both - no default needed
                         lemma_gender = None
-                    elif gender_class == "common_gender_variable":
+                    elif gender_class == GenderClass.COMMON_GENDER_VARIABLE:
                         # For variable common gender (amico/amica), the lemma has a specific gender
                         # that tells us which gender untagged forms belong to
                         lemma_gender = _extract_gender(entry)
@@ -2199,7 +2200,7 @@ def import_wiktextract(
             form_meaning_hints: dict[str, str] = {}  # form_text -> meaning_hint
             synthesize_plurals: list[tuple[str, str, str]] = []  # (form, gender, hint)
 
-            if pos_filter == "noun":
+            if pos_filter == POS.NOUN:
                 # Extract qualifiers from head_templates (e.g., braccia<g:f><q:anatomical>)
                 plural_qualifiers = _extract_plural_qualifiers(entry)
 
@@ -2225,7 +2226,7 @@ def import_wiktextract(
                                 (form_text, gender, form_meaning_hints.get(form_text, ""))
                             )
 
-            elif pos_filter == "verb":
+            elif pos_filter == POS.VERB:
                 auxiliary = _extract_auxiliary(entry)
                 transitivity = _extract_transitivity(entry)
                 # Always insert verb_metadata so we have a row to update
@@ -2240,7 +2241,7 @@ def import_wiktextract(
                     )
                 )
 
-            elif pos_filter == "adjective":
+            elif pos_filter == POS.ADJECTIVE:
                 # Insert adjective metadata with inflection class
                 inflection_class = _get_adjective_inflection_class(entry)
                 conn.execute(
@@ -2276,7 +2277,7 @@ def import_wiktextract(
             # Key insight: m/s will ALWAYS exist unless the adjective is feminine-only,
             # because _iter_forms() adds the lemma word as m/s via base form inference.
             # For feminine-only adjectives (like "incinta"), only f/s exists.
-            adj_has_masc_singular = pos_filter == "adjective" and not _is_feminine_only_adjective(
+            adj_has_masc_singular = pos_filter == POS.ADJECTIVE and not _is_feminine_only_adjective(
                 entry
             )
 
@@ -2284,7 +2285,7 @@ def import_wiktextract(
             # (used to avoid duplicating untagged plurals when explicit ones exist)
             explicit_fem_plurals: set[str] = set()
             explicit_masc_plurals: set[str] = set()
-            if pos_filter == "noun":
+            if pos_filter == POS.NOUN:
                 for form_data in entry.get("forms", []):
                     form_text = form_data.get("form", "")
                     form_tags = form_data.get("tags", [])
@@ -2297,7 +2298,7 @@ def import_wiktextract(
             for form_stressed, tags, form_origin in _iter_forms(
                 entry, pos_filter, stressed_alternatives
             ):
-                if pos_filter == "noun":
+                if pos_filter == POS.NOUN:
                     # Get number_class for citation form determination
                     loop_number_class = (
                         noun_class.get("number_class", "standard") if noun_class else "standard"
@@ -2311,24 +2312,24 @@ def import_wiktextract(
                     # Check if this is a common gender noun without explicit gender in tags
                     has_gender_tag = "masculine" in tags or "feminine" in tags
                     is_common_gender = noun_class and noun_class.get("gender_class") in (
-                        "common_gender_fixed",
-                        "common_gender_variable",
-                        "by_sense",
+                        GenderClass.COMMON_GENDER_FIXED,
+                        GenderClass.COMMON_GENDER_VARIABLE,
+                        GenderClass.BY_SENSE,
                     )
 
                     if is_common_gender and not has_gender_tag:
                         # For common_gender nouns without explicit gender tags:
-                        # - common_gender_fixed/by_sense: same form works for both genders
-                        # - common_gender_variable: different forms for m/f (need counterpart lookup)
+                        # - COMMON_GENDER_FIXED/BY_SENSE: same form works for both genders
+                        # - COMMON_GENDER_VARIABLE: different forms for m/f (need counterpart lookup)
                         gender_class = noun_class.get("gender_class") if noun_class else None
-                        is_variable_gender = gender_class == "common_gender_variable"
+                        is_variable_gender = gender_class == GenderClass.COMMON_GENDER_VARIABLE
 
                         if is_variable_gender and "plural" in tags:
                             # Smart handling for variable-gender nouns (e.g., amico/amica)
                             # Guard: need lemma_gender to determine which gender this belongs to
                             if not lemma_gender:
                                 logger.warning(
-                                    f"Noun '{word}' is common_gender_variable with untagged "
+                                    f"Noun '{word}' is GenderClass.COMMON_GENDER_VARIABLE with untagged "
                                     f"plural '{form_stressed}' but has no lemma gender. Skipping."
                                 )
                                 continue
@@ -2435,7 +2436,7 @@ def import_wiktextract(
                             continue
 
                         else:
-                            # For fixed-gender nouns (by_sense) or non-plural forms:
+                            # For fixed-gender nouns (GenderClass.BY_SENSE) or non-plural forms:
                             # duplicate for both genders with same form
                             # Only mark first gender (m) as citation form to avoid duplicates
                             citation_marked = False
@@ -2486,7 +2487,7 @@ def import_wiktextract(
                                 seen_base_forms.add((number, gender))
                 else:
                     # Pass form_origin to all POS form builders
-                    if pos_filter == "adjective":
+                    if pos_filter == POS.ADJECTIVE:
                         # Citation form: m/s for standard adjectives, f/s only for feminine-only
                         is_masc_singular = "masculine" in tags and "singular" in tags
                         is_fem_singular = "feminine" in tags and "singular" in tags
@@ -2507,7 +2508,7 @@ def import_wiktextract(
                         )
                         if row and is_adj_citation:
                             adj_citation_marked = True
-                    elif pos_filter == "verb":
+                    elif pos_filter == POS.VERB:
                         # Citation form is infinitive (tagged as "infinitive" or "canonical")
                         # Only mark first infinitive to avoid duplicates for stress variants
                         is_infinitive = "infinitive" in tags or "canonical" in tags
@@ -2533,7 +2534,7 @@ def import_wiktextract(
 
             # For nouns: synthesize plurals from head_templates (braccio-type cases)
             # These are forms that only exist in head_templates, not in the forms array
-            if pos_filter == "noun" and synthesize_plurals:
+            if pos_filter == POS.NOUN and synthesize_plurals:
                 for form_text, gender, hint in synthesize_plurals:
                     if ("plural", gender) not in seen_base_forms:
                         row = _build_noun_form_row(
@@ -2551,16 +2552,16 @@ def import_wiktextract(
 
             # For nouns: add base form from lemma word if not already present
             # The lemma word is always the base form (singular for regular, plural for pluralia tantum)
-            if pos_filter == "noun" and noun_class:
+            if pos_filter == POS.NOUN and noun_class:
                 number_class = noun_class.get("number_class", "standard")
                 gender_class = noun_class.get("gender_class")
                 is_pluralia_tantum = number_class == "pluralia_tantum"
                 base_number = "plural" if is_pluralia_tantum else "singular"
 
                 is_common_gender = gender_class in (
-                    "common_gender_fixed",
-                    "common_gender_variable",
-                    "by_sense",
+                    GenderClass.COMMON_GENDER_FIXED,
+                    GenderClass.COMMON_GENDER_VARIABLE,
+                    GenderClass.BY_SENSE,
                 )
 
                 if is_common_gender:
@@ -2634,7 +2635,7 @@ def import_wiktextract(
                             add_form(row)
 
             # Queue definitions with form_meaning_hint for soft key linkage
-            if pos_filter == "noun" and word in DEFINITION_FORM_LINKAGE:
+            if pos_filter == POS.NOUN and word in DEFINITION_FORM_LINKAGE:
                 # This lemma has meaning-dependent plurals - link definitions to forms
                 linkage = DEFINITION_FORM_LINKAGE[word]
                 for sense in entry.get("senses", []):
@@ -2699,14 +2700,14 @@ def import_wiktextract(
 
     # Post-processing: Link relationships
     # (must happen after all lemmas are inserted so we can resolve lemma IDs)
-    if pos_filter == "adjective":
+    if pos_filter == POS.ADJECTIVE:
         degree_stats = link_comparative_superlative(conn, degree_links)
 
         # Add linking stats to main stats dict
         stats["degree_linked"] = degree_stats["linked"]
         stats["degree_base_not_found"] = degree_stats["base_not_found"]
 
-    if pos_filter == "verb":
+    if pos_filter == POS.VERB:
         pronominal_stats = link_pronominal_verbs(conn)
 
         # Add pronominal linking stats to main stats dict
@@ -2715,7 +2716,7 @@ def import_wiktextract(
         stats["pronominal_inherent"] = pronominal_stats["inherent_pronominal"]
         stats["pronominal_parse_failed"] = pronominal_stats["base_form_parse_failed"]
 
-    if pos_filter == "noun":
+    if pos_filter == POS.NOUN:
         # Link gender counterpart pairs (professore↔professoressa)
         counterpart_stats = link_noun_counterparts(conn, jsonl_path)
         stats["counterparts_found"] = counterpart_stats["counterparts_found"]
@@ -2737,7 +2738,7 @@ def import_wiktextract(
         progress_callback(total_lines, total_lines)
 
     # Log aggregated noun gender/plural warnings (if any)
-    if pos_filter == "noun":
+    if pos_filter == POS.NOUN:
         if stats.get("counterpart_no_plural", 0) > 0:
             logger.info(
                 "Noun plurals: %d counterparts had no plural form in lookup (Wiktextract data gap)",
@@ -2799,7 +2800,7 @@ def enrich_from_form_of_entries(
     conn: Connection,
     jsonl_path: Path,
     *,
-    pos_filter: str = "verb",
+    pos_filter: POS = POS.VERB,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Extract labels and spelling from form-of entries in a single pass.
@@ -2818,7 +2819,7 @@ def enrich_from_form_of_entries(
     Args:
         conn: SQLAlchemy connection
         jsonl_path: Path to the Wiktextract JSONL file
-        pos_filter: Part of speech to enrich (default: "verb")
+        pos_filter: Part of speech to enrich
         progress_callback: Optional callback for progress reporting (current, total)
 
     Returns:
@@ -3043,7 +3044,9 @@ def link_comparative_superlative(
     # Use written form (not normalized stressed) to preserve orthographic distinctions.
     # Fall back to derive_written_from_stressed() if written is not yet populated.
     result = conn.execute(
-        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == "adjective")
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(
+            lemmas.c.pos == POS.ADJECTIVE
+        )
     )
     lemma_lookup: dict[str, int] = {}
     for row in result:
@@ -3109,7 +3112,7 @@ def link_pronominal_verbs(conn: Connection) -> dict[str, int]:
     # Use written form (not normalized stressed) to preserve orthographic distinctions.
     # Fall back to derive_written_from_stressed() if written is not yet populated.
     result = conn.execute(
-        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == "verb")
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == POS.VERB)
     )
     lemma_lookup: dict[str, int] = {}
     for row in result:
@@ -3118,7 +3121,7 @@ def link_pronominal_verbs(conn: Connection) -> dict[str, int]:
             lemma_lookup[written] = row.id
 
     # Get stressed forms for pronominal detection
-    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == "verb"))
+    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == POS.VERB))
 
     for row in result:
         lemma_id = row.id
@@ -3213,7 +3216,7 @@ def link_noun_counterparts(
     # Build lookup: written_form -> lemma_id for nouns
     # Use written form (not normalized stressed) to preserve orthographic distinctions.
     result = conn.execute(
-        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == "noun")
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == POS.NOUN)
     )
     noun_lookup: dict[str, int] = {}
     for row in result:
@@ -3372,7 +3375,7 @@ def link_noun_derivations(
 
     # Build lookup: written_form -> lemma_id for nouns
     result = conn.execute(
-        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == "noun")
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == POS.NOUN)
     )
     noun_lookup: dict[str, int] = {}
     for row in result:
@@ -3409,22 +3412,22 @@ def link_noun_derivations(
                 gloss = glosses[0] if glosses else ""
 
                 # Determine derivation type from tags
-                derivation_type = None
+                derivation_type: DerivationType | None = None
                 if "diminutive" in tags:
-                    derivation_type = "diminutive"
+                    derivation_type = DerivationType.DIMINUTIVE
                 elif "augmentative" in tags:
-                    derivation_type = "augmentative"
+                    derivation_type = DerivationType.AUGMENTATIVE
                 elif "pejorative" in tags:
-                    derivation_type = "pejorative"
+                    derivation_type = DerivationType.PEJORATIVE
 
                 # Also check gloss patterns if no tag
                 if derivation_type is None:
                     if "diminutive of " in gloss.lower():
-                        derivation_type = "diminutive"
+                        derivation_type = DerivationType.DIMINUTIVE
                     elif "augmentative of " in gloss.lower():
-                        derivation_type = "augmentative"
+                        derivation_type = DerivationType.AUGMENTATIVE
                     elif "pejorative of " in gloss.lower():
-                        derivation_type = "pejorative"
+                        derivation_type = DerivationType.PEJORATIVE
 
                 if derivation_type is None:
                     continue
@@ -3527,7 +3530,9 @@ def import_adjective_allomorphs(
     # Use written form (not normalized stressed) to preserve orthographic distinctions.
     # Fall back to derive_written_from_stressed() if written is not yet populated.
     result = conn.execute(
-        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == "adjective")
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(
+            lemmas.c.pos == POS.ADJECTIVE
+        )
     )
     adj_lookup: dict[str, int] = {}
     for row in result:
@@ -3738,7 +3743,7 @@ def import_noun_allomorphs(
     # Use written form (not normalized stressed) to preserve orthographic distinctions.
     # Fall back to derive_written_from_stressed() if written is not yet populated.
     result = conn.execute(
-        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == "noun")
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == POS.NOUN)
     )
     noun_lookup: dict[str, int] = {}
     for row in result:
@@ -4073,7 +4078,7 @@ def enrich_missing_feminine_plurals(
     *,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
-    """Add missing feminine plural forms to common_gender_variable nouns.
+    """Add missing feminine plural forms to GenderClass.COMMON_GENDER_VARIABLE nouns.
 
     This enrichment phase:
     1. Finds nouns with f.sg but missing f.pl
@@ -4103,7 +4108,7 @@ def enrich_missing_feminine_plurals(
     }
 
     # Phase 1: Find all nouns with missing f.pl
-    # Query: common_gender_variable nouns with f.sg but no f.pl
+    # Query: GenderClass.COMMON_GENDER_VARIABLE nouns with f.sg but no f.pl
     missing_query = (
         select(
             lemmas.c.id.label("noun_lemma_id"),
@@ -4117,7 +4122,7 @@ def enrich_missing_feminine_plurals(
             )
         )
         .where(
-            noun_metadata.c.gender_class == "common_gender_variable",
+            noun_metadata.c.gender_class == GenderClass.COMMON_GENDER_VARIABLE,
             noun_forms.c.gender == "f",
             noun_forms.c.number == "singular",
         )

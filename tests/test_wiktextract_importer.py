@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import select
 
 from italian_anki.db import (
+    POS,
     adjective_forms,
     adjective_metadata,
     definitions,
@@ -445,7 +446,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["lemmas"] == 2
 
@@ -499,7 +500,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             assert stats["lemmas"] == 1
             assert stats["forms"] >= 4  # 4 forms (canonical kept for adjectives + gender/number)
@@ -546,7 +547,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             assert stats["lemmas"] == 1
             # Should have 4 forms: alto (base), alta (inferred singular), alti, alte
@@ -583,7 +584,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             assert stats["lemmas"] == 1
             # Should have 4 forms for 2-form adjective:
@@ -639,7 +640,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             assert stats["lemmas"] == 1
             # Should have exactly 4 forms for invariable adjective:
@@ -690,7 +691,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             with get_connection(db_path) as conn:
                 # Check invariable adjective form_origin
@@ -740,7 +741,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             with get_connection(db_path) as conn:
                 # Check 4-form adjective (bello)
@@ -793,7 +794,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             with get_connection(db_path) as conn:
                 # Check ottimista is detected as 2-form
@@ -847,7 +848,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             # Only the valid adjective should be imported
             assert stats["lemmas"] == 1
@@ -888,7 +889,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="verb")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.VERB)
 
             # Only the valid verb should be imported
             assert stats["lemmas"] == 1
@@ -932,7 +933,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             # Only the valid noun should be imported
             assert stats["lemmas"] == 1
@@ -970,7 +971,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
             # Both should be imported
             assert stats["lemmas"] == 2
@@ -1013,18 +1014,18 @@ class TestWiktextractImporter:
 
             # Import verb
             with get_connection(db_path) as conn:
-                verb_stats = import_wiktextract(conn, jsonl_path, pos_filter="verb")
+                verb_stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.VERB)
             assert verb_stats["lemmas"] == 1
 
             # Import noun
             with get_connection(db_path) as conn:
-                noun_stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                noun_stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
             assert noun_stats["lemmas"] == 1
             assert noun_stats["cleared"] == 0  # No nouns to clear from first import
 
             # Import adjective
             with get_connection(db_path) as conn:
-                adj_stats = import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                adj_stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
             assert adj_stats["lemmas"] == 1
             assert adj_stats["cleared"] == 0
 
@@ -1169,7 +1170,7 @@ class TestWiktextractImporter:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             # Only nouns with gender should be imported (noun without gender is skipped)
             assert stats["lemmas"] == 2
@@ -1454,7 +1455,7 @@ class TestNounClassification:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["lemmas"] == 1
 
@@ -1507,7 +1508,7 @@ class TestNounClassification:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["lemmas"] == 1
 
@@ -1553,7 +1554,7 @@ class TestNounClassification:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["lemmas"] == 1
 
@@ -1595,7 +1596,7 @@ class TestNounClassification:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["lemmas"] == 1
 
@@ -1640,7 +1641,7 @@ class TestNounClassification:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["lemmas"] == 1
 
@@ -1683,7 +1684,7 @@ class TestNounClassification:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["lemmas"] == 1
 
@@ -1716,7 +1717,7 @@ class TestNounClassification:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["lemmas"] == 1
 
@@ -1757,7 +1758,7 @@ class TestNounClassification:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["lemmas"] == 1
 
@@ -1790,7 +1791,7 @@ class TestNounClassification:
 
             # First import
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             # Check metadata exists
             with get_connection(db_path) as conn:
@@ -1799,7 +1800,7 @@ class TestNounClassification:
 
             # Second import (should clear and reimport)
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["cleared"] == 1
 
@@ -1838,7 +1839,7 @@ class TestNounClassification:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["lemmas"] == 1
 
@@ -1916,7 +1917,7 @@ class TestNounClassification:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             # Should import only 1 lemma (amico) - amica is the counterpart
             # (both would be imported as separate lemmas, but we check amico's forms)
@@ -1981,7 +1982,7 @@ class TestNounClassification:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["lemmas"] == 1
 
@@ -2044,7 +2045,7 @@ class TestNounClassification:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
             assert stats["lemmas"] == 1  # Only dio is a lemma
 
@@ -2106,7 +2107,7 @@ class TestImportAdjAllomorphs:
 
             with get_connection(db_path) as conn:
                 # First import adjectives (grande only, gran skipped)
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
                 # Then import allomorphs
                 stats = import_adjective_allomorphs(conn, jsonl_path)
@@ -2169,7 +2170,7 @@ class TestImportAdjAllomorphs:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
                 import_adjective_allomorphs(conn, jsonl_path)
 
             with get_connection(db_path) as conn:
@@ -2220,7 +2221,7 @@ class TestImportAdjAllomorphs:
 
             with get_connection(db_path) as conn:
                 # Import without parent
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
                 stats = import_adjective_allomorphs(conn, jsonl_path)
 
             # Should track as parent_not_found
@@ -2259,7 +2260,7 @@ class TestImportAdjAllomorphs:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="adjective")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
                 stats = import_adjective_allomorphs(conn, jsonl_path)
 
             # Should have added 1 hardcoded form: san (sant' comes from Morphit)
@@ -2330,7 +2331,7 @@ class TestImportNounAllomorphs:
 
             with get_connection(db_path) as conn:
                 # First import nouns (colore only, color skipped as alt-of)
-                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
                 # Then import allomorphs
                 stats = import_noun_allomorphs(conn, jsonl_path)
@@ -2400,7 +2401,7 @@ class TestImportNounAllomorphs:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
                 stats = import_noun_allomorphs(conn, jsonl_path)
 
             assert stats["allomorphs_added"] == 1
@@ -2449,7 +2450,7 @@ class TestImportNounAllomorphs:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
                 stats = import_noun_allomorphs(conn, jsonl_path)
 
             assert stats["parent_not_found"] == 1
@@ -2495,7 +2496,7 @@ class TestImportNounAllomorphs:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
                 stats = import_noun_allomorphs(conn, jsonl_path)
 
             # Should have added hardcoded forms: san -> santo, cor -> cuore
@@ -2577,7 +2578,7 @@ class TestImportNounAllomorphs:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="noun")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
                 stats = import_noun_allomorphs(conn, jsonl_path)
 
             # Should not have added any allomorphs from the_entry (no apocopic tag)
@@ -2614,7 +2615,7 @@ class TestNormalizationsAndOverrides:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="verb")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.VERB)
 
             with get_connection(db_path) as conn:
                 lemma = conn.execute(
@@ -2656,7 +2657,7 @@ class TestNormalizationsAndOverrides:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="verb")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.VERB)
 
             with get_connection(db_path) as conn:
                 forms = conn.execute(select(verb_forms)).fetchall()
@@ -2718,7 +2719,7 @@ class TestNormalizationsAndOverrides:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                import_wiktextract(conn, jsonl_path, pos_filter="verb")
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.VERB)
 
             with get_connection(db_path) as conn:
                 lemma = conn.execute(
@@ -2753,7 +2754,7 @@ class TestNormalizationsAndOverrides:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="verb")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.VERB)
 
             assert stats["blocklisted_lemmas"] >= 1
 
@@ -2788,7 +2789,7 @@ class TestNormalizationsAndOverrides:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                stats = import_wiktextract(conn, jsonl_path, pos_filter="verb")
+                stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.VERB)
 
             assert stats["blocklisted_lemmas"] >= 1
 
