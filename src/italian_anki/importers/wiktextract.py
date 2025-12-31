@@ -4503,7 +4503,7 @@ def enrich_missing_feminine_plurals(
                     noun_forms.insert().values(
                         lemma_id=noun_lemma_id,
                         written=f_pl_written,
-                        written_source=None,  # Same as f.sg, not derived
+                        written_source="copied:f_sg",  # Written form copied from f.sg
                         stressed=f_pl_stressed,
                         gender="f",
                         number="plural",
