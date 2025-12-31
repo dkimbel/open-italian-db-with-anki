@@ -2086,6 +2086,10 @@ def import_wiktextract(
     seen_verb_keys: set[tuple[Any, ...]] = set()
     current_batch_map: dict[tuple[Any, ...], tuple[dict[str, Any], int]] = {}
 
+    # Track unique noun forms to avoid duplicates (some nouns have multiple Wiktextract entries)
+    # Key: (lemma_id, stressed, gender, number)
+    seen_noun_keys: set[tuple[int, str, str, str]] = set()
+
     def _verb_form_key_normalized(row: dict[str, Any]) -> tuple[Any, ...]:
         """Create a grammatical key for verb form deduplication.
 
@@ -2115,7 +2119,7 @@ def import_wiktextract(
         return "ó" in stressed or "é" in stressed or "Ó" in stressed or "É" in stressed
 
     def add_form(row: dict[str, Any]) -> bool:
-        """Add a form to the batch, with deduplication for verbs.
+        """Add a form to the batch, with deduplication for verbs and nouns.
 
         Returns True if the form was added, False if it was a duplicate.
 
@@ -2124,6 +2128,9 @@ def import_wiktextract(
            with and without labels, keep unlabeled)
         2. Prefer grave over acute accents (when same slot exists with both
            accent types like accòrgo vs accórgo, keep grave)
+
+        For nouns, implements simple deduplication by (lemma_id, stressed,
+        gender, number) - first form wins, duplicates are skipped.
 
         This handles inconsistent Wiktionary source data where the same form
         may appear multiple times with different annotations.
@@ -2176,6 +2183,13 @@ def import_wiktextract(
             # Case 3: New form - add to both tracking structures
             seen_verb_keys.add(key)
             current_batch_map[key] = (row, len(form_batch))
+
+        # Noun deduplication: simple key-based check (no replacement logic needed)
+        if pos_filter == POS.NOUN:
+            key = (row["lemma_id"], row["stressed"], row["gender"], row["number"])
+            if key in seen_noun_keys:
+                return False
+            seen_noun_keys.add(key)
 
         form_batch.append(row)
         return True
@@ -4346,9 +4360,14 @@ def enrich_missing_feminine_plurals(
         .distinct()
     )
 
-    # Get all candidates
+    # Get all candidates (deduplicate by lemma_id since adjective lookup is by lemma)
+    # This prevents adding the same f.pl multiple times when a noun has multiple f.sg variants
     candidates: list[Any] = []
+    seen_lemma_ids: set[int] = set()
     for row in conn.execute(missing_query):
+        # Skip if we already have a candidate for this lemma
+        if row.noun_lemma_id in seen_lemma_ids:
+            continue
         # Check if f.pl already exists
         exists = conn.execute(
             select(func.count())
@@ -4361,6 +4380,7 @@ def enrich_missing_feminine_plurals(
         ).scalar()
         if exists == 0:
             candidates.append(row)
+            seen_lemma_ids.add(row.noun_lemma_id)
 
     stats["total_missing"] = len(candidates)
 
@@ -4368,12 +4388,13 @@ def enrich_missing_feminine_plurals(
         progress_callback(0, len(candidates))
 
     # Phase 2: Build adjective f.pl lookup
-    # Map: lemma_written -> (written, stressed) from adjective_forms
-    adj_f_pl_lookup: dict[str, tuple[str | None, str]] = {}
+    # Map: lemma_written -> (written, written_source, stressed) from adjective_forms
+    adj_f_pl_lookup: dict[str, tuple[str | None, str | None, str]] = {}
     adj_query = (
         select(
             lemmas.c.written.label("lemma_written"),
             adjective_forms.c.written,
+            adjective_forms.c.written_source,
             adjective_forms.c.stressed,
         )
         .select_from(lemmas.join(adjective_forms, adjective_forms.c.lemma_id == lemmas.c.id))
@@ -4386,7 +4407,7 @@ def enrich_missing_feminine_plurals(
     for row in conn.execute(adj_query):
         # Use first match if multiple (shouldn't happen for well-formed data)
         if row.lemma_written not in adj_f_pl_lookup:
-            adj_f_pl_lookup[row.lemma_written] = (row.written, row.stressed)
+            adj_f_pl_lookup[row.lemma_written] = (row.written, row.written_source, row.stressed)
 
     # Phase 3: Process each candidate
     for i, candidate in enumerate(candidates):
@@ -4400,18 +4421,20 @@ def enrich_missing_feminine_plurals(
 
         # Try to copy from adjective first
         if lemma_written in adj_f_pl_lookup:
-            adj_written, adj_stressed = adj_f_pl_lookup[lemma_written]
+            adj_written, _adj_written_source, adj_stressed = adj_f_pl_lookup[lemma_written]
 
             # Compute article
             def_article, article_source = get_definite(adj_stressed, "f", "plural")
 
-            # Derive written form if not available
+            # Use adjective's written form if available, otherwise derive
             written = adj_written
-            written_source = None
-            if written is None:
+            if written is not None:
+                # Adjective has a written form - mark as copied
+                written_source = "copied:adjective"
+            else:
+                # No written form from adjective - try to derive
                 written = derive_written_from_stressed(adj_stressed)
-                if written is not None:
-                    written_source = "derived:orthography_rule"
+                written_source = "derived:orthography_rule" if written is not None else None
 
             # Insert the form
             try:

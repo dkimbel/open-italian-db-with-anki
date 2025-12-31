@@ -102,6 +102,9 @@ noun_forms = Table(
     # Citation form marker - True for the canonical/dictionary form
     # (singular for standard nouns, plural for pluralia tantum)
     Column("is_citation_form", Boolean, default=False),
+    # Unique constraint: prevents duplicate forms for the same lemma
+    # Note: Uses stressed (not written) because written is nullable and NULL != NULL in SQL
+    UniqueConstraint("lemma_id", "stressed", "gender", "number", name="uq_noun_forms_entry"),
 )
 
 # Adjective forms with grammatical features
