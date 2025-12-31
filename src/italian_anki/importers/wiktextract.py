@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Connection, func, select, update
+from sqlalchemy import Connection, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from italian_anki.articles import get_definite
@@ -2847,6 +2847,10 @@ def import_wiktextract(
         stats["pronominal_inherent"] = pronominal_stats["inherent_pronominal"]
         stats["pronominal_parse_failed"] = pronominal_stats["base_form_parse_failed"]
 
+        # Sync lemma stress with citation form (fixes acute→grave mismatches)
+        stress_sync_stats = sync_verb_lemma_stress(conn)
+        stats["lemma_stress_synced"] = stress_sync_stats["synced"]
+
     if pos_filter == POS.NOUN:
         # Link gender counterpart pairs (professore↔professoressa)
         counterpart_stats = link_noun_counterparts(conn, jsonl_path)
@@ -3311,6 +3315,47 @@ def link_pronominal_verbs(conn: Connection) -> dict[str, int]:
             stats["inherent_pronominal"] += 1
 
     return stats
+
+
+def sync_verb_lemma_stress(conn: Connection) -> dict[str, int]:
+    """Sync verb lemma stressed forms with their citation forms.
+
+    During import, verb forms go through deduplication that prefers grave accents
+    over acute accents. The lemma is created before this processing, so it may
+    retain an acute accent while the citation form has been corrected to grave.
+
+    This function updates lemmas.stressed to match verb_forms.stressed where
+    is_citation_form=1, but ONLY when the difference is accent type (acute→grave)
+    on the same vowel, not when the stress position differs.
+
+    For example:
+    - scéndere → scèndere: YES (same vowel, acute→grave)
+    - suggére → sùggere: NO (different syllable stressed)
+
+    Returns:
+        Dict with 'synced' count of lemmas that were updated.
+    """
+    result = conn.execute(
+        text("""
+            UPDATE lemmas
+            SET stressed = (
+                SELECT vf.stressed
+                FROM verb_forms vf
+                WHERE vf.lemma_id = lemmas.id AND vf.is_citation_form = 1
+            )
+            WHERE pos = 'verb' AND EXISTS (
+                SELECT 1 FROM verb_forms vf
+                WHERE vf.lemma_id = lemmas.id
+                  AND vf.is_citation_form = 1
+                  AND vf.stressed != lemmas.stressed
+                  -- Only sync if the citation form, with grave→acute substitution,
+                  -- equals the lemma. This ensures we're only fixing accent type
+                  -- (acute→grave), not changing which syllable is stressed.
+                  AND REPLACE(REPLACE(vf.stressed, 'è', 'é'), 'ò', 'ó') = lemmas.stressed
+            )
+        """)
+    )
+    return {"synced": result.rowcount}
 
 
 def link_noun_counterparts(
