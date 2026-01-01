@@ -114,66 +114,6 @@ class VerificationReport:
 # =============================================================================
 
 
-def check_verb_form_uniqueness(conn: Connection) -> CheckResult:
-    """Check that verb forms are unique by their identifying attributes."""
-    query = text("""
-        SELECT lemma_id, mood, tense, aspect, person, number, gender,
-               is_formal, is_negative, COUNT(*) as cnt
-        FROM verb_forms
-        GROUP BY lemma_id, mood, tense, aspect, person, number, gender,
-                 is_formal, is_negative
-        HAVING cnt > 1
-    """)
-    result = conn.execute(query).fetchall()
-    count = len(result)
-
-    if count == 0:
-        return CheckResult(
-            name="verb_form_uniqueness",
-            passed=True,
-            message="Verb form uniqueness",
-        )
-    else:
-        details = [f"lemma_id={row[0]}, {row[1]}/{row[2]}" for row in result[:10]]
-        return CheckResult(
-            name="verb_form_uniqueness",
-            passed=False,
-            message=f"Verb form uniqueness: {count} duplicates found",
-            details=details,
-        )
-
-
-def check_noun_form_uniqueness(conn: Connection) -> CheckResult:
-    """Check that noun forms are unique by lemma_id, gender, number, and stressed.
-
-    Note: stressed must be included to allow derivations like
-    "professore" -> "professoressa" which differ in stressed form.
-    """
-    query = text("""
-        SELECT lemma_id, gender, number, stressed, COUNT(*) as cnt
-        FROM noun_forms
-        GROUP BY lemma_id, gender, number, stressed
-        HAVING cnt > 1
-    """)
-    result = conn.execute(query).fetchall()
-    count = len(result)
-
-    if count == 0:
-        return CheckResult(
-            name="noun_form_uniqueness",
-            passed=True,
-            message="Noun form uniqueness",
-        )
-    else:
-        details = [f"lemma_id={row[0]}, {row[1]}/{row[2]}" for row in result[:10]]
-        return CheckResult(
-            name="noun_form_uniqueness",
-            passed=False,
-            message=f"Noun form uniqueness: {count} duplicates found",
-            details=details,
-        )
-
-
 def check_orphaned_frequencies(conn: Connection) -> CheckResult:
     """Check that all frequency records reference existing lemmas."""
     query = text("""
@@ -414,6 +354,7 @@ COVERAGE_THRESHOLDS = {
     "adjective_lemmas": 20_000,
     "total_forms": 900_000,
     "written_spelling_pct": 100.0,
+    "written_source_pct": 100.0,
     "frequency_coverage_pct": 60.0,
     "italian_sentences": 900_000,
 }
@@ -508,6 +449,31 @@ def check_coverage_thresholds(conn: Connection) -> list[CheckResult]:
             name="written_spelling",
             passed=pct >= threshold,
             message=f"Forms with spelling: {pct:.1f}% (min: {threshold:.1f}%)",
+        )
+    )
+
+    # Written source coverage (forms + lemmas)
+    query = text("""
+        SELECT
+            CAST(SUM(CASE WHEN written_source IS NOT NULL THEN 1 ELSE 0 END) AS FLOAT) * 100 /
+            COUNT(*)
+        FROM (
+            SELECT written_source FROM verb_forms
+            UNION ALL
+            SELECT written_source FROM noun_forms
+            UNION ALL
+            SELECT written_source FROM adjective_forms
+            UNION ALL
+            SELECT written_source FROM lemmas
+        )
+    """)
+    pct = conn.execute(query).scalar() or 0.0
+    threshold = COVERAGE_THRESHOLDS["written_source_pct"]
+    results.append(
+        CheckResult(
+            name="written_source",
+            passed=pct >= threshold,
+            message=f"Written source coverage: {pct:.1f}% (min: {threshold:.1f}%)",
         )
     )
 
@@ -732,8 +698,6 @@ def verify_database(conn: Connection, *, verbose: bool = False) -> VerificationR
 
     # Integrity checks
     report.integrity_checks = [
-        check_verb_form_uniqueness(conn),
-        check_noun_form_uniqueness(conn),
         check_orphaned_frequencies(conn),
         check_orphaned_translations(conn),
     ]

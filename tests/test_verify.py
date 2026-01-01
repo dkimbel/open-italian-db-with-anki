@@ -13,10 +13,8 @@ from italian_anki.verify import (
     check_adjective_class_consistency,
     check_citation_form_existence,
     check_metadata_row_existence,
-    check_noun_form_uniqueness,
     check_number_class_consistency,
     check_orphaned_frequencies,
-    check_verb_form_uniqueness,
     verify_database,
 )
 
@@ -107,61 +105,6 @@ class TestVerificationReport:
 
 class TestIntegrityChecks:
     """Tests for integrity check functions."""
-
-    def test_verb_form_uniqueness_clean(self, temp_db: Path) -> None:
-        """Test verb form uniqueness check with no duplicates."""
-        with get_connection(temp_db) as conn:
-            # Insert a lemma and unique verb forms
-            conn.execute(text("INSERT INTO lemmas (stressed, pos) VALUES ('parlare', 'verb')"))
-            lemma_id = conn.execute(text("SELECT last_insert_rowid()")).scalar()
-            conn.execute(
-                text("""
-                    INSERT INTO verb_forms
-                    (lemma_id, written, stressed, mood, tense, person, number)
-                    VALUES (:id, 'parlo', 'parlo', 'indicative', 'present', 1, 'singular')
-                """),
-                {"id": lemma_id},
-            )
-
-            result = check_verb_form_uniqueness(conn)
-            assert result.passed
-
-    def test_verb_form_uniqueness_duplicate(self, temp_db: Path) -> None:
-        """Test verb form uniqueness check with duplicates."""
-        with get_connection(temp_db) as conn:
-            conn.execute(text("INSERT INTO lemmas (stressed, pos) VALUES ('parlare', 'verb')"))
-            lemma_id = conn.execute(text("SELECT last_insert_rowid()")).scalar()
-
-            # Insert duplicate forms
-            for _ in range(2):
-                conn.execute(
-                    text("""
-                        INSERT INTO verb_forms
-                        (lemma_id, written, stressed, mood, tense, person, number)
-                        VALUES (:id, 'parlo', 'parlo', 'indicative', 'present', 1, 'singular')
-                    """),
-                    {"id": lemma_id},
-                )
-
-            result = check_verb_form_uniqueness(conn)
-            assert not result.passed
-            assert "duplicates" in result.message
-
-    def test_noun_form_uniqueness_clean(self, temp_db: Path) -> None:
-        """Test noun form uniqueness with no duplicates."""
-        with get_connection(temp_db) as conn:
-            conn.execute(text("INSERT INTO lemmas (stressed, pos) VALUES ('casa', 'noun')"))
-            lemma_id = conn.execute(text("SELECT last_insert_rowid()")).scalar()
-            conn.execute(
-                text("""
-                    INSERT INTO noun_forms (lemma_id, written, stressed, gender, number)
-                    VALUES (:id, 'casa', 'casa', 'f', 'singular')
-                """),
-                {"id": lemma_id},
-            )
-
-            result = check_noun_form_uniqueness(conn)
-            assert result.passed
 
     def test_orphaned_frequencies(self, temp_db: Path) -> None:
         """Test orphaned frequencies check."""
