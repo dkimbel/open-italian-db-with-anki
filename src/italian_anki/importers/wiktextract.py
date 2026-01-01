@@ -1029,6 +1029,285 @@ SKIP_PLURAL_NOUN_LEMMAS: frozenset[str] = frozenset(
 # NOTE: This ONLY blocks the apocopic allomorph forms, not any homonyms.
 SKIP_APOCOPIC_ALLOMORPHS: frozenset[str] = frozenset({"final", "fin"})
 
+# Per-lemma blocklist: adjective forms to skip when importing
+# These are archaic, dialectal, erroneous, or non-standard forms
+# Aggressive list - learners should learn modern standard Italian
+BLOCKED_ADJECTIVE_FORMS: dict[str, set[str]] = {
+    # === Archaic spellings ===
+    "tedesco": {"thedesco", "thedeschi", "thedesca", "thedesche"},
+    "ebreo": {"hebreo", "hebrei", "hebrea", "hebree"},
+    "storico": {"istorico", "istorici", "istorica", "istoriche"},
+    "pratico": {
+        "practico",
+        "practici",
+        "practica",
+        "practiche",
+        "prattico",
+        "prattici",
+        "prattica",
+        "prattiche",
+    },
+    # === Dialectal/non-standard ===
+    "italiano": {"itagliano"},
+    "povero": {"poro", "pori", "pora", "pore", "pover'"},
+    "pigmeo": {"pimmeo", "pimmei", "pimmea", "pimmee"},
+    "matto": {"matteo", "mattei", "mattea", "mattee"},
+    "ladro": {"latro", "latri", "latra", "latre"},
+    "nemico": {"nimico", "nimici", "nimica", "nimiche"},
+    "veglio": {"ueglio", "uegli", "ueglia", "ueglie"},
+    "scimunito": {"scemunito", "scemuniti", "scemunita", "scemunite"},
+    "debosciato": {"ribusciato", "ribusciati", "ribusciata", "ribusciate"},
+    # === Typos/errors ===
+    "assassino": {"assessino", "assessini", "assessina", "assessine"},
+    "illegittimo": {"illeggittimo"},
+    "proprietario": {"propietario"},
+    # === Symbols, not words ===
+    "primo": {"1º", "1ª"},
+    # === Truncated forms ===
+    "solo": {"sol"},
+    "vicino": {"vicin"},
+    "santo": {"sant'"},
+    # === Archaic/poetic ===
+    "dio": {"dia", "die", "dii"},
+    "accidioso": {"accidïoso", "accidïosi", "accidïosa", "accidïose"},
+    # === Unusual spelling variants (k for c, etc.) ===
+    "ceco": {"ceko", "ceki", "ceka", "ceke"},
+    # === Incorrect plurals identified by Gemini/ChatGPT ===
+    # These have both wrong AND correct forms in Wiktextract; block wrong ones
+    "carolingio": {"carolinge"},  # correct: carolingie
+    "porco": {"porchi"},  # correct: porci (irregular)
+    "cieco": {"cieci"},  # correct: ciechi (stressed penult rule)
+    "bolscevico": {"bolscevici"},  # correct: bolscevichi (hard k)
+    "menscevico": {"menscevici"},  # correct: menscevichi (hard k)
+    "fenicio": {"fenice"},  # correct: fenicie (fenice = phoenix, different word!)
+    "malvagio": {"malvage"},  # correct: malvagie (modern standard)
+    "cercatore": {"cercatora", "cercatore"},  # correct: cercatrice/cercatrici
+    # === Non-standard variants to normalize ===
+    "ubriaco": {
+        "ubbriaco",
+        "ubbriachi",
+        "ubbriaca",
+        "ubbriache",
+        "briaco",
+        "briachi",
+        "briaca",
+        "briache",
+        "imbriaco",
+        "imbriachi",
+        "imbriaca",
+        "imbriache",
+    },  # normalize to ubriaco
+    "ufficiale": {"officiale", "officiali"},  # archaic Latin form
+    # === Archaic demonyms (block non-standard spellings) ===
+    "afghano": {"afgano", "afgani", "afgana", "afgane"},
+    "africano": {"affricano", "affricani", "affricana", "affricane"},
+    "asiatico": {"asiaco", "asiaci", "asiaca", "asiache"},
+    "spagnolo": {"spagnuolo", "spagnuoli", "spagnuola", "spagnuole"},
+    "veneziano": {"viniziano", "viniziani", "viniziana", "viniziane"},
+    "partigiano": {
+        "parteggiano",
+        "parteggiani",
+        "parteggiana",
+        "parteggiane",
+        "partegiano",
+        "partegiani",
+        "partegiana",
+        "partegiane",
+    },
+    "musulmano": {"mussulmano", "mussulmani", "mussulmana", "mussulmane"},
+    "jugoslavo": {"iugoslavo", "iugoslavi", "iugoslava", "iugoslave"},
+    "giudeo": {"giudio", "giudii", "giudia", "giudie"},
+    "pompeiano": {"pompeano", "pompeani", "pompeana", "pompeane"},
+    "romagnolo": {"romagnuolo", "romagnuoli", "romagnuola", "romagnuole"},
+    "trevigiano": {"trivigiano", "trivigiani", "trivigiana", "trivigiane"},
+    "anconetano": {"anconitano", "anconitani", "anconitana", "anconitane"},
+    "eremitano": {"romitano", "romitani", "romitana", "romitane"},
+    "pitagorico": {"pitagoreo", "pitagorei", "pitagorea", "pitagoree"},
+    "quacchero": {"quacquero", "quacqueri", "quacquera", "quacquere"},
+    "sardegnolo": {
+        "sardagnolo",
+        "sardagnoli",
+        "sardagnola",
+        "sardagnole",
+        "sardignolo",
+        "sardignoli",
+        "sardignola",
+        "sardignole",
+    },
+    "schizzinoso": {"schizzignoso", "schizzignosi", "schizzignosa", "schizzignose"},
+    "tapino": {"taupino", "taupini", "taupina", "taupine"},
+    "guerraiolo": {"guerraiuolo", "guerraiuoli", "guerraiuola", "guerraiuole"},
+    "passeggero": {"passeggiero", "passeggieri", "passeggiera", "passeggiere"},
+    "rousseauiano": {"russoiano", "russoiani", "russoiana", "russoiane"},
+    "sciagurato": {"sciaurato", "sciaurati", "sciaurata", "sciaurate"},
+    "presuntuoso": {
+        "presontuoso",
+        "presontuosi",
+        "presontuosa",
+        "presontuose",
+        "prosontuoso",
+        "prosontuosi",
+        "prosontuosa",
+        "prosontuose",
+    },
+    # === Variant spellings of compound nationality words ===
+    "hawaiano": {
+        "avaiano",
+        "avaiani",
+        "avaiana",
+        "avaiane",
+        "hawaiiano",
+        "hawaiiani",
+        "hawaiiana",
+        "hawaiiane",
+    },
+    "honduregno": {"onduregno", "onduregni", "onduregna", "onduregne"},
+    "keniano": {"kenyano", "kenyani", "kenyana", "kenyane"},
+    "kosovaro": {
+        "cossovaro",
+        "cossovari",
+        "cossovara",
+        "cossovare",
+        "kossovaro",
+        "kossovari",
+        "kossovara",
+        "kossovare",
+    },
+    "laotiano": {"laosiano", "laosiani", "laosiana", "laosiane"},
+    "pakistano": {"pachistano", "pachistani", "pachistana", "pachistane"},
+    "paraguaiano": {"paraguayano", "paraguayani", "paraguayana", "paraguayane"},
+    "uruguaiano": {"uruguayano", "uruguayani", "uruguayana", "uruguayane"},
+    "valenciano": {"valenziano", "valenziani", "valenziana", "valenziane"},
+    "magrebino": {"maghrebino", "maghrebini", "maghrebina", "maghrebine"},
+    # === Misc archaic/variant ===
+    "fraudolento": {"frodolento", "frodolenti", "frodolenta", "frodolente"},
+    "gallego": {"gagliego", "gaglieghi", "gagliega", "gaglieghe"},
+    "infermo": {"infirmo", "infirmi", "infirma", "infirme"},
+    "maltusiano": {"malthusiano", "malthusiani", "malthusiana", "malthusiane"},
+    "onnivoro": {"omnivoro", "omnivori", "omnivora", "omnivore"},
+    "reumatico": {"rematico", "rematici", "rematica", "rematiche"},
+    "sconsiderato": {
+        "malconsiderato",
+        "malconsiderati",
+        "malconsiderata",
+        "malconsiderate",
+    },
+    "sprovveduto": {"malprovveduto", "malprovveduti", "malprovvedute"},
+    "siriano": {"soriano", "soriani", "soriana", "soriane"},
+    "comacino": {"cumacino", "cumacini", "cumacina", "cumacine"},
+    "balzachiano": {"balzacchiano", "balzacchiani", "balzacchiana", "balzacchiane"},
+    "kolchoziano": {"colcosiano", "colcosiani", "colcosiana", "colcosiane"},
+    "eurasiatico": {"euroasiatico", "euroasiatici", "euroasiatica", "euroasiatiche"},
+    "ipoacusico": {"ipacusico", "ipacusici", "ipacusica", "ipacusiche"},
+    "handicappato": {"andicappato", "andicappati", "andicappata", "andicappate"},
+    "cassintegrato": {
+        "cassaintegrato",
+        "cassaintegrati",
+        "cassaintegrata",
+        "cassaintegrate",
+    },
+    "sottoccupato": {"sottooccupato", "sottooccupati", "sottooccupata", "sottooccupate"},
+    "ottuagenario": {
+        "ottagenario",
+        "ottogenario",
+        "ottogenari",
+        "ottogenaria",
+        "ottogenarie",
+    },
+    "settuagenario": {"settagenario", "settagenari", "settagenaria", "settagenarie"},
+    "avventizio": {
+        "avveniticcio",
+        "avveniticci",
+        "avveniticcia",
+        "avveniticce",
+        "avventiccio",
+        "avventicci",
+        "avventiccia",
+        "avventicce",
+        "veniticcio",
+        "veniticci",
+        "veniticcia",
+        "veniticce",
+    },
+    "egualitario": {
+        "egalitario",
+        "egalitari",
+        "egalitaria",
+        "egalitarie",
+        "ugualitario",
+        "ugualitari",
+        "ugualitaria",
+        "ugualitarie",
+    },
+    "risolutore": {"risolutorio", "risolutoria", "risolutorie"},
+    "uzbeco": {"uzbeko", "uzbeki", "uzbeka", "uzbeke"},
+}
+
+# Forms to block only in specific gender/number contexts
+# Structure: lemma -> (gender, number) -> set of blocked forms
+BLOCKED_ADJECTIVE_FORMS_GENDERED: dict[str, dict[tuple[str, str], set[str]]] = {
+    # invasore: block non-standard feminine forms (correct: invaditrice/invaditrici)
+    # NOTE: invasore is both noun and adjective - also blocked in BLOCKED_NOUN_FORMS_GENDERED
+    "invasore": {
+        ("f", "singular"): {"invasora", "invastrice"},  # Spanish/non-standard patterns
+        ("f", "plural"): {"invastrici", "invasore"},  # invasore is only valid as m.sg
+    },
+}
+
+
+def is_blocked_adjective_form(
+    lemma_written: str,
+    form_written: str,
+    gender: str,
+    number: str,
+) -> bool:
+    """Check if an adjective form should be blocked.
+
+    Checks both unconditional blocklist and gender-specific blocklist.
+    """
+    # Check unconditional blocklist
+    if form_written in BLOCKED_ADJECTIVE_FORMS.get(lemma_written, set()):
+        return True
+
+    # Check gender-specific blocklist
+    lemma_gendered = BLOCKED_ADJECTIVE_FORMS_GENDERED.get(lemma_written, {})
+    blocked_forms = lemma_gendered.get((gender, number), set())
+    return form_written in blocked_forms
+
+
+# =============================================================================
+# Noun form blocklist
+# =============================================================================
+# Some noun forms from Wiktionary are incorrect or non-standard.
+# Structure: lemma -> (gender, number) -> set of blocked forms
+
+BLOCKED_NOUN_FORMS_GENDERED: dict[str, dict[tuple[str, str], set[str]]] = {
+    # invasore: block non-standard feminine forms (correct: invaditrice/invaditrici)
+    # NOTE: invasore is both noun and adjective - also blocked in BLOCKED_ADJECTIVE_FORMS_GENDERED
+    "invasore": {
+        ("f", "singular"): {"invasora", "invastrice"},  # Spanish/non-standard patterns
+        ("f", "plural"): {"invastrici", "invasore"},  # invasore is only valid as m.sg
+    },
+}
+
+
+def is_blocked_noun_form(
+    lemma_written: str,
+    form_written: str,
+    gender: str | None,
+    number: str,
+) -> bool:
+    """Check if a noun form should be blocked.
+
+    Checks the gender-specific blocklist.
+    """
+    if gender is None:
+        return False
+
+    lemma_gendered = BLOCKED_NOUN_FORMS_GENDERED.get(lemma_written, {})
+    blocked_forms = lemma_gendered.get((gender, number), set())
+    return form_written in blocked_forms
+
 
 def _parse_entry(line: str) -> dict[str, Any] | None:
     """Parse a JSONL line, returning None if invalid."""
@@ -2059,6 +2338,8 @@ def import_wiktextract(
         "skipped_plural_duplicate": 0,
         "counterpart_no_plural": 0,  # Nouns where counterpart plural not found in lookup
         "no_counterpart_no_gender": 0,  # Nouns with no counterpart AND no gender tag on plural
+        "adjective_forms_blocked": 0,  # Forms filtered by BLOCKED_ADJECTIVE_FORMS
+        "noun_forms_blocked": 0,  # Forms filtered by BLOCKED_NOUN_FORMS_GENDERED
         "cleared": cleared,
     }
 
@@ -2449,6 +2730,23 @@ def import_wiktextract(
                     if is_pluralia_tantum and "singular" in tags:
                         continue
 
+                    # Check blocklist for erroneous noun forms
+                    form_gender_for_blocklist = (
+                        "m" if "masculine" in tags else ("f" if "feminine" in tags else None)
+                    )
+                    form_number_for_blocklist = "plural" if "plural" in tags else "singular"
+                    form_written_for_blocklist = (
+                        derive_written_from_stressed(form_stressed) or form_stressed
+                    )
+                    if is_blocked_noun_form(
+                        word,
+                        form_written_for_blocklist,
+                        form_gender_for_blocklist,
+                        form_number_for_blocklist,
+                    ):
+                        stats["noun_forms_blocked"] += 1
+                        continue
+
                     # Check if this is a common gender noun without explicit gender in tags
                     has_gender_tag = "masculine" in tags or "feminine" in tags
                     is_common_gender = noun_class and noun_class.get("gender_class") in (
@@ -2628,9 +2926,28 @@ def import_wiktextract(
                 else:
                     # Pass form_origin to all POS form builders
                     if pos_filter == POS.ADJECTIVE:
+                        # Extract gender/number from tags for blocklist check
+                        form_gender = (
+                            "m" if "masculine" in tags else ("f" if "feminine" in tags else None)
+                        )
+                        form_number = "plural" if "plural" in tags else "singular"
+
+                        # Check blocklist for archaic/erroneous adjective forms
+                        lemma_written = derive_written_from_stressed(lemma_stressed)
+                        form_written = derive_written_from_stressed(form_stressed) or form_stressed
+                        if (
+                            lemma_written
+                            and form_gender
+                            and is_blocked_adjective_form(
+                                lemma_written, form_written, form_gender, form_number
+                            )
+                        ):
+                            stats["adjective_forms_blocked"] += 1
+                            continue
+
                         # Citation form: m/s for standard adjectives, f/s only for feminine-only
-                        is_masc_singular = "masculine" in tags and "singular" in tags
-                        is_fem_singular = "feminine" in tags and "singular" in tags
+                        is_masc_singular = form_gender == "m" and form_number == "singular"
+                        is_fem_singular = form_gender == "f" and form_number == "singular"
 
                         # Only mark m/s as citation, OR f/s if this is a feminine-only adjective
                         is_adj_citation = (is_masc_singular and not adj_citation_marked) or (
@@ -3705,6 +4022,7 @@ def import_adjective_allomorphs(
         "scanned": 0,
         "allomorphs_added": 0,
         "forms_added": 0,
+        "forms_blocked": 0,  # Forms filtered by BLOCKED_ADJECTIVE_FORMS
         "parent_not_found": 0,
         "duplicates_skipped": 0,
         "already_in_parent": 0,
@@ -3857,6 +4175,17 @@ def import_adjective_allomorphs(
                     # Use form from lookup if available, otherwise use entry word
                     # (entry word is typically the m/s citation form)
                     form_text = form_lookup.get((gender, number), allomorph_word)
+
+                    # Skip if no form text
+                    if not form_text:
+                        continue
+
+                    # Check blocklist for archaic/erroneous forms
+                    form_written = derive_written_from_stressed(form_text) or form_text
+                    if is_blocked_adjective_form(parent_written, form_written, gender, number):
+                        stats["forms_blocked"] += 1
+                        continue
+
                     def_article, article_source = get_definite(form_text, gender, number)
 
                     try:
@@ -4299,17 +4628,166 @@ def _synthesize_feminine_plural(f_sg: str) -> str | None:
     return None
 
 
+def _get_cgv_noun_lemmas(conn: Connection) -> dict[str, int]:
+    """Return {lemma_written: lemma_id} for all COMMON_GENDER_VARIABLE nouns.
+
+    These are nouns that have different masculine and feminine forms
+    (e.g., amico/amica, invasore/invaditrice).
+    """
+    result = conn.execute(
+        select(lemmas.c.id, lemmas.c.written)
+        .select_from(noun_metadata.join(lemmas, noun_metadata.c.lemma_id == lemmas.c.id))
+        .where(noun_metadata.c.gender_class == GenderClass.COMMON_GENDER_VARIABLE)
+    )
+    return {row.written: row.id for row in result if row.written}
+
+
+def _insert_noun_form(
+    conn: Connection,
+    lemma_id: int,
+    stressed: str,
+    gender: str,
+    number: str,
+    form_origin: str,
+    *,
+    written: str | None = None,
+    written_source: str | None = None,
+) -> bool:
+    """Insert a noun form, handling article computation and duplicates.
+
+    Returns True if inserted, False if duplicate (IntegrityError).
+    """
+    def_article, article_source = get_definite(stressed, gender, number)
+
+    if written is None:
+        written = derive_written_from_stressed(stressed)
+        written_source = "derived:orthography_rule" if written is not None else None
+
+    try:
+        conn.execute(
+            noun_forms.insert().values(
+                lemma_id=lemma_id,
+                written=written,
+                written_source=written_source,
+                stressed=stressed,
+                gender=gender,
+                number=number,
+                labels=None,
+                derivation_type=None,
+                meaning_hint=None,
+                def_article=def_article,
+                article_source=article_source,
+                form_origin=form_origin,
+                is_citation_form=False,
+            )
+        )
+        return True
+    except IntegrityError:
+        return False
+
+
+def enrich_nouns_from_adjectives(
+    conn: Connection,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
+    """Copy all adjective forms to matching COMMON_GENDER_VARIABLE nouns.
+
+    For each adjective with the same lemma name as a CGV noun,
+    copy all 4 gender/number forms. UNIQUE constraint handles duplicates.
+
+    This runs BEFORE enrich_missing_feminine_plurals() so that adjective forms
+    are prioritized over synthesized forms.
+
+    Args:
+        conn: SQLAlchemy connection
+        progress_callback: Optional callback for progress reporting (current, total)
+
+    Returns:
+        Statistics dict with counts
+    """
+    stats = {
+        "adjective_forms_found": 0,
+        "copied": 0,
+        "skipped_duplicate": 0,
+        "skipped_no_matching_noun": 0,
+    }
+
+    # Get all CGV noun lemmas: {written: lemma_id}
+    cgv_nouns = _get_cgv_noun_lemmas(conn)
+
+    # Query all adjective forms (positive degree only)
+    adj_query = (
+        select(
+            lemmas.c.written.label("lemma_written"),
+            adjective_forms.c.written,
+            adjective_forms.c.written_source,
+            adjective_forms.c.stressed,
+            adjective_forms.c.gender,
+            adjective_forms.c.number,
+        )
+        .select_from(lemmas.join(adjective_forms, adjective_forms.c.lemma_id == lemmas.c.id))
+        .where(adjective_forms.c.degree == "positive")
+    )
+
+    adj_forms = list(conn.execute(adj_query))
+    stats["adjective_forms_found"] = len(adj_forms)
+
+    if progress_callback:
+        progress_callback(0, len(adj_forms))
+
+    for i, adj in enumerate(adj_forms):
+        if progress_callback and i % 1000 == 0:
+            progress_callback(i, len(adj_forms))
+
+        noun_lemma_id = cgv_nouns.get(adj.lemma_written)
+        if noun_lemma_id is None:
+            stats["skipped_no_matching_noun"] += 1
+            continue
+
+        # Determine written form and source
+        if adj.written is not None:
+            written = adj.written
+            written_source = "copied:adjective"
+        else:
+            written = derive_written_from_stressed(adj.stressed)
+            written_source = "derived:orthography_rule" if written is not None else None
+
+        # Insert the form
+        if _insert_noun_form(
+            conn,
+            noun_lemma_id,
+            adj.stressed,
+            adj.gender,
+            adj.number,
+            "copied:adjective",
+            written=written,
+            written_source=written_source,
+        ):
+            stats["copied"] += 1
+        else:
+            stats["skipped_duplicate"] += 1
+
+    if progress_callback:
+        progress_callback(len(adj_forms), len(adj_forms))
+
+    return stats
+
+
 def enrich_missing_feminine_plurals(
     conn: Connection,
     *,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
-    """Add missing feminine plural forms to GenderClass.COMMON_GENDER_VARIABLE nouns.
+    """Synthesize missing feminine plural forms for COMMON_GENDER_VARIABLE nouns.
 
-    This enrichment phase:
-    1. Finds nouns with f.sg but missing f.pl
-    2. First tries to copy f.pl from matching adjective forms (verified data)
-    3. For remaining nouns, synthesizes f.pl using Italian pluralization rules
+    This enrichment phase runs AFTER enrich_nouns_from_adjectives() and handles
+    CGV nouns that still have f.sg but missing f.pl (i.e., no matching adjective).
+
+    Synthesis rules:
+    - Invariable nouns (f.sg = m.sg): f.pl = f.sg
+    - Regular -a → -e pluralization
+    - -trice → -trici pluralization
 
     The synthesis is safe because:
     - Italian feminine plurals are 100% regular
@@ -4325,7 +4803,6 @@ def enrich_missing_feminine_plurals(
     """
     stats = {
         "total_missing": 0,
-        "copied_from_adjective": 0,
         "synthesized": 0,
         "added_invariable": 0,
         "skipped_multiword": 0,
@@ -4333,7 +4810,7 @@ def enrich_missing_feminine_plurals(
         "skipped_synthesis_failed": 0,
     }
 
-    # Phase 1: Find all nouns with missing f.pl
+    # Find all nouns with missing f.pl
     # Query: GenderClass.COMMON_GENDER_VARIABLE nouns with f.sg but no f.pl
     missing_query = (
         select(
@@ -4355,7 +4832,7 @@ def enrich_missing_feminine_plurals(
         .distinct()
     )
 
-    # Get all candidates (deduplicate by lemma_id since adjective lookup is by lemma)
+    # Get all candidates (deduplicate by lemma_id)
     # This prevents adding the same f.pl multiple times when a noun has multiple f.sg variants
     candidates: list[Any] = []
     seen_lemma_ids: set[int] = set()
@@ -4363,7 +4840,7 @@ def enrich_missing_feminine_plurals(
         # Skip if we already have a candidate for this lemma
         if row.noun_lemma_id in seen_lemma_ids:
             continue
-        # Check if f.pl already exists
+        # Check if f.pl already exists (may have been added by enrich_nouns_from_adjectives)
         exists = conn.execute(
             select(func.count())
             .select_from(noun_forms)
@@ -4382,81 +4859,16 @@ def enrich_missing_feminine_plurals(
     if progress_callback:
         progress_callback(0, len(candidates))
 
-    # Phase 2: Build adjective f.pl lookup
-    # Map: lemma_written -> (written, written_source, stressed) from adjective_forms
-    adj_f_pl_lookup: dict[str, tuple[str | None, str | None, str]] = {}
-    adj_query = (
-        select(
-            lemmas.c.written.label("lemma_written"),
-            adjective_forms.c.written,
-            adjective_forms.c.written_source,
-            adjective_forms.c.stressed,
-        )
-        .select_from(lemmas.join(adjective_forms, adjective_forms.c.lemma_id == lemmas.c.id))
-        .where(
-            adjective_forms.c.gender == "f",
-            adjective_forms.c.number == "plural",
-            adjective_forms.c.degree == "positive",  # Only base forms
-        )
-    )
-    for row in conn.execute(adj_query):
-        # Use first match if multiple (shouldn't happen for well-formed data)
-        if row.lemma_written not in adj_f_pl_lookup:
-            adj_f_pl_lookup[row.lemma_written] = (row.written, row.written_source, row.stressed)
-
-    # Phase 3: Process each candidate
+    # Process each candidate - synthesize f.pl
     for i, candidate in enumerate(candidates):
         if progress_callback and i % 100 == 0:
             progress_callback(i, len(candidates))
 
         noun_lemma_id: int = candidate.noun_lemma_id
-        lemma_written: str = candidate.lemma_written
         f_sg_written: str | None = candidate.f_sg_written
         f_sg_stressed: str = candidate.f_sg_stressed
 
-        # Try to copy from adjective first
-        if lemma_written in adj_f_pl_lookup:
-            adj_written, _adj_written_source, adj_stressed = adj_f_pl_lookup[lemma_written]
-
-            # Compute article
-            def_article, article_source = get_definite(adj_stressed, "f", "plural")
-
-            # Use adjective's written form if available, otherwise derive
-            written = adj_written
-            if written is not None:
-                # Adjective has a written form - mark as copied
-                written_source = "copied:adjective"
-            else:
-                # No written form from adjective - try to derive
-                written = derive_written_from_stressed(adj_stressed)
-                written_source = "derived:orthography_rule" if written is not None else None
-
-            # Insert the form
-            try:
-                conn.execute(
-                    noun_forms.insert().values(
-                        lemma_id=noun_lemma_id,
-                        written=written,
-                        written_source=written_source,
-                        stressed=adj_stressed,
-                        gender="f",
-                        number="plural",
-                        labels=None,
-                        derivation_type=None,
-                        meaning_hint=None,
-                        def_article=def_article,
-                        article_source=article_source,
-                        form_origin="copied:adjective_f_pl",
-                        is_citation_form=False,
-                    )
-                )
-                stats["copied_from_adjective"] += 1
-            except IntegrityError:
-                # Duplicate form already exists (constraint violation)
-                pass
-            continue
-
-        # No adjective form - try to synthesize
+        # Try to synthesize
         # Use stressed form for synthesis (may have accents)
         f_sg: str | None = f_sg_stressed or f_sg_written
         if not f_sg:
@@ -4486,35 +4898,17 @@ def enrich_missing_feminine_plurals(
         ).first()
         if m_sg_result and m_sg_result.stressed == f_sg:
             # Invariable: f.pl = f.sg
-            f_pl_stressed = f_sg
-            f_pl_written = f_sg_written
-
-            # Compute article
-            def_article, article_source = get_definite(f_pl_stressed, "f", "plural")
-
-            # Insert the invariable form
-            try:
-                conn.execute(
-                    noun_forms.insert().values(
-                        lemma_id=noun_lemma_id,
-                        written=f_pl_written,
-                        written_source="copied:f_sg",  # Written form copied from f.sg
-                        stressed=f_pl_stressed,
-                        gender="f",
-                        number="plural",
-                        labels=None,
-                        derivation_type=None,
-                        meaning_hint=None,
-                        def_article=def_article,
-                        article_source=article_source,
-                        form_origin="inferred:f_pl_invariable",
-                        is_citation_form=False,
-                    )
-                )
+            if _insert_noun_form(
+                conn,
+                noun_lemma_id,
+                f_sg,  # f.pl = f.sg for invariables
+                "f",
+                "plural",
+                "inferred:f_pl_invariable",
+                written=f_sg_written,
+                written_source="copied:f_sg",
+            ):
                 stats["added_invariable"] += 1
-            except IntegrityError:
-                # Duplicate form already exists (constraint violation)
-                pass
             continue
 
         # Synthesize f.pl
@@ -4523,36 +4917,19 @@ def enrich_missing_feminine_plurals(
             stats["skipped_synthesis_failed"] += 1
             continue
 
-        # Derive written form
-        f_pl_written = derive_written_from_stressed(f_pl_stressed)
-        written_source = "derived:orthography_rule" if f_pl_written is not None else None
-
-        # Compute article
-        def_article, article_source = get_definite(f_pl_stressed, "f", "plural")
-
         # Insert the synthesized form
-        try:
-            conn.execute(
-                noun_forms.insert().values(
-                    lemma_id=noun_lemma_id,
-                    written=f_pl_written,
-                    written_source=written_source,
-                    stressed=f_pl_stressed,
-                    gender="f",
-                    number="plural",
-                    labels=None,
-                    derivation_type=None,
-                    meaning_hint=None,
-                    def_article=def_article,
-                    article_source=article_source,
-                    form_origin="inferred:f_pl_from_f_sg",
-                    is_citation_form=False,
-                )
-            )
+        f_pl_written = derive_written_from_stressed(f_pl_stressed)
+        if _insert_noun_form(
+            conn,
+            noun_lemma_id,
+            f_pl_stressed,
+            "f",
+            "plural",
+            "inferred:f_pl_from_f_sg",
+            written=f_pl_written,
+            written_source="derived:orthography_rule" if f_pl_written else None,
+        ):
             stats["synthesized"] += 1
-        except IntegrityError:
-            # Duplicate form already exists (constraint violation)
-            pass
 
     if progress_callback:
         progress_callback(len(candidates), len(candidates))

@@ -16,6 +16,7 @@ from italian_anki.db.schema import (
     verb_forms,
 )
 from italian_anki.enums import POS
+from italian_anki.importers.wiktextract import is_blocked_adjective_form
 from italian_anki.normalize import (
     FRENCH_LOANWORD_WHITELIST,
     derive_written_from_stressed,
@@ -352,6 +353,7 @@ def fill_missing_adjective_forms(
         "adjectives_completed": 0,
         "not_in_morphit": 0,
         "combos_skipped": 0,
+        "forms_blocked": 0,
     }
 
     # Build Morphit lookup: normalized_lemma -> list of MorphitEntry
@@ -441,6 +443,11 @@ def fill_missing_adjective_forms(
             # Set is_citation_form for m/s if lemma lacks citation form
             is_m_s = entry.gender == "m" and entry.number == "singular"
             set_as_citation = is_m_s and not has_citation_form and not citation_form_set_this_lemma
+
+            # Check blocklist for archaic/erroneous forms
+            if is_blocked_adjective_form(lemma_normalized, entry.form, entry.gender, entry.number):
+                stats["forms_blocked"] += 1
+                continue
 
             # Insert new form
             conn.execute(
