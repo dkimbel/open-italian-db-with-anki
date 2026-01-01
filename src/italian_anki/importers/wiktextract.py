@@ -93,6 +93,25 @@ FEMININE_FORM_CORRECTIONS: dict[str, str] = {
     "scannatrive": "scannatrice",
 }
 
+# Noun forms to exclude during import and synthesis.
+# These are rare, archaic, wrong, or arguably adjectival forms.
+NOUN_FORM_BLOCKLIST: frozenset[str] = frozenset(
+    {
+        # avvocato: prefer avvocata/avvocate over -essa forms
+        "avvocatessa",
+        "avvocatesse",
+        # evasore: evaditrice/evaditrici are rare/archaic
+        "evaditrice",
+        "evaditrici",
+        # questore: questrice/questrici are wrong
+        "questrice",
+        "questrici",
+        # cane: canìna is arguably adjectival
+        "canìna",
+        "canìne",
+    }
+)
+
 # Known elision particles that should have space removed after apostrophe.
 # These are words that undergo elision before vowel-initial words in Italian.
 # Truncated imperatives (va', fa', da', sta') are NOT in this list because
@@ -2165,6 +2184,10 @@ def _build_noun_form_row(
             - 'inferred:singular': Added missing singular tag
         is_citation_form: Whether this is the canonical dictionary form
     """
+    # Filter out blocklisted forms (rare, archaic, wrong, or adjectival)
+    if form_stressed in NOUN_FORM_BLOCKLIST:
+        return None
+
     if should_filter_form(tags):
         return None
 
@@ -4755,17 +4778,19 @@ def enrich_missing_feminine_plurals(
         Statistics dict with counts
     """
     stats = {
-        "total_missing": 0,
+        "total_f_sg": 0,
         "synthesized": 0,
         "added_invariable": 0,
+        "skipped_blocklisted": 0,
         "skipped_multiword": 0,
         "skipped_typo": 0,
         "skipped_synthesis_failed": 0,
+        "skipped_already_exists": 0,
     }
 
-    # Find all nouns with missing f.pl
-    # Query: GenderClass.COMMON_GENDER_VARIABLE nouns with f.sg but no f.pl
-    missing_query = (
+    # Find ALL f.sg forms for CGV nouns (not deduplicated by lemma)
+    # Each f.sg may produce a different f.pl (e.g., evasora→evasore, evaditrice→evaditrici)
+    f_sg_query = (
         select(
             lemmas.c.id.label("noun_lemma_id"),
             lemmas.c.written.label("lemma_written"),
@@ -4785,47 +4810,31 @@ def enrich_missing_feminine_plurals(
         .distinct()
     )
 
-    # Get all candidates (deduplicate by lemma_id)
-    # This prevents adding the same f.pl multiple times when a noun has multiple f.sg variants
-    candidates: list[Any] = []
-    seen_lemma_ids: set[int] = set()
-    for row in conn.execute(missing_query):
-        # Skip if we already have a candidate for this lemma
-        if row.noun_lemma_id in seen_lemma_ids:
-            continue
-        # Check if f.pl already exists
-        exists = conn.execute(
-            select(func.count())
-            .select_from(noun_forms)
-            .where(
-                noun_forms.c.lemma_id == row.noun_lemma_id,
-                noun_forms.c.gender == "f",
-                noun_forms.c.number == "plural",
-            )
-        ).scalar()
-        if exists == 0:
-            candidates.append(row)
-            seen_lemma_ids.add(row.noun_lemma_id)
-
-    stats["total_missing"] = len(candidates)
+    # Collect all f.sg forms
+    all_f_sg_rows = list(conn.execute(f_sg_query))
+    stats["total_f_sg"] = len(all_f_sg_rows)
 
     if progress_callback:
-        progress_callback(0, len(candidates))
+        progress_callback(0, len(all_f_sg_rows))
 
-    # Process each candidate - synthesize f.pl
-    for i, candidate in enumerate(candidates):
+    # Process each f.sg - synthesize its corresponding f.pl if not already present
+    for i, row in enumerate(all_f_sg_rows):
         if progress_callback and i % 100 == 0:
-            progress_callback(i, len(candidates))
+            progress_callback(i, len(all_f_sg_rows))
 
-        noun_lemma_id: int = candidate.noun_lemma_id
-        f_sg_written: str | None = candidate.f_sg_written
-        f_sg_stressed: str = candidate.f_sg_stressed
+        noun_lemma_id: int = row.noun_lemma_id
+        f_sg_written: str | None = row.f_sg_written
+        f_sg_stressed: str = row.f_sg_stressed
 
-        # Try to synthesize
         # Use stressed form for synthesis (may have accents)
         f_sg: str | None = f_sg_stressed or f_sg_written
         if not f_sg:
             stats["skipped_synthesis_failed"] += 1
+            continue
+
+        # Skip blocklisted f.sg forms
+        if f_sg in NOUN_FORM_BLOCKLIST:
+            stats["skipped_blocklisted"] += 1
             continue
 
         # Skip multi-word expressions
@@ -4850,7 +4859,21 @@ def enrich_missing_feminine_plurals(
             .limit(1)
         ).first()
         if m_sg_result and m_sg_result.stressed == f_sg:
-            # Invariable: f.pl = f.sg
+            # Invariable: f.pl = f.sg - check if this specific f.pl exists
+            exists = conn.execute(
+                select(func.count())
+                .select_from(noun_forms)
+                .where(
+                    noun_forms.c.lemma_id == noun_lemma_id,
+                    noun_forms.c.gender == "f",
+                    noun_forms.c.number == "plural",
+                    noun_forms.c.stressed == f_sg,
+                )
+            ).scalar()
+            if exists and exists > 0:
+                stats["skipped_already_exists"] += 1
+                continue
+
             if _insert_noun_form(
                 conn,
                 noun_lemma_id,
@@ -4870,6 +4893,27 @@ def enrich_missing_feminine_plurals(
             stats["skipped_synthesis_failed"] += 1
             continue
 
+        # Skip if synthesized f.pl is blocklisted
+        if f_pl_stressed in NOUN_FORM_BLOCKLIST:
+            stats["skipped_blocklisted"] += 1
+            continue
+
+        # Check if THIS SPECIFIC f.pl already exists (by stressed form)
+        # This allows multiple f.sg variants to produce different f.pl forms
+        exists = conn.execute(
+            select(func.count())
+            .select_from(noun_forms)
+            .where(
+                noun_forms.c.lemma_id == noun_lemma_id,
+                noun_forms.c.gender == "f",
+                noun_forms.c.number == "plural",
+                noun_forms.c.stressed == f_pl_stressed,
+            )
+        ).scalar()
+        if exists and exists > 0:
+            stats["skipped_already_exists"] += 1
+            continue
+
         # Insert the synthesized form
         f_pl_written = derive_written_from_stressed(f_pl_stressed)
         if _insert_noun_form(
@@ -4885,6 +4929,6 @@ def enrich_missing_feminine_plurals(
             stats["synthesized"] += 1
 
     if progress_callback:
-        progress_callback(len(candidates), len(candidates))
+        progress_callback(len(all_f_sg_rows), len(all_f_sg_rows))
 
     return stats

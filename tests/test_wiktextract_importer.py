@@ -23,7 +23,9 @@ from italian_anki.db import (
 )
 from italian_anki.importers.tatoeba import import_tatoeba
 from italian_anki.importers.wiktextract import (
+    NOUN_FORM_BLOCKLIST,
     enrich_from_form_of_entries,
+    enrich_missing_feminine_plurals,
     import_adjective_allomorphs,
     import_noun_allomorphs,
     import_wiktextract,
@@ -2800,6 +2802,250 @@ class TestNormalizationsAndOverrides:
 
                 # Should have been filtered out
                 assert lemma is None
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+
+class TestNounFormBlocklist:
+    """Tests for NOUN_FORM_BLOCKLIST filtering."""
+
+    def test_blocklist_contains_expected_forms(self) -> None:
+        """Verify the blocklist contains the expected forms."""
+        expected = {
+            "avvocatessa",
+            "avvocatesse",
+            "evaditrice",
+            "evaditrici",
+            "questrice",
+            "questrici",
+            "canìna",
+            "canìne",
+        }
+        assert expected == NOUN_FORM_BLOCKLIST
+
+    def test_blocklisted_forms_not_imported(self) -> None:
+        """Blocklisted noun forms should not be imported from Wiktextract."""
+        # Create a CGV noun with a blocklisted form (avvocatessa)
+        avvocato = {
+            "pos": "noun",
+            "word": "avvocato",
+            "head_templates": [{"args": {"1": "it", "2": "mfbysense"}, "name": "it-noun"}],
+            "forms": [
+                {"form": "avvocato", "tags": ["masculine", "singular"]},
+                {"form": "avvocati", "tags": ["masculine", "plural"]},
+                {"form": "avvocata", "tags": ["feminine", "singular"]},  # allowed
+                {"form": "avvocatessa", "tags": ["feminine", "singular"]},  # blocklisted
+                {"form": "avvocate", "tags": ["feminine", "plural"]},  # allowed
+                {"form": "avvocatesse", "tags": ["feminine", "plural"]},  # blocklisted
+            ],
+            "senses": [{"glosses": ["lawyer"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([avvocato])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
+
+            with get_connection(db_path) as conn:
+                lemma = conn.execute(
+                    select(lemmas).where(lemmas.c.stressed == "avvocato")
+                ).fetchone()
+                assert lemma is not None
+
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == lemma.id)
+                ).fetchall()
+
+                form_texts = {f.stressed for f in forms}
+
+                # avvocata and avvocate should exist
+                assert "avvocata" in form_texts
+                assert "avvocate" in form_texts
+
+                # blocklisted forms should NOT exist
+                assert "avvocatessa" not in form_texts
+                assert "avvocatesse" not in form_texts
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+
+class TestEnrichMissingFemininePlurals:
+    """Tests for enrich_missing_feminine_plurals function."""
+
+    def test_synthesizes_missing_f_pl_for_each_f_sg(self) -> None:
+        """Each f.sg variant should get its own f.pl synthesized."""
+        # Create a CGV noun with two f.sg variants
+        # Use "mf" gender marker and forms that differ by gender to get CGV classification
+        uccisore = {
+            "pos": "noun",
+            "word": "uccisore",
+            "head_templates": [{"args": {"1": "mf"}}],  # mf = common gender
+            "forms": [
+                {"form": "uccisore", "tags": ["masculine", "singular"]},
+                {"form": "uccisori", "tags": ["masculine", "plural"]},
+                # Two f.sg variants - should produce different f.pl
+                {"form": "uccisora", "tags": ["feminine", "singular"]},  # -> uccisore
+                {"form": "ucciditrice", "tags": ["feminine", "singular"]},  # -> ucciditrici
+                # No f.pl provided - should be synthesized
+            ],
+            "senses": [{"glosses": ["killer"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([uccisore])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
+
+            # Run the enrichment
+            with get_connection(db_path) as conn:
+                stats = enrich_missing_feminine_plurals(conn)
+
+            # Should have synthesized 2 f.pl (one for each f.sg)
+            assert stats["synthesized"] == 2
+
+            with get_connection(db_path) as conn:
+                lemma = conn.execute(
+                    select(lemmas).where(lemmas.c.stressed == "uccisore")
+                ).fetchone()
+                assert lemma is not None
+
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == lemma.id)
+                ).fetchall()
+
+                f_pl_forms = [f for f in forms if f.gender == "f" and f.number == "plural"]
+                f_pl_texts = {f.stressed for f in f_pl_forms}
+
+                # Both f.pl variants should exist
+                assert "uccisore" in f_pl_texts  # from uccisora
+                assert "ucciditrici" in f_pl_texts  # from ucciditrice
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_does_not_duplicate_existing_f_pl(self) -> None:
+        """If f.pl already exists, should not create duplicate."""
+        # Create a CGV noun where f.pl already exists from Wiktextract
+        # Use "mf" and forms that differ by gender to get CGV classification
+        collega = {
+            "pos": "noun",
+            "word": "collega",
+            "head_templates": [{"args": {"1": "mf"}}],  # mf = common gender
+            "forms": [
+                {"form": "collèga", "tags": ["feminine", "singular"]},  # f.sg
+                {"form": "collèghi", "tags": ["masculine", "plural"]},
+                {"form": "collèghe", "tags": ["feminine", "plural"]},  # f.pl already exists
+            ],
+            "senses": [{"glosses": ["colleague"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([collega])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
+
+            # Run the enrichment
+            with get_connection(db_path) as conn:
+                stats = enrich_missing_feminine_plurals(conn)
+
+            # Should not have synthesized anything (f.pl already exists)
+            assert stats["synthesized"] == 0
+            assert stats["skipped_already_exists"] == 1
+
+            with get_connection(db_path) as conn:
+                # Lemma stressed is "collega" (from word field)
+                # Note: stressed form may be inferred from forms or word field
+                lemma = conn.execute(select(lemmas).where(lemmas.c.pos == "noun")).fetchone()
+                assert lemma is not None
+
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == lemma.id)
+                ).fetchall()
+
+                f_pl_forms = [f for f in forms if f.gender == "f" and f.number == "plural"]
+                # Should only have one f.pl (the original from Wiktextract)
+                assert len(f_pl_forms) == 1
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_skips_blocklisted_f_sg_forms(self) -> None:
+        """Blocklisted f.sg forms should not have f.pl synthesized."""
+        # Create a noun with canìna (blocklisted) as f.sg
+        # Use "mf" and forms that differ by gender to get CGV classification
+        cane = {
+            "pos": "noun",
+            "word": "cane",
+            "head_templates": [{"args": {"1": "mf"}}],  # mf = common gender
+            "forms": [
+                {"form": "cane", "tags": ["masculine", "singular"]},
+                {"form": "cani", "tags": ["masculine", "plural"]},
+                {"form": "cagna", "tags": ["feminine", "singular"]},
+                {"form": "canìna", "tags": ["feminine", "singular", "diminutive"]},  # blocklisted
+                {"form": "cagne", "tags": ["feminine", "plural"]},
+            ],
+            "senses": [{"glosses": ["dog"]}],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([cane])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
+
+            # canìna should have been blocked during import
+            with get_connection(db_path) as conn:
+                lemma = conn.execute(select(lemmas).where(lemmas.c.stressed == "cane")).fetchone()
+                assert lemma is not None
+
+                forms = conn.execute(
+                    select(noun_forms).where(noun_forms.c.lemma_id == lemma.id)
+                ).fetchall()
+
+                form_texts = {f.stressed for f in forms}
+                assert "canìna" not in form_texts
+
+            # Run the enrichment - should not try to synthesize canìne
+            with get_connection(db_path) as conn:
+                stats = enrich_missing_feminine_plurals(conn)
+
+            # The blocklist applies during import, so canìna is never in the db
+            # Thus skipped_blocklisted should be 0, and cagne already exists
+            assert stats["skipped_blocklisted"] == 0
+            assert stats["skipped_already_exists"] >= 1
 
         finally:
             db_path.unlink()
