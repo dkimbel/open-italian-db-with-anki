@@ -592,6 +592,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 )
                 print()
                 print(f"{indent}Entries scanned:      {stats['scanned']:,}")
+                print(f"{indent}Alt_of filtered:      {stats['alt_of_filtered']:,}")
                 print(f"{indent}Allomorphs found:     {stats['allomorphs_added']:,}")
                 print(f"{indent}Forms added:          {stats['forms_added']:,}")
                 print(f"{indent}Already in parent:    {stats['already_in_parent']:,}")

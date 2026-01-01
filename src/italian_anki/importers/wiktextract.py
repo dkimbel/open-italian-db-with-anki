@@ -4102,6 +4102,7 @@ def import_adjective_allomorphs(
         "allomorphs_added": 0,
         "forms_added": 0,
         "forms_blocked": 0,  # Forms filtered by BLOCKED_ADJECTIVE_FORMS
+        "alt_of_filtered": 0,  # Alt_of entries filtered by FILTER_TAGS (archaic, etc.)
         "parent_not_found": 0,
         "duplicates_skipped": 0,
         "already_in_parent": 0,
@@ -4158,6 +4159,11 @@ def import_adjective_allomorphs(
                     if parent_word:
                         # Determine label from tags
                         tags = sense.get("tags", [])
+                        # Skip senses with archaic/dialectal/etc. tags
+                        if should_filter_form(tags):
+                            stats["alt_of_filtered"] += 1
+                            parent_word = None  # Reset to continue looking
+                            break
                         if "apocopic" in tags:
                             label = "apocopic"
                         break
