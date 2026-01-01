@@ -4652,20 +4652,6 @@ def _synthesize_feminine_plural(f_sg: str) -> str | None:
     return None
 
 
-def _get_cgv_noun_lemmas(conn: Connection) -> dict[str, int]:
-    """Return {lemma_written: lemma_id} for all COMMON_GENDER_VARIABLE nouns.
-
-    These are nouns that have different masculine and feminine forms
-    (e.g., amico/amica, invasore/invaditrice).
-    """
-    result = conn.execute(
-        select(lemmas.c.id, lemmas.c.written)
-        .select_from(noun_metadata.join(lemmas, noun_metadata.c.lemma_id == lemmas.c.id))
-        .where(noun_metadata.c.gender_class == GenderClass.COMMON_GENDER_VARIABLE)
-    )
-    return {row.written: row.id for row in result if row.written}
-
-
 def _insert_noun_form(
     conn: Connection,
     lemma_id: int,
@@ -4710,94 +4696,6 @@ def _insert_noun_form(
         return False
 
 
-def enrich_nouns_from_adjectives(
-    conn: Connection,
-    *,
-    progress_callback: Callable[[int, int], None] | None = None,
-) -> dict[str, int]:
-    """Copy all adjective forms to matching COMMON_GENDER_VARIABLE nouns.
-
-    For each adjective with the same lemma name as a CGV noun,
-    copy all 4 gender/number forms. UNIQUE constraint handles duplicates.
-
-    This runs BEFORE enrich_missing_feminine_plurals() so that adjective forms
-    are prioritized over synthesized forms.
-
-    Args:
-        conn: SQLAlchemy connection
-        progress_callback: Optional callback for progress reporting (current, total)
-
-    Returns:
-        Statistics dict with counts
-    """
-    stats = {
-        "adjective_forms_found": 0,
-        "copied": 0,
-        "skipped_duplicate": 0,
-        "skipped_no_matching_noun": 0,
-    }
-
-    # Get all CGV noun lemmas: {written: lemma_id}
-    cgv_nouns = _get_cgv_noun_lemmas(conn)
-
-    # Query all adjective forms (positive degree only)
-    adj_query = (
-        select(
-            lemmas.c.written.label("lemma_written"),
-            adjective_forms.c.written,
-            adjective_forms.c.written_source,
-            adjective_forms.c.stressed,
-            adjective_forms.c.gender,
-            adjective_forms.c.number,
-        )
-        .select_from(lemmas.join(adjective_forms, adjective_forms.c.lemma_id == lemmas.c.id))
-        .where(adjective_forms.c.degree == "positive")
-    )
-
-    adj_forms = list(conn.execute(adj_query))
-    stats["adjective_forms_found"] = len(adj_forms)
-
-    if progress_callback:
-        progress_callback(0, len(adj_forms))
-
-    for i, adj in enumerate(adj_forms):
-        if progress_callback and i % 1000 == 0:
-            progress_callback(i, len(adj_forms))
-
-        noun_lemma_id = cgv_nouns.get(adj.lemma_written)
-        if noun_lemma_id is None:
-            stats["skipped_no_matching_noun"] += 1
-            continue
-
-        # Determine written form and source
-        if adj.written is not None:
-            written = adj.written
-            written_source = "copied:adjective"
-        else:
-            written = derive_written_from_stressed(adj.stressed)
-            written_source = "derived:orthography_rule" if written is not None else None
-
-        # Insert the form
-        if _insert_noun_form(
-            conn,
-            noun_lemma_id,
-            adj.stressed,
-            adj.gender,
-            adj.number,
-            "copied:adjective",
-            written=written,
-            written_source=written_source,
-        ):
-            stats["copied"] += 1
-        else:
-            stats["skipped_duplicate"] += 1
-
-    if progress_callback:
-        progress_callback(len(adj_forms), len(adj_forms))
-
-    return stats
-
-
 def enrich_missing_feminine_plurals(
     conn: Connection,
     *,
@@ -4805,8 +4703,7 @@ def enrich_missing_feminine_plurals(
 ) -> dict[str, int]:
     """Synthesize missing feminine plural forms for COMMON_GENDER_VARIABLE nouns.
 
-    This enrichment phase runs AFTER enrich_nouns_from_adjectives() and handles
-    CGV nouns that still have f.sg but missing f.pl (i.e., no matching adjective).
+    This enrichment phase handles CGV nouns that have f.sg but missing f.pl.
 
     Synthesis rules:
     - Invariable nouns (f.sg = m.sg): f.pl = f.sg
@@ -4864,7 +4761,7 @@ def enrich_missing_feminine_plurals(
         # Skip if we already have a candidate for this lemma
         if row.noun_lemma_id in seen_lemma_ids:
             continue
-        # Check if f.pl already exists (may have been added by enrich_nouns_from_adjectives)
+        # Check if f.pl already exists
         exists = conn.execute(
             select(func.count())
             .select_from(noun_forms)

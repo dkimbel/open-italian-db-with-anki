@@ -42,7 +42,6 @@ from italian_anki.importers.morphit import (
 from italian_anki.importers.wiktextract import (
     enrich_from_form_of_entries,
     enrich_missing_feminine_plurals,
-    enrich_nouns_from_adjectives,
     generate_gendered_participles,
     import_adjective_allomorphs,
     import_noun_allomorphs,
@@ -677,17 +676,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     print()
 
     with get_connection(db_path) as conn:
-        # Copy adjective forms to matching CGV nouns (all 4 gender/number combos)
-        print("Copying adjective forms to nouns...")
-        adj_stats = enrich_nouns_from_adjectives(conn, progress_callback=_make_progress_callback())
-        print()
-        print(f"  Adjective forms found:      {adj_stats['adjective_forms_found']:,}")
-        print(f"  Copied to nouns:            {adj_stats['copied']:,}")
-        print(f"  Skipped (duplicate):        {adj_stats['skipped_duplicate']:,}")
-        print(f"  Skipped (no matching noun): {adj_stats['skipped_no_matching_noun']:,}")
-        print()
-
-        # Synthesize missing feminine plurals for remaining CGV nouns
+        # Synthesize missing feminine plurals for CGV nouns
         print("Synthesizing missing feminine plural forms...")
         stats = enrich_missing_feminine_plurals(conn, progress_callback=_make_progress_callback())
         print()
