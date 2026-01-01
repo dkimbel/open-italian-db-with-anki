@@ -235,10 +235,16 @@ def _is_two_form_adjective(entry: dict[str, Any]) -> bool:
     """Check if adjective is 2-form (same form for masculine and feminine).
 
     Detection methods:
-    1. Genderless number tags in forms array (e.g., ["plural"] for "facile")
-    2. "m or f by sense" in head_templates expansion (e.g., "ottimista")
+    1. Whitelist (for entries with empty forms array but known 2-form pattern)
+    2. Genderless number tags in forms array (e.g., ["plural"] for "facile")
+    3. "m or f by sense" in head_templates expansion (e.g., "ottimista")
     """
-    # Method 1: Genderless number tags in forms array
+    # Method 1: Whitelist for known 2-form adjectives with empty forms
+    word = entry.get("word", "")
+    if word in TWO_FORM_ADJECTIVE_WHITELIST:
+        return True
+
+    # Method 2: Genderless number tags in forms array
     for form_data in entry.get("forms", []):
         tags = set(form_data.get("tags", []))
         has_gender = "masculine" in tags or "feminine" in tags
@@ -330,6 +336,16 @@ HARDCODED_ALLOMORPH_FORMS: list[tuple[str, str, str, str, str | None]] = [
     # NOTE: grande has inflection_class='2-form' in adjective_metadata, so grandi is consistent
     ("grandi", "grande", "m", "plural", None),
     ("grandi", "grande", "f", "plural", None),
+    # minori plurals for minore - Wiktextract has empty forms array (Zipf 4.79, comparative of piccolo)
+    # NOTE: minore has inflection_class='2-form' via TWO_FORM_ADJECTIVE_WHITELIST; singulars are inferred
+    ("minori", "minore", "m", "plural", None),
+    ("minori", "minore", "f", "plural", None),
+    # distrutto forms - Wiktextract has empty forms array (Zipf 3.28, adj: "distraught", "tired")
+    # Standard 4-form adjective, all forms must be hardcoded since none are in Wiktextract
+    ("distrutto", "distrutto", "m", "singular", None),
+    ("distrutta", "distrutto", "f", "singular", None),
+    ("distrutti", "distrutto", "m", "plural", None),
+    ("distrutte", "distrutto", "f", "plural", None),
 ]
 
 # Hardcoded noun allomorphs not properly captured by Wiktextract
@@ -735,6 +751,15 @@ INVARIABLE_ADJECTIVE_WHITELIST: frozenset[str] = frozenset(
     }
 )
 
+# 2-form adjectives with generic head template (missing forms in Wiktextract).
+# These have same form for masculine and feminine, different for singular/plural.
+# Without this whitelist, they'd default to "4-form" (wrong).
+TWO_FORM_ADJECTIVE_WHITELIST: frozenset[str] = frozenset(
+    {
+        "minore",  # Comparative of piccolo; Zipf 4.79, forms: minore/minori
+    }
+)
+
 # Lemmas with malformed Wiktextract data that cause incorrect inferences.
 # These are filtered out entirely during import.
 # NOTE: Use the exact Wiktextract word spelling (entry["word"]), not normalized form.
@@ -824,9 +849,9 @@ LEMMA_BLOCKLIST: frozenset[str] = frozenset(
         "bel",  # Apocopated form of "bello", only m/sg
         "di vecchia data",  # Multi-word phrase, only m/sg
         "disfattista",  # Missing forms, only m/sg
-        "distrutto",  # Past participle, missing other forms
+        # "distrutto" - UNBLOCKED: has independent adj meanings, forms hardcoded
         "falecio",  # Missing feminine forms
-        "minore",  # Comparative, missing forms
+        # "minore" - UNBLOCKED: high-frequency (Zipf 4.79), forms synthesized via whitelist
         "uno sì e uno no",  # Multi-word phrase, missing plurals
         "uno sì, l'altro no",  # Multi-word phrase, missing plurals
         # === Nouns with corrupted Wiktionary data (wrong gender) ===
