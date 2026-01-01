@@ -592,12 +592,15 @@ def _build_stressed_alternatives(jsonl_path: Path) -> dict[str, str]:
     return lookup
 
 
-def _build_counterpart_plurals(jsonl_path: Path) -> dict[str, str]:
-    """Build a lookup of lemma words to their plural forms.
+def _build_counterpart_plurals(jsonl_path: Path) -> dict[str, tuple[str, str | None]]:
+    """Build a lookup of lemma words to their plural forms and gender.
 
     For nouns with counterpart markers (f: "+" or m: "+"), we need to look up
     the counterpart entry's plural. E.g., "amico" has counterpart "amica",
     and we need to know "amica" → "amiche".
+
+    We also store the gender so callers can verify the counterpart entry has
+    the expected gender (some Wiktextract entries have incorrect gender data).
 
     Note: We do NOT skip form-of entries here because counterpart entries like
     "amica" often have form_of senses (referencing "amico") but still have
@@ -607,13 +610,13 @@ def _build_counterpart_plurals(jsonl_path: Path) -> dict[str, str]:
         jsonl_path: Path to Wiktextract JSONL file
 
     Returns:
-        Dict mapping lemma word to its plural form.
-        E.g., {"amica": "amiche", "amico": "amici"}
+        Dict mapping lemma word to (plural_form, gender).
+        E.g., {"amica": ("amiche", "f"), "amico": ("amici", "m")}
     """
     # Tags that indicate a less preferred plural form
     deprioritize_tags = frozenset({"archaic", "dialectal", "obsolete", "poetic", "rare"})
 
-    lookup: dict[str, str] = {}
+    lookup: dict[str, tuple[str, str | None]] = {}
 
     with jsonl_path.open(encoding="utf-8") as f:
         for line in f:
@@ -631,6 +634,9 @@ def _build_counterpart_plurals(jsonl_path: Path) -> dict[str, str]:
             word = entry.get("word", "")
             if not word:
                 continue
+
+            # Extract gender for validation by callers
+            gender = _extract_gender(entry)
 
             # Find the best plural form:
             # - Must have "plural" tag
@@ -661,7 +667,7 @@ def _build_counterpart_plurals(jsonl_path: Path) -> dict[str, str]:
                         break
 
             if best_plural:
-                lookup[word] = best_plural
+                lookup[word] = (best_plural, gender)
 
     return lookup
 
@@ -2339,6 +2345,7 @@ def import_wiktextract(
         "blocklisted_lemmas": 0,
         "skipped_plural_duplicate": 0,
         "counterpart_no_plural": 0,  # Nouns where counterpart plural not found in lookup
+        "counterpart_wrong_gender": 0,  # Nouns where counterpart has wrong gender in Wiktextract
         "no_counterpart_no_gender": 0,  # Nouns with no counterpart AND no gender tag on plural
         "adjective_forms_blocked": 0,  # Forms filtered by BLOCKED_ADJECTIVE_FORMS
         "noun_forms_blocked": 0,  # Forms filtered by BLOCKED_NOUN_FORMS_GENDERED
@@ -2503,7 +2510,7 @@ def import_wiktextract(
 
     # Build lookup of counterpart plurals for nouns
     # (fixes bug where "amico" gets "amici" for both genders instead of "amiche" for f)
-    counterpart_plurals: dict[str, str] | None = None
+    counterpart_plurals: dict[str, tuple[str, str | None]] | None = None
     if pos_filter == POS.NOUN:
         counterpart_plurals = _build_counterpart_plurals(jsonl_path)
 
@@ -2807,55 +2814,65 @@ def import_wiktextract(
                             counterpart = _get_counterpart_form(entry, lemma_gender)
                             if counterpart and counterpart_plurals:
                                 if counterpart in counterpart_plurals:
-                                    # Generate own gender with this form
-                                    row = _build_noun_form_row(
-                                        lemma_id,
-                                        form_stressed,
-                                        tags,
-                                        own_gender,
-                                        meaning_hint=form_meaning_hints.get(form_stressed),
-                                    )
-                                    if row:
-                                        add_form(row)
-                                        if _is_trackable_base_form(row, tags):
-                                            seen_base_forms.add(("plural", own_gender))
+                                    other_plural, counterpart_gender = counterpart_plurals[
+                                        counterpart
+                                    ]
+                                    # Verify counterpart has expected gender (some Wiktextract
+                                    # entries have wrong gender, e.g., "maialina" marked as "m")
+                                    if counterpart_gender != other_gender:
+                                        # Wrong gender - can't trust this plural
+                                        # Fall through to Case C handling
+                                        stats["counterpart_wrong_gender"] += 1
                                     else:
-                                        stats["forms_filtered"] += 1
+                                        # Generate own gender with this form
+                                        row = _build_noun_form_row(
+                                            lemma_id,
+                                            form_stressed,
+                                            tags,
+                                            own_gender,
+                                            meaning_hint=form_meaning_hints.get(form_stressed),
+                                        )
+                                        if row:
+                                            add_form(row)
+                                            if _is_trackable_base_form(row, tags):
+                                                seen_base_forms.add(("plural", own_gender))
+                                        else:
+                                            stats["forms_filtered"] += 1
 
-                                    # Generate other gender with looked-up plural
-                                    other_plural = counterpart_plurals[counterpart]
-                                    row = _build_noun_form_row(
-                                        lemma_id,
-                                        other_plural,
-                                        tags,
-                                        other_gender,
-                                        meaning_hint=form_meaning_hints.get(other_plural),
-                                    )
-                                    if row:
-                                        add_form(row)
-                                        if _is_trackable_base_form(row, tags):
-                                            seen_base_forms.add(("plural", other_gender))
-                                    else:
-                                        stats["forms_filtered"] += 1
-                                    continue
-                                else:
-                                    # Case C: Counterpart exists but not in lookup
-                                    # (aggregated - logged at end of import)
+                                        # Generate other gender with looked-up plural
+                                        row = _build_noun_form_row(
+                                            lemma_id,
+                                            other_plural,
+                                            tags,
+                                            other_gender,
+                                            meaning_hint=form_meaning_hints.get(other_plural),
+                                        )
+                                        if row:
+                                            add_form(row)
+                                            if _is_trackable_base_form(row, tags):
+                                                seen_base_forms.add(("plural", other_gender))
+                                        else:
+                                            stats["forms_filtered"] += 1
+                                        continue
+                                # Case C: Counterpart not in lookup, or wrong gender
+                                # (aggregated - logged at end of import)
+                                # Only create own-gender plural; let enrichment handle other
+                                if counterpart not in counterpart_plurals:
                                     stats["counterpart_no_plural"] += 1
-                                    row = _build_noun_form_row(
-                                        lemma_id,
-                                        form_stressed,
-                                        tags,
-                                        own_gender,
-                                        meaning_hint=form_meaning_hints.get(form_stressed),
-                                    )
-                                    if row:
-                                        add_form(row)
-                                        if _is_trackable_base_form(row, tags):
-                                            seen_base_forms.add(("plural", own_gender))
-                                    else:
-                                        stats["forms_filtered"] += 1
-                                    continue
+                                row = _build_noun_form_row(
+                                    lemma_id,
+                                    form_stressed,
+                                    tags,
+                                    own_gender,
+                                    meaning_hint=form_meaning_hints.get(form_stressed),
+                                )
+                                if row:
+                                    add_form(row)
+                                    if _is_trackable_base_form(row, tags):
+                                        seen_base_forms.add(("plural", own_gender))
+                                else:
+                                    stats["forms_filtered"] += 1
+                                continue
 
                             # Case D: Plural but no counterpart info - use own gender only
                             # (aggregated - logged at end of import)
@@ -3206,6 +3223,11 @@ def import_wiktextract(
             logger.info(
                 "Noun plurals: %d counterparts had no plural form in lookup (Wiktextract data gap)",
                 stats["counterpart_no_plural"],
+            )
+        if stats.get("counterpart_wrong_gender", 0) > 0:
+            logger.info(
+                "Noun plurals: %d counterparts had wrong gender in Wiktextract (skipped lookup)",
+                stats["counterpart_wrong_gender"],
             )
         if stats.get("no_counterpart_no_gender", 0) > 0:
             logger.info(

@@ -1949,33 +1949,33 @@ class TestNounClassification:
     def test_explicit_gender_plural_prevents_duplication(self) -> None:
         """Test that entries with explicit gender plurals don't duplicate untagged ones.
 
-        For nouns like "dio" that have explicit feminine plural "dee", the untagged
-        plurals "dei/dii" should only be used for masculine, not duplicated.
+        For nouns like "eroe" that have explicit feminine plural "eroine", the untagged
+        plurals "eroi" should only be used for masculine, not duplicated.
 
-        Note: "dii" has archaic tag, so it gets filtered out entirely (see FILTER_TAGS).
+        Note: "eròi" has archaic tag, so it gets filtered out entirely (see FILTER_TAGS).
         This test verifies:
-        1. Archaic forms like "dii" are filtered
+        1. Archaic forms like "eròi" are filtered
         2. Non-archaic untagged plurals go to masculine only (not fem)
         3. Explicit feminine plurals work correctly
         """
-        sample_dio = {
+        sample_eroe = {
             "pos": "noun",
-            "word": "dio",
+            "word": "eroe",
             "head_templates": [{"args": {"1": "m", "f": "+"}}],
             "categories": ["Italian lemmas"],
             "forms": [
-                {"form": "dei", "tags": ["plural"]},  # Untagged - should be masc only
-                {"form": "dii", "tags": ["archaic", "dialectal", "plural"]},  # Filtered (archaic)
-                {"form": "dea", "tags": ["feminine"]},  # Feminine singular
-                {"form": "dee", "tags": ["feminine", "plural"]},  # Explicit feminine plural
+                {"form": "eroi", "tags": ["plural"]},  # Untagged - should be masc only
+                {"form": "eròi", "tags": ["archaic", "dialectal", "plural"]},  # Filtered
+                {"form": "eroina", "tags": ["feminine"]},  # Feminine singular
+                {"form": "eroine", "tags": ["feminine", "plural"]},  # Explicit feminine plural
             ],
-            "senses": [{"glosses": ["god"], "tags": []}],
+            "senses": [{"glosses": ["hero"], "tags": []}],
         }
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
-        jsonl_path = _create_test_jsonl([sample_dio])
+        jsonl_path = _create_test_jsonl([sample_eroe])
 
         try:
             engine = get_engine(db_path)
@@ -1987,23 +1987,23 @@ class TestNounClassification:
             assert stats["lemmas"] == 1
 
             with get_connection(db_path) as conn:
-                dio = conn.execute(select(lemmas).where(lemmas.c.stressed == "dio")).fetchone()
-                assert dio is not None
+                eroe = conn.execute(select(lemmas).where(lemmas.c.stressed == "eroe")).fetchone()
+                assert eroe is not None
 
                 forms = conn.execute(
-                    select(noun_forms).where(noun_forms.c.lemma_id == dio.id)
+                    select(noun_forms).where(noun_forms.c.lemma_id == eroe.id)
                 ).fetchall()
 
-                # Check masculine plurals - only "dei" (archaic "dii" is filtered)
+                # Check masculine plurals - only "eroi" (archaic "eròi" is filtered)
                 masc_plur = [f for f in forms if f.gender == "m" and f.number == "plural"]
                 masc_forms = {f.stressed for f in masc_plur}
-                assert "dei" in masc_forms, f"Expected 'dei' in masculine plurals, got {masc_forms}"
-                assert "dii" not in masc_forms, "Archaic 'dii' should be filtered out"
+                assert "eroi" in masc_forms, f"Expected 'eroi' in masc plurals, got {masc_forms}"
+                assert "eròi" not in masc_forms, "Archaic 'eròi' should be filtered out"
 
-                # Check feminine plural - should ONLY have dee, NOT dei
+                # Check feminine plural - should ONLY have eroine, NOT eroi
                 fem_plur = [f for f in forms if f.gender == "f" and f.number == "plural"]
                 fem_forms = {f.stressed for f in fem_plur}
-                assert fem_forms == {"dee"}, f"Expected only 'dee' for feminine, got {fem_forms}"
+                assert fem_forms == {"eroine"}, f"Expected only 'eroine' for fem, got {fem_forms}"
 
         finally:
             db_path.unlink()
@@ -2011,34 +2011,34 @@ class TestNounClassification:
 
     def test_stressed_alternatives_enriches_forms(self) -> None:
         """Test that unaccented forms get enriched with accented alternatives."""
-        # Main lemma entry: dio with unaccented "dei" plural
-        sample_dio = {
+        # Main lemma entry: eroe with unaccented "eroi" plural
+        sample_eroe = {
             "pos": "noun",
-            "word": "dio",
+            "word": "eroe",
             "head_templates": [{"args": {"1": "m"}}],
             "categories": ["Italian lemmas"],
             "forms": [
-                {"form": "dei", "tags": ["plural"]},  # Unaccented
+                {"form": "eroi", "tags": ["plural"]},  # Unaccented
             ],
-            "senses": [{"glosses": ["god"], "tags": []}],
+            "senses": [{"glosses": ["hero"], "tags": []}],
         }
 
-        # Form-of entry: "dei" with accented alternative "dèi"
-        sample_dei_formof = {
+        # Form-of entry: "eroi" with accented alternative "eròi"
+        sample_eroi_formof = {
             "pos": "noun",
-            "word": "dei",
+            "word": "eroi",
             "head_templates": [{"args": {"1": "it", "2": "noun form"}}],
             "categories": [],
             "forms": [
-                {"form": "dèi", "tags": ["alternative"]},  # Accented alternative
+                {"form": "eròi", "tags": ["alternative"]},  # Accented alternative
             ],
-            "senses": [{"form_of": [{"word": "dio"}], "glosses": ["plural of dio"]}],
+            "senses": [{"form_of": [{"word": "eroe"}], "glosses": ["plural of eroe"]}],
         }
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
-        jsonl_path = _create_test_jsonl([sample_dio, sample_dei_formof])
+        jsonl_path = _create_test_jsonl([sample_eroe, sample_eroi_formof])
 
         try:
             engine = get_engine(db_path)
@@ -2047,23 +2047,23 @@ class TestNounClassification:
             with get_connection(db_path) as conn:
                 stats = import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
 
-            assert stats["lemmas"] == 1  # Only dio is a lemma
+            assert stats["lemmas"] == 1  # Only eroe is a lemma
 
             with get_connection(db_path) as conn:
                 # Check the plural form is accented
-                dio = conn.execute(select(lemmas).where(lemmas.c.stressed == "dio")).fetchone()
-                assert dio is not None
+                eroe = conn.execute(select(lemmas).where(lemmas.c.stressed == "eroe")).fetchone()
+                assert eroe is not None
 
                 forms = conn.execute(
-                    select(noun_forms).where(noun_forms.c.lemma_id == dio.id)
+                    select(noun_forms).where(noun_forms.c.lemma_id == eroe.id)
                 ).fetchall()
 
                 plural_forms = [f for f in forms if f.number == "plural"]
                 assert len(plural_forms) >= 1
 
-                # The plural should be the accented "dèi", not unaccented "dei"
+                # The plural should be the accented "eròi", not unaccented "eroi"
                 plural_stressed = [f.stressed for f in plural_forms]
-                assert "dèi" in plural_stressed, f"Expected 'dèi' in {plural_stressed}"
+                assert "eròi" in plural_stressed, f"Expected 'eròi' in {plural_stressed}"
 
         finally:
             db_path.unlink()

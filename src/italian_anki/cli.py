@@ -404,6 +404,8 @@ def _run_wiktextract_import(
         print(f"{indent}  Duplicate plurals:  {stats['skipped_plural_duplicate']:,}")
     if stats.get("nouns_skipped_no_gender", 0) > 0:
         print(f"{indent}  No gender:          {stats['nouns_skipped_no_gender']:,}")
+    if stats.get("counterpart_wrong_gender", 0) > 0:
+        print(f"{indent}  Wrong gender:       {stats['counterpart_wrong_gender']:,}")
     return stats
 
 
