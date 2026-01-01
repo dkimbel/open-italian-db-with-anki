@@ -1,0 +1,21 @@
+Tatoeba Sentence Data
+=====================
+
+Source: https://tatoeba.org/
+
+This data is released under the Creative Commons Attribution 2.0 France
+license (CC BY 2.0 FR), except for sentences explicitly marked as CC0 1.0.
+
+CC BY 2.0 FR: https://creativecommons.org/licenses/by/2.0/fr/
+CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/
+
+Attribution
+-----------
+When using this data, please attribute it to "Tatoeba" with a link to
+https://tatoeba.org/
+
+Additional Notes
+----------------
+- Japanese and English sentences derived from the Tanaka Corpus (public domain)
+- Audio licensing varies by contributor
+- See https://tatoeba.org/en/terms_of_use for full terms

@@ -2,6 +2,10 @@
 
 This directory contains linguistic data from multiple sources, each with its own license.
 
+## Licenses
+
+Licenses for all the data described here can be found in `data-licenses`.
+
 ## Downloading Data
 
 All data can be downloaded programmatically using the provided tasks:
