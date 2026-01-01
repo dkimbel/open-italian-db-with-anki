@@ -2,13 +2,11 @@
 
 import logging
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Connection, Table, select, update
 
-from italian_anki.articles import get_definite
 from italian_anki.db.schema import (
     adjective_forms,
     lemmas,
@@ -16,7 +14,6 @@ from italian_anki.db.schema import (
     verb_forms,
 )
 from italian_anki.enums import POS
-from italian_anki.importers.wiktextract import is_blocked_adjective_form
 from italian_anki.normalize import (
     FRENCH_LOANWORD_WHITELIST,
     derive_written_from_stressed,
@@ -38,56 +35,11 @@ POS_FORM_TABLES: dict[POS, Table] = {
     POS.ADJECTIVE: adjective_forms,
 }
 
-# Morphit adjective tag components
-_DEGREE_MAP = {"pos": "positive", "sup": "superlative", "comp": "comparative"}
-_NUMBER_MAP = {"s": "singular", "p": "plural"}
-# No need for a _GENDER_MAP -- we just reuse the "m" or "f" value
-
 # Corrections for known Morphit errors in noun forms
 # Applied when enriching noun_forms.written from Morphit data
 NOUN_WRITTEN_CORRECTIONS: dict[str, str] = {
     "toto": "totò",  # Morphit error: pluralia tantum game name needs final accent
 }
-
-
-@dataclass
-class MorphitEntry:
-    """Parsed Morphit adjective entry with full grammatical features."""
-
-    form: str  # Real Italian spelling (e.g., "grandi")
-    lemma: str  # Lemma word (e.g., "grande")
-    degree: str  # "positive", "superlative", "comparative"
-    gender: str  # "m", "f"
-    number: str  # "singular", "plural"
-
-
-def _parse_adjective_tag(tags: str) -> tuple[str, str, str] | None:
-    """Parse ADJ:{degree}+{gender}+{number} format.
-
-    Examples:
-        ADJ:pos+m+s -> ("positive", "m", "singular")
-        ADJ:sup+f+p -> ("superlative", "f", "plural")
-
-    Returns:
-        Tuple of (degree, gender, number) or None if not a valid adjective tag.
-    """
-    if not tags.startswith("ADJ:"):
-        return None
-
-    # Remove "ADJ:" prefix and split on "+"
-    parts = tags[4:].split("+")
-    if len(parts) != 3:
-        return None
-
-    degree_raw, gender, number_raw = parts
-
-    degree = _DEGREE_MAP.get(degree_raw)
-    number = _NUMBER_MAP.get(number_raw)
-
-    if degree is None or number is None:
-        return None
-
-    return (degree, gender, number)
 
 
 def _parse_morphit(
@@ -161,45 +113,6 @@ def _build_form_lookup(
             normalized_lookup[written] = form
 
     return exact_lookup, normalized_lookup
-
-
-def _build_adjective_lookup(morphit_path: Path) -> dict[str, list[MorphitEntry]]:
-    """Build lemma -> list of MorphitEntry for adjectives.
-
-    This enables looking up ALL forms for a given lemma, including their
-    grammatical features (degree, gender, number).
-
-    Returns:
-        Dict mapping normalized lemma to list of all its adjective forms.
-        E.g., {"grande": [MorphitEntry(form="grande", gender="m", ...),
-                          MorphitEntry(form="grandi", gender="m", number="plural", ...),
-                          ...]}
-    """
-    lookup: dict[str, list[MorphitEntry]] = {}
-
-    for form, lemma, tags in _parse_morphit(morphit_path):
-        parsed = _parse_adjective_tag(tags)
-        if parsed is None:
-            continue
-
-        degree, gender, number = parsed
-
-        entry = MorphitEntry(
-            form=form,
-            lemma=lemma,
-            degree=degree,
-            gender=gender,
-            number=number,
-        )
-
-        # Use written form as key (preserves meaningful final accents)
-        # Use warn=False since Morphit contains French loanwords with multi-accents
-        written_lemma = derive_written_from_stressed(lemma, warn=False) or lemma
-        if written_lemma not in lookup:
-            lookup[written_lemma] = []
-        lookup[written_lemma].append(entry)
-
-    return lookup
 
 
 def import_morphit(
@@ -317,169 +230,6 @@ def import_morphit(
     # Final progress callback
     if progress_callback:
         progress_callback(total_forms, total_forms)
-
-    return stats
-
-
-def fill_missing_adjective_forms(
-    conn: Connection,
-    morphit_path: Path,
-    *,
-    progress_callback: Callable[[int, int], None] | None = None,
-) -> dict[str, int]:
-    """Fill missing adjective forms using Morphit as authoritative source.
-
-    For ALL adjectives, looks up forms in Morphit and inserts any missing
-    (gender, number) combinations. This includes:
-    - Standard forms (m/f x sg/pl) for adjectives with incomplete data
-    - Elided forms (ending with ') like grand', sant' for allomorphs
-
-    Args:
-        conn: SQLAlchemy connection
-        morphit_path: Path to morph-it.txt file
-        progress_callback: Optional callback for progress reporting (current, total)
-
-    Returns:
-        Statistics dict with counts:
-        - adjectives_checked: Number of adjectives processed
-        - forms_added: Number of new forms inserted from Morphit
-        - adjectives_completed: Adjectives that gained forms
-        - not_in_morphit: Adjectives not found in Morphit
-        - combos_skipped: Forms skipped because they already exist
-    """
-    stats = {
-        "adjectives_checked": 0,
-        "forms_added": 0,
-        "adjectives_completed": 0,
-        "not_in_morphit": 0,
-        "combos_skipped": 0,
-        "forms_blocked": 0,
-    }
-
-    # Build Morphit lookup: normalized_lemma -> list of MorphitEntry
-    morphit_lookup = _build_adjective_lookup(morphit_path)
-
-    # Get ALL adjectives (not just incomplete ones)
-    # The existing_combos logic prevents duplicate insertions
-    # Use warn=False since French loanwords may have multiple accents
-    result = conn.execute(
-        select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == POS.ADJECTIVE)
-    )
-    all_adjectives = [
-        (row.id, derive_written_from_stressed(row.stressed, warn=False) or row.stressed)
-        for row in result
-    ]
-    stats["adjectives_checked"] = len(all_adjectives)
-
-    if progress_callback:
-        progress_callback(0, len(all_adjectives))
-
-    for idx, (lemma_id, lemma_normalized) in enumerate(all_adjectives, 1):
-        if progress_callback and idx % 100 == 0:
-            progress_callback(idx, len(all_adjectives))
-
-        # Look up in Morphit by normalized lemma
-        morphit_forms = morphit_lookup.get(lemma_normalized, [])
-
-        if not morphit_forms:
-            stats["not_in_morphit"] += 1
-            logger.debug("Adjective '%s' not found in Morphit", lemma_normalized)
-            continue
-
-        # Get existing forms for this lemma (positive degree only)
-        existing_result = conn.execute(
-            select(
-                adjective_forms.c.stressed,
-                adjective_forms.c.gender,
-                adjective_forms.c.number,
-                adjective_forms.c.is_citation_form,
-            )
-            .where(adjective_forms.c.lemma_id == lemma_id)
-            .where(adjective_forms.c.degree == "positive")
-        )
-        existing_rows = existing_result.fetchall()
-
-        # Key matches DB constraint: UNIQUE (lemma_id, stressed, gender, number, degree)
-        # This allows multiple forms per (gender, number) as long as stressed differs
-        existing_combos = {(row.stressed, row.gender, row.number) for row in existing_rows}
-
-        # Check if lemma already has a citation form
-        has_citation_form = any(row.is_citation_form for row in existing_rows)
-        citation_form_set_this_lemma = False
-
-        forms_added_for_lemma = 0
-
-        # Insert missing forms from Morphit (only positive degree)
-        for entry in morphit_forms:
-            if entry.degree != "positive":
-                continue  # Only fill base forms, not superlatives/comparatives
-
-            # Key includes form to allow multiple forms per (gender, number)
-            combo = (entry.form, entry.gender, entry.number)
-
-            if combo in existing_combos:
-                # Exact duplicate - skip silently
-                stats["combos_skipped"] += 1
-                logger.debug(
-                    "Skipped duplicate '%s' for '%s' (%s/%s)",
-                    entry.form,
-                    lemma_normalized,
-                    entry.gender,
-                    entry.number,
-                )
-                continue
-
-            # Check if this is a French loanword that should preserve its accent
-            if entry.form in FRENCH_LOANWORD_WHITELIST:
-                written_form = FRENCH_LOANWORD_WHITELIST[entry.form]
-                written_source = "hardcoded:loanword"
-            else:
-                written_form = entry.form
-                written_source = "morphit"
-
-            # Compute definite article for this form (gender is already 'm'/'f')
-            def_article, article_source = get_definite(written_form, entry.gender, entry.number)
-
-            # Set is_citation_form for m/s if lemma lacks citation form
-            is_m_s = entry.gender == "m" and entry.number == "singular"
-            set_as_citation = is_m_s and not has_citation_form and not citation_form_set_this_lemma
-
-            # Check blocklist for archaic/erroneous forms
-            if is_blocked_adjective_form(lemma_normalized, entry.form, entry.gender, entry.number):
-                stats["forms_blocked"] += 1
-                continue
-
-            # Insert new form
-            conn.execute(
-                adjective_forms.insert().values(
-                    lemma_id=lemma_id,
-                    written=written_form,
-                    written_source=written_source,
-                    stressed=entry.form,  # Morphit doesn't have stress; use form
-                    gender=entry.gender,
-                    number=entry.number,
-                    degree="positive",
-                    labels=None,
-                    def_article=def_article,
-                    article_source=article_source,
-                    form_origin="morphit",
-                    is_citation_form=set_as_citation,
-                )
-            )
-            if set_as_citation:
-                citation_form_set_this_lemma = True
-            # Mark this combo as filled to prevent duplicate insertions
-            existing_combos.add(combo)
-            forms_added_for_lemma += 1
-            stats["forms_added"] += 1
-
-        # Check if now complete (4 positive-degree forms)
-        # existing_combos now includes forms we just added
-        if forms_added_for_lemma > 0 and len(existing_combos) >= 4:
-            stats["adjectives_completed"] += 1
-
-    if progress_callback:
-        progress_callback(len(all_adjectives), len(all_adjectives))
 
     return stats
 

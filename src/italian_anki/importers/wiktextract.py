@@ -323,10 +323,13 @@ HARDCODED_DEGREE_RELATIONSHIPS: dict[str, tuple[str, str]] = {
 # Hardcoded allomorph forms not captured by normal import
 # These are stored as forms under their parent lemma, not as separate lemmas
 # Format: (form, parent_lemma, gender, number, label)
-# Note: sant' is NOT hardcoded - it comes from Morphit via fill_missing_adjective_forms()
-HARDCODED_ALLOMORPH_FORMS: list[tuple[str, str, str, str, str]] = [
+HARDCODED_ALLOMORPH_FORMS: list[tuple[str, str, str, str, str | None]] = [
     # san is apocopic (before consonants) - not in Morphit as adjective
     ("san", "santo", "m", "singular", "apocopic"),  # San Pietro, San Marco
+    # grandi plurals for grande - no wiktextract entry exists, lemma created via alt_of form processing
+    # NOTE: grande has inflection_class='2-form' in adjective_metadata, so grandi is consistent
+    ("grandi", "grande", "m", "plural", None),
+    ("grandi", "grande", "f", "plural", None),
 ]
 
 # Hardcoded noun allomorphs not properly captured by Wiktextract
