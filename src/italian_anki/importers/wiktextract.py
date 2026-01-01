@@ -741,6 +741,10 @@ LEMMA_BLOCKLIST: frozenset[str] = frozenset(
         "daun",  # Typo/nonsense entry
         "1ª",  # Ordinal notation, not an adjective lemma
         "12º",  # Ordinal notation, not an adjective lemma
+        # === Archaic/poetic adjectives with incomplete forms ===
+        "dio",  # Archaic/poetic adjective ("bright, resplendent"), all forms blocked
+        # === Adjectives that are primarily nouns ===
+        "cercatore",  # Primarily a noun; as adjective has incomplete/incorrect forms in Wiktextract
         # === Feminine-only adjectives - bad data (names, botanical, rare) ===
         "aurica",
         "beatrice",
@@ -1068,7 +1072,6 @@ BLOCKED_ADJECTIVE_FORMS: dict[str, set[str]] = {
     "vicino": {"vicin"},
     "santo": {"sant'"},
     # === Archaic/poetic ===
-    "dio": {"dia", "die", "dii"},
     "accidioso": {"accidïoso", "accidïosi", "accidïosa", "accidïose"},
     # === Unusual spelling variants (k for c, etc.) ===
     "ceco": {"ceko", "ceki", "ceka", "ceke"},
@@ -1081,7 +1084,6 @@ BLOCKED_ADJECTIVE_FORMS: dict[str, set[str]] = {
     "menscevico": {"menscevici"},  # correct: menscevichi (hard k)
     "fenicio": {"fenice"},  # correct: fenicie (fenice = phoenix, different word!)
     "malvagio": {"malvage"},  # correct: malvagie (modern standard)
-    "cercatore": {"cercatora", "cercatore"},  # correct: cercatrice/cercatrici
     # === Non-standard variants to normalize ===
     "ubriaco": {
         "ubbriaco",
