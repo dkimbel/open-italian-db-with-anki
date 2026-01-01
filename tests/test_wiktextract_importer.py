@@ -2128,7 +2128,7 @@ class TestImportAdjAllomorphs:
                 ).fetchall()
 
                 # Find allomorph forms (labeled apocopic)
-                allomorph_forms = [f for f in forms if f.labels == "apocopic"]
+                allomorph_forms = [f for f in forms if f.labels == ["apocopic"]]
                 assert len(allomorph_forms) == 4
 
                 # All should have form="gran"
@@ -2284,7 +2284,7 @@ class TestImportAdjAllomorphs:
                 san_form = san_forms[0]
                 assert san_form.gender == "m"
                 assert san_form.number == "singular"
-                assert san_form.labels == "apocopic"
+                assert san_form.labels == ["apocopic"]
                 assert san_form.form_origin == "hardcoded"
 
         finally:
@@ -2352,7 +2352,7 @@ class TestImportNounAllomorphs:
                 ).fetchall()
 
                 # Find allomorph forms (labeled apocopic)
-                allomorph_forms = [f for f in forms if f.labels == "apocopic"]
+                allomorph_forms = [f for f in forms if f.labels == ["apocopic"]]
                 assert len(allomorph_forms) == 1
 
                 form = allomorph_forms[0]
@@ -2421,7 +2421,7 @@ class TestImportNounAllomorphs:
 
                 form = val_forms[0]
                 assert form.gender == "f"
-                assert form.labels == "apocopic"
+                assert form.labels == ["apocopic"]
 
         finally:
             db_path.unlink()
@@ -2520,7 +2520,7 @@ class TestImportNounAllomorphs:
                 san_form = san_forms[0]
                 assert san_form.gender == "m"
                 assert san_form.number == "singular"
-                assert san_form.labels == "apocopic"
+                assert san_form.labels == ["apocopic"]
                 assert san_form.form_origin == "hardcoded"
 
                 # Check cor was added to cuore
@@ -2537,7 +2537,7 @@ class TestImportNounAllomorphs:
                 assert len(cor_forms) == 1
                 cor_form = cor_forms[0]
                 assert cor_form.gender == "m"
-                assert cor_form.labels == "apocopic"
+                assert cor_form.labels == ["apocopic"]
                 assert cor_form.form_origin == "hardcoded"
 
         finally:
