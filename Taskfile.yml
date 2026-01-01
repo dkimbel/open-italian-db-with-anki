@@ -89,6 +89,11 @@ tasks:
     cmds:
       - uv run italian-anki import-tatoeba
 
+  import-verb-irregularity:
+    desc: Import verb irregularity pattern classifications
+    cmds:
+      - uv run italian-anki import-verb-irregularity
+
   import-all:
     desc: Run full import pipeline
     cmds:

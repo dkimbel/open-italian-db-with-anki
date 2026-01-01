@@ -293,6 +293,38 @@ adjective_metadata = Table(
     ),  # 'wiktextract', 'wiktextract:canonical', 'hardcoded'
 )
 
+# Verb irregularity pattern classification
+#
+# This table classifies irregular verbs by their conjugation patterns across
+# different tense domains. A verb can have irregularities in multiple tenses
+# (e.g., venire has g_insertion in present, strong_nn in remote, syncopated_rr
+# in future).
+#
+# NULL in any pattern column means the verb is regular in that tense domain.
+# This table only contains entries for verbs with at least one irregular pattern.
+#
+# Pattern enum values are defined in italian_anki/enums.py:
+# - PresentPattern: g_insertion, suppletive_essere, modal_potere, etc.
+# - RemotePattern: strong_ss, strong_nn, suppletive_essere, etc.
+# - FuturePattern: syncopated_rr, syncopated_dr, contracted_base, suppletive
+# - ParticiplePattern: strong_tto, strong_so, strong_to_into, etc.
+# - SubjunctivePattern: suppletive_sia, suppletive_abbia, etc.
+#
+verb_irregularity = Table(
+    "verb_irregularity",
+    metadata,
+    Column("lemma_id", Integer, ForeignKey("lemmas.id"), primary_key=True),
+    # Pattern columns (NULL = regular in this tense domain)
+    Column("present_pattern", Text),  # PresentPattern enum value
+    Column("remote_pattern", Text),  # RemotePattern enum value
+    Column("future_pattern", Text),  # FuturePattern enum value
+    Column("participle_pattern", Text),  # ParticiplePattern enum value
+    Column("subjunctive_pattern", Text),  # SubjunctivePattern enum value
+    # Metadata
+    Column("classification_source", Text),  # 'manual', 'inferred', etc.
+    Column("notes", Text),  # Optional notes for edge cases
+)
+
 # Indexes (defined separately for clarity)
 Index(
     "idx_lemmas_stressed_pos", lemmas.c.stressed, lemmas.c.pos
@@ -319,6 +351,12 @@ Index("idx_adjective_forms_written", adjective_forms.c.written)
 Index("idx_adjective_forms_origin", adjective_forms.c.form_origin)
 # adjective_metadata indexes
 Index("idx_adjective_metadata_base", adjective_metadata.c.base_lemma_id)
+# verb_irregularity indexes
+Index("idx_verb_irregularity_present", verb_irregularity.c.present_pattern)
+Index("idx_verb_irregularity_remote", verb_irregularity.c.remote_pattern)
+Index("idx_verb_irregularity_future", verb_irregularity.c.future_pattern)
+Index("idx_verb_irregularity_participle", verb_irregularity.c.participle_pattern)
+Index("idx_verb_irregularity_subjunctive", verb_irregularity.c.subjunctive_pattern)
 # Other indexes
 Index("idx_definitions_lemma", definitions.c.lemma_id)
 Index("idx_frequencies_lemma", frequencies.c.lemma_id)

@@ -30,6 +30,7 @@ from italian_anki.importers import (
     import_itwac,
     import_morphit,
     import_tatoeba,
+    import_verb_irregularity,
     import_wiktextract,
 )
 from italian_anki.importers.itwac import ITWAC_CSV_FILES
@@ -200,6 +201,39 @@ def cmd_import_tatoeba(args: argparse.Namespace) -> int:
 
     with get_connection(db_path) as conn:
         _run_tatoeba_import(conn, ita_path, eng_path, links_path)
+
+    print()
+    print("Import complete!")
+    return 0
+
+
+def cmd_import_verb_irregularity(args: argparse.Namespace) -> int:
+    """Run the verb irregularity pattern import command."""
+    db_path = Path(args.database)
+
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        print("Run 'import-wiktextract' first to create the database.", file=sys.stderr)
+        return 1
+
+    # Ensure verb_irregularity table exists (may be added after initial schema)
+    engine = get_engine(db_path)
+    init_db(engine)
+
+    print(f"Importing verb irregularity patterns to: {db_path}")
+    print()
+
+    with get_connection(db_path) as conn:
+        stats = import_verb_irregularity(conn, progress_callback=_make_progress_callback())
+        print()
+        print(f"  Total classifications:  {stats.total:,}")
+        print(f"  Matched:                {stats.matched:,}")
+        print(f"  Not found:              {stats.not_found:,}")
+        if stats.not_found > 0:
+            if len(stats.not_found_list) <= 10:
+                print(f"    Missing verbs: {', '.join(stats.not_found_list)}")
+            else:
+                print(f"    First 10 missing: {', '.join(stats.not_found_list[:10])}")
 
     print()
     print("Import complete!")
@@ -843,6 +877,20 @@ def main() -> int:
         help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
     )
     tatoeba_parser.set_defaults(func=cmd_import_tatoeba)
+
+    # import-verb-irregularity subcommand
+    irreg_parser = subparsers.add_parser(
+        "import-verb-irregularity",
+        help="Import verb irregularity pattern classifications",
+    )
+    irreg_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    irreg_parser.set_defaults(func=cmd_import_verb_irregularity)
 
     # import-all subcommand
     import_all_parser = subparsers.add_parser(
