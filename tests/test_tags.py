@@ -33,9 +33,13 @@ class TestShouldFilterForm:
         """Test that forms with uncommon tag are NOT filtered (kept with label)."""
         assert should_filter_form(["uncommon", "gerund"]) is False
 
-    def test_allows_poetic_forms(self) -> None:
-        """Test that forms with poetic tag are NOT filtered (kept with label)."""
-        assert should_filter_form(["poetic", "infinitive"]) is False
+    def test_filters_poetic_forms(self) -> None:
+        """Test that forms with poetic tag ARE filtered (literary/archaic style)."""
+        assert should_filter_form(["poetic", "infinitive"]) is True
+
+    def test_filters_dialectal_forms(self) -> None:
+        """Test that forms with dialectal tag ARE filtered (non-standard regional)."""
+        assert should_filter_form(["dialectal", "plural"]) is True
 
     def test_filters_misspelling(self) -> None:
         """Test that existing misspelling filter still works."""

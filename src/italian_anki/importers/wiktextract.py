@@ -632,8 +632,12 @@ def _build_counterpart_plurals(jsonl_path: Path) -> dict[str, tuple[str, str | N
         Dict mapping lemma word to (plural_form, gender).
         E.g., {"amica": ("amiche", "f"), "amico": ("amici", "m")}
     """
-    # Tags that indicate a less preferred plural form
-    deprioritize_tags = frozenset({"archaic", "dialectal", "obsolete", "poetic", "rare"})
+    # Tags that indicate a less preferred plural form for the counterpart lookup.
+    # Note: archaic/obsolete/dated/poetic/dialectal are already filtered by FILTER_TAGS
+    # in tags.py, so they won't appear here. We only need to deprioritize "rare" forms
+    # which are kept in the database with labels but shouldn't be the default plural
+    # for counterpart generation.
+    deprioritize_tags = frozenset({"rare"})
 
     lookup: dict[str, tuple[str, str | None]] = {}
 
@@ -660,7 +664,7 @@ def _build_counterpart_plurals(jsonl_path: Path) -> dict[str, tuple[str, str | N
             # Find the best plural form:
             # - Must have "plural" tag
             # - Must NOT have diminutive/augmentative tags
-            # - Prefer forms without archaic/dialectal/obsolete/poetic tags
+            # - Prefer forms without "rare" tag (standard forms over rare alternatives)
             best_plural: str | None = None
             best_has_deprioritized = True  # Start pessimistic
 

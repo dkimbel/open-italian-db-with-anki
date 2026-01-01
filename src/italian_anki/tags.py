@@ -27,6 +27,12 @@ FILTER_TAGS = frozenset(
         "archaic",
         "obsolete",
         "dated",
+        # Poetic forms are literary/archaic style (e.g., dièi, fìaro, pàrto).
+        # 152 forms affected, all have standard alternatives.
+        "poetic",
+        # Dialectal forms are non-standard regional variants (e.g., "sora" for "sorella").
+        # Only 3 forms affected.
+        "dialectal",
         # Note: "error-unknown-tag" and "error-unrecognized-form" are NOT filtered -
         # they just mean wiktextract couldn't parse some annotation, but the forms
         # themselves are valid
@@ -85,14 +91,13 @@ GENDER_TAGS = frozenset({"masculine", "feminine"})
 # Rare/regional labels are merged into broader categories for consistency.
 # The mapping also serves as a whitelist - only keys are recognized as labels.
 #
-# Note: archaic/obsolete/dated are NOT here because forms with those tags are
-# filtered out entirely (see FILTER_TAGS). These labels are only for forms we keep.
+# Note: archaic/obsolete/dated/poetic/dialectal are NOT here because forms with
+# those tags are filtered out entirely (see FILTER_TAGS). These labels are only
+# for forms we keep.
 LABEL_CANONICAL: dict[str, str] = {
     # Core labels (map to themselves)
     "literary": "literary",
     "regional": "regional",
-    "dialectal": "dialectal",
-    "poetic": "poetic",
     "rare": "rare",
     "colloquial": "colloquial",
     "uncommon": "uncommon",
