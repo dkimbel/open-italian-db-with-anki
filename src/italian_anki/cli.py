@@ -386,24 +386,24 @@ def _run_wiktextract_import(
     )
     print()
     if stats["cleared"] > 0:
-        print(f"{indent}Cleared:     {stats['cleared']:,} existing lemmas")
-    print(f"{indent}Lemmas:      {stats['lemmas']:,}")
-    print(f"{indent}Forms:       {stats['forms']:,}")
-    print(f"{indent}Definitions: {stats['definitions']:,}")
-    print(f"{indent}Skipped:     {stats['skipped']:,}")
+        print(f"{indent}Cleared:       {stats['cleared']:,} existing lemmas")
+    print(f"{indent}Lemmas:        {stats['lemmas']:,}")
+    print(f"{indent}Forms:         {stats['forms']:,}")
+    print(f"{indent}Definitions:   {stats['definitions']:,}")
+    print(f"{indent}Skipped:       {stats['skipped']:,}")
+    if pos == POS.VERB:
+        print(f"{indent}Stress synced:  {stats.get('lemma_stress_synced', 0):,}")
     # Show skip reason breakdown (only non-zero counts)
     if stats.get("blocklisted_lemmas", 0) > 0:
-        print(f"{indent}  Blocklisted: {stats['blocklisted_lemmas']:,}")
+        print(f"{indent}  Blocklisted:        {stats['blocklisted_lemmas']:,}")
     if stats.get("misspellings_skipped", 0) > 0:
-        print(f"{indent}  Misspellings: {stats['misspellings_skipped']:,}")
+        print(f"{indent}  Misspellings:       {stats['misspellings_skipped']:,}")
     if stats.get("alt_forms_skipped", 0) > 0:
-        print(f"{indent}  Alt-forms: {stats['alt_forms_skipped']:,}")
+        print(f"{indent}  Alt-forms:          {stats['alt_forms_skipped']:,}")
     if stats.get("skipped_plural_duplicate", 0) > 0:
-        print(f"{indent}  Duplicate plurals: {stats['skipped_plural_duplicate']:,}")
+        print(f"{indent}  Duplicate plurals:  {stats['skipped_plural_duplicate']:,}")
     if stats.get("nouns_skipped_no_gender", 0) > 0:
-        print(f"{indent}  No gender: {stats['nouns_skipped_no_gender']:,}")
-    if pos == POS.VERB:
-        print(f"{indent}Stress synced: {stats.get('lemma_stress_synced', 0):,}")
+        print(f"{indent}  No gender:          {stats['nouns_skipped_no_gender']:,}")
     return stats
 
 
@@ -457,7 +457,7 @@ def _run_itwac_import(
     print(f"{indent}Lemmas matched:     {stats['matched']:,} ({freq_pct:.0f}% of corpus frequency)")
     print(f"{indent}Lemmas not found:   {stats['not_found']:,}")
     if stats.get("multi_accent", 0) > 0:
-        print(f"{indent}  Multi-accent: {stats['multi_accent']:,}")
+        print(f"{indent}  Multi-accent:   {stats['multi_accent']:,}")
     return stats
 
 
