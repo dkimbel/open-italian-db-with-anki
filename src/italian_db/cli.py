@@ -422,9 +422,9 @@ def _run_wiktextract_import(
     print(f"{indent}Lemmas:        {stats['lemmas']:,}")
     print(f"{indent}Forms:         {stats['forms']:,}")
     print(f"{indent}Definitions:   {stats['definitions']:,}")
-    print(f"{indent}Skipped:       {stats['skipped']:,}")
     if pos == POS.VERB:
         print(f"{indent}Stress synced: {stats.get('lemma_stress_synced', 0):,}")
+    print(f"{indent}Skipped:       {stats['skipped']:,}")
     # Show skip reason breakdown (only non-zero counts)
     if stats.get("blocklisted_lemmas", 0) > 0:
         print(f"{indent}  Blocklisted:        {stats['blocklisted_lemmas']:,}")
