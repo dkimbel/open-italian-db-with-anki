@@ -15,37 +15,6 @@ and similar forms are not always present.
 >
 > If you find any mistakes, please [open an issue](https://github.com/dkimbel/open-italian-db-with-anki/issues).
 
-## Data Sources & Licenses
-
-**No scraping**: All data is downloaded from freely available, pre-packaged datasets
-published by their respective projects. See `data-licenses/` for full license texts.
-
-| Source | License | Role |
-|--------|---------|------|
-| [Wiktextract](https://kaikki.org) | CC-BY-SA 3.0 + GFDL | Lemmas, conjugations, definitions |
-| [Morph-it!](https://docs.sslmit.unibo.it) | CC-BY-SA 2.0 + LGPL | Real Italian orthography |
-| [ItWaC](https://github.com/franfranz/Word_Frequency_Lists_ITA) | MIT | Frequency data |
-| [Tatoeba](https://tatoeba.org) | CC-BY 2.0 FR | Example sentences |
-
-## Quick Start
-
-```bash
-# Install dependencies
-uv sync
-
-# Download source data (~1.3GB, skips existing)
-task download-all
-
-# Build database
-task import-all
-
-# Sanity checks / validation
-task verify-db
-
-# Check stats
-task stats
-```
-
 ## Example Queries
 
 ### Gender-changing plural (uovo → uova)
@@ -83,29 +52,6 @@ va       và        3       singular
 andiamo  andiàmo   1       plural
 andate   andàte    2       plural
 vanno    vànno     3       plural
-```
-
-### Adjective allomorphs (bello → bel/bell'/bei/begli)
-
-```sql
-SELECT af.written, af.gender, af.number
-FROM lemmas l
-JOIN adjective_forms af ON l.id = af.lemma_id
-WHERE l.written = 'bello';
-```
-
-```
-written  gender  number
--------  ------  --------
-bello    m       singular
-bel      m       singular
-bell'    m       singular
-bella    f       singular
-bell'    f       singular
-belli    m       plural
-bei      m       plural
-begli    m       plural
-belle    f       plural
 ```
 
 ### Most frequent verbs, with IPA pronunciations
@@ -152,6 +98,60 @@ Chi non lavora non ha diritto di mangiare.                 He who does not work,
 Non devi mangiare troppi gelati e troppi spaghetti.        You must not eat too much ice-cream and spaghetti.
 Che ne dici di mangiare fuori stasera tanto per cambiare?  How about eating out this evening for a change?
 ```
+
+### Adjective allomorphs (bello → bel/bell'/bei/begli)
+
+```sql
+SELECT af.written, af.gender, af.number
+FROM lemmas l
+JOIN adjective_forms af ON l.id = af.lemma_id
+WHERE l.written = 'bello';
+```
+
+```
+written  gender  number
+-------  ------  --------
+bello    m       singular
+bel      m       singular
+bell'    m       singular
+bella    f       singular
+bell'    f       singular
+belli    m       plural
+bei      m       plural
+begli    m       plural
+belle    f       plural
+```
+
+## Quick Start
+
+```bash
+# Install dependencies
+uv sync
+
+# Download source data (~1.3GB, skips existing)
+task download-all
+
+# Build database
+task import-all
+
+# Sanity checks / validation
+task verify-db
+
+# Check stats
+task stats
+```
+
+## Data Sources & Licenses
+
+**No scraping**: All data is downloaded from freely available, pre-packaged datasets
+published by their respective projects. See `data-licenses/` for full license texts.
+
+| Source | License | Role |
+|--------|---------|------|
+| [Wiktextract](https://kaikki.org) | CC-BY-SA 3.0 + GFDL | Lemmas, conjugations, definitions |
+| [Morph-it!](https://docs.sslmit.unibo.it) | CC-BY-SA 2.0 + LGPL | Real Italian orthography |
+| [ItWaC](https://github.com/franfranz/Word_Frequency_Lists_ITA) | MIT | Frequency data |
+| [Tatoeba](https://tatoeba.org) | CC-BY 2.0 FR | Example sentences |
 
 ## What's In The Database
 
