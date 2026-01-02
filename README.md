@@ -1,9 +1,9 @@
-# Open Italian Database for Anki Decks
+# Open Italian Language Database (with Anki generation)
 
 ## What is this?
 
 This is Python code for:
-- Building a SQLite database from a variety of freely-available online sources.
+- Building an Italian language SQLite database from a variety of freely-available online sources.
 - Using the database to generate [Anki](https://apps.ankiweb.net/) decks.
 
 This tool is optimized for learners of modern standard Italian. Archaic, poetic, literary,
@@ -11,8 +11,8 @@ and similar forms are not always present.
 
 > [!NOTE]
 > This database is assembled from multiple sources, with some automated inference for missing data
-> (e.g. inferring a noun's missing feminine plural form). It may contain incorrect information!
-> If you find any mistakes, please [open an issue]().
+> (e.g. inferring a noun's feminine plural form). It may contain incorrect information!
+> If you find any mistakes, please [open an issue](https://github.com/dkimbel/open-italian-db-with-anki/issues).
 
 ## Data Sources & Licenses
 
@@ -165,7 +165,7 @@ Che ne dici di mangiare fuori stasera tanto per cambiare?  How about eating out 
 ```
 open-italian-db-with-anki/
 ├── italian.db              # SQLite database (generated, not committed)
-├── src/italian_anki/       # Python source code
+├── src/italian_db/         # Python source code
 │   ├── db/                 #   Database schema and connection
 │   │   ├── schema.py       #     SQLAlchemy table definitions
 │   │   └── connection.py   #     Database session management

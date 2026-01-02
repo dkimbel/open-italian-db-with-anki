@@ -7,15 +7,15 @@ from typing import Any
 
 from sqlalchemy import select, text
 
-from italian_anki.db import (
+from italian_db.db import (
     get_connection,
     get_engine,
     init_db,
     sentences,
     translations,
 )
-from italian_anki.importers.tatoeba import import_tatoeba
-from italian_anki.importers.wiktextract import import_wiktextract
+from italian_db.importers.tatoeba import import_tatoeba
+from italian_db.importers.wiktextract import import_wiktextract
 
 # Sample verb entry from Wiktextract
 SAMPLE_VERB = {

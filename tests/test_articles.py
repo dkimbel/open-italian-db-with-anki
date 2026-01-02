@@ -1,6 +1,6 @@
 """Tests for Italian article determination."""
 
-from italian_anki.articles import (
+from italian_db.articles import (
     ArticleSelector,
     derive_indefinite,
     derive_partitive,

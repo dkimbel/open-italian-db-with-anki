@@ -4,8 +4,8 @@ This module provides comprehensive checks to validate database integrity,
 consistency, and coverage after the import pipeline runs.
 
 Usage:
-    from italian_anki.verify import verify_database
-    from italian_anki.db import get_connection
+    from italian_db.verify import verify_database
+    from italian_db.db import get_connection
 
     with get_connection(db_path) as conn:
         report = verify_database(conn, verbose=True)

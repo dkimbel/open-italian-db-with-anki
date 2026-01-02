@@ -1,6 +1,6 @@
 """Tests for tag parsing functions."""
 
-from italian_anki.tags import parse_verb_tags, should_filter_form
+from italian_db.tags import parse_verb_tags, should_filter_form
 
 
 class TestShouldFilterForm:

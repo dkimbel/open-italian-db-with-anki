@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy import Connection, select, text
 
-from italian_anki.db.schema import sentences, translations
+from italian_db.db.schema import sentences, translations
 
 
 def _clear_existing_data(conn: Connection) -> int:

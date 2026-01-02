@@ -250,7 +250,7 @@ wheels = [
 ]
 
 [[package]]
-name = "italian-anki"
+name = "italian-language-db"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

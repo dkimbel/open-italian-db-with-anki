@@ -196,7 +196,7 @@ French is the only language where:
 
 The whitelist contains ~40 French loanwords identified from the complete
 Wiktextract Italian dictionary. See `FRENCH_LOANWORD_WHITELIST` in
-`src/italian_anki/normalize.py` for the full list and detailed documentation.
+`src/italian_db/normalize.py` for the full list and detailed documentation.
 
 ---
 

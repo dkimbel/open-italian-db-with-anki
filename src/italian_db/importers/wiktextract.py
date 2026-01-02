@@ -10,8 +10,8 @@ from typing import Any
 from sqlalchemy import Connection, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 
-from italian_anki.articles import get_definite
-from italian_anki.db.schema import (
+from italian_db.articles import get_definite
+from italian_db.db.schema import (
     adjective_forms,
     adjective_metadata,
     definitions,
@@ -22,10 +22,10 @@ from italian_anki.db.schema import (
     verb_forms,
     verb_metadata,
 )
-from italian_anki.derivation import derive_participle_forms
-from italian_anki.enums import POS, DerivationType, GenderClass
-from italian_anki.normalize import derive_written_from_stressed, normalize
-from italian_anki.tags import (
+from italian_db.derivation import derive_participle_forms
+from italian_db.enums import POS, DerivationType, GenderClass
+from italian_db.normalize import derive_written_from_stressed, normalize
+from italian_db.tags import (
     LABEL_CANONICAL,
     SKIP_TAGS,
     parse_adjective_tags,

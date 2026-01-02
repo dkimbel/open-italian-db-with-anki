@@ -1,10 +1,10 @@
 """Data importers for Italian Anki deck generator."""
 
-from italian_anki.importers.itwac import import_itwac
-from italian_anki.importers.morphit import import_morphit
-from italian_anki.importers.tatoeba import import_tatoeba
-from italian_anki.importers.verb_irregularity import import_verb_irregularity
-from italian_anki.importers.wiktextract import (
+from italian_db.importers.itwac import import_itwac
+from italian_db.importers.morphit import import_morphit
+from italian_db.importers.tatoeba import import_tatoeba
+from italian_db.importers.verb_irregularity import import_verb_irregularity
+from italian_db.importers.wiktextract import (
     enrich_missing_feminine_plurals,
     generate_gendered_participles,
     import_wiktextract,

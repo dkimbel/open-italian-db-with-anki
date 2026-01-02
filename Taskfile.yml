@@ -44,7 +44,7 @@ tasks:
   test-cov:
     desc: Run tests with coverage report
     cmds:
-      - uv run pytest --cov=italian_anki --cov-report=term-missing
+      - uv run pytest --cov=italian_db --cov-report=term-missing
 
   check:
     desc: Run all checks (format, lint, typecheck, test)
@@ -67,69 +67,69 @@ tasks:
   import-wiktextract:
     desc: Import Wiktextract data into database
     cmds:
-      - uv run italian-anki import-wiktextract {{if .POS}}--pos {{.POS}}{{end}}
+      - uv run italian-db import-wiktextract {{if .POS}}--pos {{.POS}}{{end}}
 
   enrich-formof:
     desc: Enrich forms with register labels from form-of entries
     cmds:
-      - uv run italian-anki enrich-formof {{if .POS}}--pos {{.POS}}{{end}}
+      - uv run italian-db enrich-formof {{if .POS}}--pos {{.POS}}{{end}}
 
   import-morphit:
     desc: Enrich forms with real Italian spelling from Morph-it!
     cmds:
-      - uv run italian-anki import-morphit {{if .POS}}--pos {{.POS}}{{end}}
+      - uv run italian-db import-morphit {{if .POS}}--pos {{.POS}}{{end}}
 
   import-itwac:
     desc: Import frequency data from ItWaC corpus
     cmds:
-      - uv run italian-anki import-itwac {{if .POS}}--pos {{.POS}}{{end}}
+      - uv run italian-db import-itwac {{if .POS}}--pos {{.POS}}{{end}}
 
   import-tatoeba:
     desc: Import Tatoeba sentences and link to verbs
     cmds:
-      - uv run italian-anki import-tatoeba
+      - uv run italian-db import-tatoeba
 
   import-verb-irregularity:
     desc: Import verb irregularity pattern classifications
     cmds:
-      - uv run italian-anki import-verb-irregularity
+      - uv run italian-db import-verb-irregularity
 
   import-all:
     desc: Run full import pipeline
     cmds:
-      - uv run italian-anki import-all
+      - uv run italian-db import-all
 
   stats:
     desc: Show database statistics
     cmds:
-      - uv run italian-anki stats
+      - uv run italian-db stats
 
   verify-db:
     desc: Verify database integrity and consistency
     cmds:
-      - uv run italian-anki verify {{if .VERBOSE}}-v{{end}}
+      - uv run italian-db verify {{if .VERBOSE}}-v{{end}}
 
   download-wiktextract:
     desc: Download Wiktextract Italian dictionary
     cmds:
-      - uv run italian-anki download-wiktextract {{if .FORCE}}--force{{end}}
+      - uv run italian-db download-wiktextract {{if .FORCE}}--force{{end}}
 
   download-morphit:
     desc: Download Morph-it! morphological lexicon
     cmds:
-      - uv run italian-anki download-morphit {{if .FORCE}}--force{{end}}
+      - uv run italian-db download-morphit {{if .FORCE}}--force{{end}}
 
   download-itwac:
     desc: Download ItWaC frequency lists
     cmds:
-      - uv run italian-anki download-itwac {{if .FORCE}}--force{{end}}
+      - uv run italian-db download-itwac {{if .FORCE}}--force{{end}}
 
   download-tatoeba:
     desc: Download Tatoeba sentences and links
     cmds:
-      - uv run italian-anki download-tatoeba {{if .FORCE}}--force{{end}}
+      - uv run italian-db download-tatoeba {{if .FORCE}}--force{{end}}
 
   download-all:
     desc: Download all data sources
     cmds:
-      - uv run italian-anki download-all {{if .FORCE}}--force{{end}}
+      - uv run italian-db download-all {{if .FORCE}}--force{{end}}

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from italian_anki.enums import DerivationType
+from italian_db.enums import DerivationType
 
 # Tags that indicate a form should be filtered out entirely.
 #

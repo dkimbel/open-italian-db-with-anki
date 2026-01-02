@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy import Connection
 
-from italian_anki.db import (
+from italian_db.db import (
     adjective_forms,
     frequencies,
     get_connection,
@@ -18,35 +18,35 @@ from italian_anki.db import (
     sentences,
     verb_forms,
 )
-from italian_anki.download import (
+from italian_db.download import (
     download_all,
     download_itwac,
     download_morphit,
     download_tatoeba,
     download_wiktextract,
 )
-from italian_anki.enums import POS
-from italian_anki.importers import (
+from italian_db.enums import POS
+from italian_db.importers import (
     import_itwac,
     import_morphit,
     import_tatoeba,
     import_verb_irregularity,
     import_wiktextract,
 )
-from italian_anki.importers.itwac import ITWAC_CSV_FILES
-from italian_anki.importers.morphit import (
+from italian_db.importers.itwac import ITWAC_CSV_FILES
+from italian_db.importers.morphit import (
     apply_orthography_fallback,
     apply_unstressed_fallback,
     enrich_lemma_written,
 )
-from italian_anki.importers.wiktextract import (
+from italian_db.importers.wiktextract import (
     enrich_from_form_of_entries,
     enrich_missing_feminine_plurals,
     generate_gendered_participles,
     import_adjective_allomorphs,
     import_noun_allomorphs,
 )
-from italian_anki.verify import verify_database
+from italian_db.verify import verify_database
 
 DEFAULT_WIKTEXTRACT_PATH = Path("data/wiktextract/kaikki.org-dictionary-Italian.jsonl")
 DEFAULT_MORPHIT_PATH = Path("data/morphit/morph-it.txt")
@@ -746,7 +746,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
 def main() -> int:
     """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(
-        prog="italian-anki",
+        prog="italian-db",
         description="Generate Anki flashcard decks for learning Italian",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

@@ -1,6 +1,6 @@
 """Placeholder test to verify the test setup works."""
 
-from italian_anki import __version__
+from italian_db import __version__
 
 
 def test_version() -> None:

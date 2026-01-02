@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from italian_anki.db import (
+from italian_db.db import (
     POS,
     adjective_forms,
     get_connection,
@@ -17,12 +17,12 @@ from italian_anki.db import (
     noun_forms,
     verb_forms,
 )
-from italian_anki.importers.morphit import (
+from italian_db.importers.morphit import (
     apply_orthography_fallback,
     apply_unstressed_fallback,
     import_morphit,
 )
-from italian_anki.importers.wiktextract import import_wiktextract
+from italian_db.importers.wiktextract import import_wiktextract
 
 # Sample verb entry from Wiktextract (with stressed forms)
 SAMPLE_VERB = {

@@ -7,14 +7,14 @@ from typing import Any
 
 from sqlalchemy import Connection, Table, select, update
 
-from italian_anki.db.schema import (
+from italian_db.db.schema import (
     adjective_forms,
     lemmas,
     noun_forms,
     verb_forms,
 )
-from italian_anki.enums import POS
-from italian_anki.normalize import (
+from italian_db.enums import POS
+from italian_db.normalize import (
     FRENCH_LOANWORD_WHITELIST,
     derive_written_from_stressed,
 )
@@ -322,7 +322,7 @@ def apply_orthography_fallback(
     Returns:
         Statistics dict with 'updated', 'loanwords', 'failed' counts
     """
-    from italian_anki.normalize import (
+    from italian_db.normalize import (
         FRENCH_LOANWORD_WHITELIST,
         derive_written_from_stressed,
     )
@@ -393,7 +393,7 @@ def enrich_lemma_written(
     Returns:
         Statistics dict with counts
     """
-    from italian_anki.normalize import (
+    from italian_db.normalize import (
         FRENCH_LOANWORD_WHITELIST,
         derive_written_from_stressed,
     )

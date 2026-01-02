@@ -303,7 +303,7 @@ adjective_metadata = Table(
 # NULL in any pattern column means the verb is regular in that tense domain.
 # This table only contains entries for verbs with at least one irregular pattern.
 #
-# Pattern enum values are defined in italian_anki/enums.py:
+# Pattern enum values are defined in italian_db/enums.py:
 # - PresentPattern: g_insertion, suppletive_essere, modal_potere, etc.
 # - RemotePattern: strong_ss, strong_nn, suppletive_essere, etc.
 # - FuturePattern: syncopated_rr, syncopated_dr, contracted_base, suppletive

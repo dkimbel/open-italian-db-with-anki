@@ -7,15 +7,15 @@ from typing import Any
 
 from sqlalchemy import select
 
-from italian_anki.db import (
+from italian_db.db import (
     frequencies,
     get_connection,
     get_engine,
     init_db,
     lemmas,
 )
-from italian_anki.importers.itwac import import_itwac
-from italian_anki.importers.wiktextract import import_wiktextract
+from italian_db.importers.itwac import import_itwac
+from italian_db.importers.wiktextract import import_wiktextract
 
 # Sample verb entry from Wiktextract
 SAMPLE_VERB = {

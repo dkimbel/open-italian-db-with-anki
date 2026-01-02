@@ -8,9 +8,9 @@ from pathlib import Path
 
 from sqlalchemy import Connection, select
 
-from italian_anki.db.schema import frequencies, lemmas
-from italian_anki.enums import POS
-from italian_anki.normalize import derive_written_from_stressed
+from italian_db.db.schema import frequencies, lemmas
+from italian_db.enums import POS
+from italian_db.normalize import derive_written_from_stressed
 
 # Default CSV filenames by POS (relative to data/itwac/)
 ITWAC_CSV_FILES: dict[POS, str] = {

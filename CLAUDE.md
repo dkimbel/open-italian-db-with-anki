@@ -29,9 +29,9 @@ Run `task stats` to see current database statistics.
 ## Key Files
 
 - `italian.db` - SQLite database (generated, not committed)
-- `src/italian_anki/importers/` - Data importers
-- `src/italian_anki/db/` - Database schema and connection
-- `src/italian_anki/normalize.py` - Text normalization utilities
+- `src/italian_db/importers/` - Data importers
+- `src/italian_db/db/` - Database schema and connection
+- `src/italian_db/normalize.py` - Text normalization utilities
 - `data/` - Source data files (not committed, ~1.3GB)
 
 ## Conventions

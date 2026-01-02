@@ -1,7 +1,7 @@
 """Database modules for Italian Anki deck generator."""
 
-from italian_anki.db.connection import get_connection, get_engine
-from italian_anki.db.schema import (
+from italian_db.db.connection import get_connection, get_engine
+from italian_db.db.schema import (
     adjective_forms,
     adjective_metadata,
     definitions,
@@ -16,7 +16,7 @@ from italian_anki.db.schema import (
     verb_forms,
     verb_metadata,
 )
-from italian_anki.enums import POS, DerivationType, GenderClass
+from italian_db.enums import POS, DerivationType, GenderClass
 
 __all__ = [
     "POS",

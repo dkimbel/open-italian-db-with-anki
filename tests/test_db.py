@@ -5,7 +5,7 @@ from pathlib import Path
 
 from sqlalchemy import Connection, inspect, select, text
 
-from italian_anki.db import (
+from italian_db.db import (
     get_connection,
     get_engine,
     init_db,

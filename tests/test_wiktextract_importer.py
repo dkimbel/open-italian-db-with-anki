@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from italian_anki.db import (
+from italian_db.db import (
     POS,
     adjective_forms,
     adjective_metadata,
@@ -21,8 +21,8 @@ from italian_anki.db import (
     verb_forms,
     verb_metadata,
 )
-from italian_anki.importers.tatoeba import import_tatoeba
-from italian_anki.importers.wiktextract import (
+from italian_db.importers.tatoeba import import_tatoeba
+from italian_db.importers.wiktextract import (
     NOUN_FORM_BLOCKLIST,
     enrich_from_form_of_entries,
     enrich_missing_feminine_plurals,
@@ -2675,7 +2675,7 @@ class TestNormalizationsAndOverrides:
 
     def test_apostrophe_spacing_elision_vs_truncation(self):
         """Test that elision removes space but truncation keeps it."""
-        from italian_anki.importers.wiktextract import (
+        from italian_db.importers.wiktextract import (
             _normalize_apostrophe_spacing,  # pyright: ignore[reportPrivateUsage]
         )
 

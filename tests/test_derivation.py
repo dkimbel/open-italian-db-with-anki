@@ -1,6 +1,6 @@
 """Tests for derivation functions."""
 
-from italian_anki.derivation import derive_participle_forms
+from italian_db.derivation import derive_participle_forms
 
 
 class TestDeriveParticipleForms:

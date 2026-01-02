@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from italian_anki.db import get_connection, get_engine, init_db
-from italian_anki.verify import (
+from italian_db.db import get_connection, get_engine, init_db
+from italian_db.verify import (
     CheckResult,
     VerificationReport,
     check_adjective_class_consistency,

@@ -1,6 +1,6 @@
 """Tests for text normalization utilities."""
 
-from italian_anki.normalize import derive_written_from_stressed, normalize, tokenize
+from italian_db.normalize import derive_written_from_stressed, normalize, tokenize
 
 
 class TestNormalize:

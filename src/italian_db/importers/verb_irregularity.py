@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import Connection, delete, select
 
-from italian_anki.data.verb_irregularity_data import VERB_IRREGULARITY_CLASSIFICATIONS
-from italian_anki.db.schema import lemmas, verb_irregularity
-from italian_anki.enums import POS
+from italian_db.data.verb_irregularity_data import VERB_IRREGULARITY_CLASSIFICATIONS
+from italian_db.db.schema import lemmas, verb_irregularity
+from italian_db.enums import POS
 
 # Classification source identifier
 CLASSIFICATION_SOURCE = "manual"
