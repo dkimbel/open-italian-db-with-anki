@@ -11,11 +11,10 @@ and similar forms are not always present.
 
 > [!WARNING]
 > _This database may contain incorrect information!_
->
-> There are two potential sources of bad information:
-> - The source data itself.
-> - Inference done by this repository. For example, we synthesize the feminine plural forms of nouns when our source data doesn't provide them.
-> (You can always tell when this happened; see the `Data Provenance` section below.)
+> - The source data we rely on can contain mistakes.
+> - Inference done by this repository could introduce errors. For example, we synthesize the feminine plural forms
+> of nouns when our source data doesn't provide them. (You can always tell when this happened; see the `Data Provenance`
+> section below.)
 >
 > If you find any mistakes, please [open an issue](https://github.com/dkimbel/open-italian-db-with-anki/issues).
 
@@ -149,8 +148,8 @@ task stats
 
 ## Data Sources & Licenses
 
-**No scraping**: All data is downloaded from freely available, pre-packaged datasets
-published by their respective projects. See `data-licenses/` for full license texts.
+All data is downloaded from freely available, pre-packaged datasets published by their respective
+projects. See `data-licenses/` for full license texts.
 
 | Source | License | Role |
 |--------|---------|------|
@@ -199,7 +198,8 @@ open-italian-db-with-anki/
 
 ## Data Provenance
 
-The database tracks exactly where each piece of information comes from:
+The database tracks where each piece of information comes from using a variety
+of `*_origin` and `*_source` columns.
 
 ### Form origin (`form_origin` column)
 
