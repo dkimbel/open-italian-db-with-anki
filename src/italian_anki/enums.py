@@ -104,6 +104,9 @@ class PresentPattern(StrEnum):
     MODAL_DOVERE = "modal_dovere"  # devo(debbo)/devi/deve/dobbiamo/dovete/devono
     MODAL_SAPERE = "modal_sapere"  # so/sai/sa/sappiamo/sapete/sanno
 
+    # Suppletive -ire verbs
+    SUPPLETIVE_UDIRE = "suppletive_udire"  # odo/odi/ode/udiamo/udite/odono
+
 
 class RemotePattern(StrEnum):
     """Passato remoto (remote past) irregularity patterns.
@@ -115,6 +118,7 @@ class RemotePattern(StrEnum):
     # Double consonant strong patterns
     STRONG_SS = "strong_ss"  # dissi/disse/dissero (dire, scrivere, leggere, cuocere)
     STRONG_NN = "strong_nn"  # venni/venne/vennero (venire, tenere)
+    STRONG_BBI = "strong_bbi"  # conobbi/conobbe/conobbero (conoscere, crescere)
 
     # Single consonant strong patterns
     STRONG_SI = "strong_si"  # presi/prese/presero (prendere, chiedere, spendere)

@@ -511,6 +511,16 @@ def _run_tatoeba_import(
     return stats
 
 
+def _run_verb_irregularity_import(conn: Connection, indent: str = "  ") -> dict[str, Any]:
+    """Run verb irregularity import and print stats."""
+    stats = import_verb_irregularity(conn, progress_callback=_make_progress_callback())
+    print()
+    print(f"{indent}Total classifications:  {stats.total:,}")
+    print(f"{indent}Matched:                {stats.matched:,}")
+    print(f"{indent}Not found:              {stats.not_found:,}")
+    return {"total": stats.total, "matched": stats.matched, "not_found": stats.not_found}
+
+
 def cmd_import_all(args: argparse.Namespace) -> int:
     """Run the full import pipeline for all parts of speech."""
     db_path = Path(args.database)
@@ -552,16 +562,17 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print()
 
         # Determine step count:
-        # - adjectives: 9 steps (wiktextract, morphit-forms, lemma-written, fill-missing,
+        # - adjectives: 8 steps (wiktextract, morphit-forms, lemma-written,
         #                        allomorphs, form-of, unstressed, orthography, itwac)
         # - nouns: 8 steps (wiktextract, morphit-forms, lemma-written, allomorphs,
         #                   form-of, unstressed, orthography, itwac)
-        # - verbs: 5 steps (wiktextract, participles, lemma-written, form-of, itwac)
+        # - verbs: 6 steps (wiktextract, participles, lemma-written, form-of, itwac,
+        #                   verb-irregularity)
         #          Verbs skip morphit-forms/unstressed/orthography (produce 0 updates)
         if pos == POS.ADJECTIVE:
             total_steps = 8
         elif pos == POS.VERB:
-            total_steps = 5
+            total_steps = 6
         else:
             total_steps = 8
 
@@ -687,6 +698,12 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             else:
                 print(f"[{step_itwac}/{total_steps}] Skipped: No ItWaC file for this POS")
             print()
+
+            # Step 6 (verb only): Import verb irregularity patterns
+            if pos == POS.VERB:
+                print(f"[6/{total_steps}] Importing verb irregularity patterns...")
+                _run_verb_irregularity_import(conn, indent=indent)
+                print()
 
     # Post-processing: Cross-POS enrichments
     print("=" * 80)

@@ -55,22 +55,23 @@ def import_verb_irregularity(
     # Clear existing entries for clean re-import
     conn.execute(delete(verb_irregularity))
 
-    # Build lookup dict: stressed form -> lemma_id (for verbs only)
-    result = conn.execute(select(lemmas.c.id, lemmas.c.stressed).where(lemmas.c.pos == POS.VERB))
-    stressed_to_id: dict[str, int] = {row.stressed: row.id for row in result}
+    # Build lookup dict: written form -> lemma_id (for verbs only)
+    # Using written form (not stressed) avoids accent variations (è vs é) causing mismatches
+    result = conn.execute(select(lemmas.c.id, lemmas.c.written).where(lemmas.c.pos == POS.VERB))
+    written_to_id: dict[str, int] = {row.written: row.id for row in result}
 
     total = len(VERB_IRREGULARITY_CLASSIFICATIONS)
     insert_batch: list[dict[str, str | int | None]] = []
 
-    for idx, (stressed_form, patterns) in enumerate(VERB_IRREGULARITY_CLASSIFICATIONS.items(), 1):
+    for idx, (written_form, patterns) in enumerate(VERB_IRREGULARITY_CLASSIFICATIONS.items(), 1):
         if progress_callback and idx % 50 == 0:
             progress_callback(idx, total)
 
-        lemma_id = stressed_to_id.get(stressed_form)
+        lemma_id = written_to_id.get(written_form)
 
         if lemma_id is None:
             stats.not_found += 1
-            stats.not_found_list.append(stressed_form)
+            stats.not_found_list.append(written_form)
             continue
 
         present, remote, future, participle, subjunctive = patterns
