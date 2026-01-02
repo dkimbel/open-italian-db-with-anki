@@ -468,7 +468,7 @@ class TestWiktextractImporter:
                 # Check that articles are computed
                 libro_sing = [f for f in libro_forms if f.number == "singular"]
                 assert len(libro_sing) >= 1
-                assert libro_sing[0].def_article == "il"  # il libro
+                assert libro_sing[0].definite_article == "il"  # il libro
                 assert libro_sing[0].article_source == "inferred"
 
                 # Check feminine noun
@@ -483,7 +483,7 @@ class TestWiktextractImporter:
                 # Check feminine articles
                 casa_sing = [f for f in casa_forms if f.number == "singular"]
                 assert len(casa_sing) >= 1
-                assert casa_sing[0].def_article == "la"  # la casa
+                assert casa_sing[0].definite_article == "la"  # la casa
                 assert casa_sing[0].article_source == "inferred"
 
         finally:
@@ -526,11 +526,11 @@ class TestWiktextractImporter:
 
                 # Check articles are computed for adjectives
                 bello_form = next(f for f in form_rows if f.stressed == "bello")
-                assert bello_form.def_article == "il"  # il bello
+                assert bello_form.definite_article == "il"  # il bello
                 assert bello_form.article_source == "inferred"
 
                 bella_form = next(f for f in form_rows if f.stressed == "bella")
-                assert bella_form.def_article == "la"  # la bella
+                assert bella_form.definite_article == "la"  # la bella
                 assert bella_form.article_source == "inferred"
 
         finally:
@@ -568,7 +568,7 @@ class TestWiktextractImporter:
                 assert alta_form is not None, "alta should be imported"
                 assert alta_form.gender == "f"
                 assert alta_form.number == "singular"
-                assert alta_form.def_article == "l'"  # l'alta
+                assert alta_form.definite_article == "l'"  # l'alta
 
         finally:
             db_path.unlink()

@@ -171,21 +171,21 @@ def get_definite(word: str, gender: Gender, number: Number) -> tuple[str, str]:
     return ("il", source)
 
 
-def derive_indefinite(def_article: str, gender: Gender) -> str | None:
+def derive_indefinite(definite_article: str, gender: Gender) -> str | None:
     """
     Derive the indefinite article from the definite article and gender.
 
     Returns None for plural forms (no indefinite article in Italian).
 
     Args:
-        def_article: The definite article ('il', 'lo', 'la', "l'", 'i', 'gli', 'le')
+        definite_article: The definite article ('il', 'lo', 'la', "l'", 'i', 'gli', 'le')
         gender: 'm' for masculine, 'f' for feminine
 
     Returns:
         The indefinite article ('un', 'uno', 'una', "un'") or None for plurals
     """
     # No indefinite for plurals
-    if def_article in ("i", "gli", "le"):
+    if definite_article in ("i", "gli", "le"):
         return None
 
     mapping = {
@@ -195,17 +195,17 @@ def derive_indefinite(def_article: str, gender: Gender) -> str | None:
         ("la", "f"): "una",
         ("l'", "f"): "un'",
     }
-    return mapping.get((def_article, gender))
+    return mapping.get((definite_article, gender))
 
 
-def derive_partitive(def_article: str) -> str:
+def derive_partitive(definite_article: str) -> str:
     """
     Derive the partitive article from the definite article.
 
     Partitives combine "di" + definite article.
 
     Args:
-        def_article: The definite article
+        definite_article: The definite article
 
     Returns:
         The partitive article ('del', 'dello', "dell'", 'della', 'dei', 'degli', 'delle')
@@ -219,7 +219,7 @@ def derive_partitive(def_article: str) -> str:
         "gli": "degli",
         "le": "delle",
     }
-    return mapping[def_article]
+    return mapping[definite_article]
 
 
 class ArticleSelector:

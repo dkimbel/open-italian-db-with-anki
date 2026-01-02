@@ -2223,7 +2223,7 @@ def _build_noun_form_row(
     gender_short = gender
 
     # Compute definite article from orthography
-    def_article, article_source = get_definite(form_stressed, gender_short, features.number)
+    definite_article, article_source = get_definite(form_stressed, gender_short, features.number)
 
     return {
         "lemma_id": lemma_id,
@@ -2235,7 +2235,7 @@ def _build_noun_form_row(
         "labels": features.labels,
         "derivation_type": features.derivation_type,
         "meaning_hint": meaning_hint,
-        "def_article": def_article,
+        "definite_article": definite_article,
         "article_source": article_source,
         "form_origin": effective_origin,
         "is_citation_form": is_citation_form,
@@ -2323,7 +2323,7 @@ def _build_adjective_form_row(
     gender_short = features.gender
 
     # Compute definite article from orthography
-    def_article, article_source = get_definite(form_stressed, gender_short, features.number)
+    definite_article, article_source = get_definite(form_stressed, gender_short, features.number)
 
     return {
         "lemma_id": lemma_id,
@@ -2333,7 +2333,7 @@ def _build_adjective_form_row(
         "number": features.number,
         "degree": features.degree,
         "labels": features.labels,
-        "def_article": def_article,
+        "definite_article": definite_article,
         "article_source": article_source,
         "form_origin": form_origin,
         "is_citation_form": is_citation_form,
@@ -4271,7 +4271,7 @@ def import_adjective_allomorphs(
                         stats["forms_blocked"] += 1
                         continue
 
-                    def_article, article_source = get_definite(form_text, gender, number)
+                    definite_article, article_source = get_definite(form_text, gender, number)
 
                     try:
                         conn.execute(
@@ -4284,7 +4284,7 @@ def import_adjective_allomorphs(
                                 number=number,
                                 degree="positive",
                                 labels=[label] if label else None,
-                                def_article=def_article,
+                                definite_article=definite_article,
                                 article_source=article_source,
                                 form_origin="alt_of",
                             )
@@ -4321,7 +4321,7 @@ def import_adjective_allomorphs(
             continue
 
         # Compute definite article (gender is already 'm'/'f')
-        def_article, article_source = get_definite(form, gender, number)
+        definite_article, article_source = get_definite(form, gender, number)
 
         try:
             conn.execute(
@@ -4334,7 +4334,7 @@ def import_adjective_allomorphs(
                     number=number,
                     degree="positive",
                     labels=[label] if label else None,
-                    def_article=def_article,
+                    definite_article=definite_article,
                     article_source=article_source,
                     form_origin="hardcoded",
                 )
@@ -4464,7 +4464,7 @@ def import_noun_allomorphs(
                 continue
 
             # Add the apocopic form (singular only - apocopic forms are singular)
-            def_article, article_source = get_definite(allomorph_word, gender, "singular")
+            definite_article, article_source = get_definite(allomorph_word, gender, "singular")
 
             try:
                 conn.execute(
@@ -4476,7 +4476,7 @@ def import_noun_allomorphs(
                         gender=gender,
                         number="singular",
                         labels=["apocopic"],
-                        def_article=def_article,
+                        definite_article=definite_article,
                         article_source=article_source,
                         form_origin="alt_of",
                     )
@@ -4507,7 +4507,7 @@ def import_noun_allomorphs(
         if form in existing_texts:
             continue
 
-        def_article, article_source = get_definite(form, gender, number)
+        definite_article, article_source = get_definite(form, gender, number)
 
         try:
             conn.execute(
@@ -4519,7 +4519,7 @@ def import_noun_allomorphs(
                     gender=gender,
                     number=number,
                     labels=["apocopic"],
-                    def_article=def_article,
+                    definite_article=definite_article,
                     article_source=article_source,
                     form_origin="hardcoded",
                 )
@@ -4728,7 +4728,7 @@ def _insert_noun_form(
 
     Returns True if inserted, False if duplicate (IntegrityError).
     """
-    def_article, article_source = get_definite(stressed, gender, number)
+    definite_article, article_source = get_definite(stressed, gender, number)
 
     if written is None:
         written = derive_written_from_stressed(stressed)
@@ -4746,7 +4746,7 @@ def _insert_noun_form(
                 labels=None,
                 derivation_type=None,
                 meaning_hint=None,
-                def_article=def_article,
+                definite_article=definite_article,
                 article_source=article_source,
                 form_origin=form_origin,
                 is_citation_form=False,

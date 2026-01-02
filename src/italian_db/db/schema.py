@@ -94,7 +94,7 @@ noun_forms = Table(
     Column("derivation_type", Text),  # NULL, 'diminutive', 'augmentative', 'pejorative'
     Column("meaning_hint", Text),  # e.g., 'anatomical', 'figurative' for braccio-type plurals
     # Article columns (computed from orthography)
-    Column("def_article", Text),  # 'il', 'lo', 'la', "l'", 'i', 'gli', 'le'
+    Column("definite_article", Text),  # 'il', 'lo', 'la', "l'", 'i', 'gli', 'le'
     Column("article_source", Text),  # 'inferred' or 'exception:<reason>'
     # Form origin tracking - how we determined this form exists
     # Values: 'wiktextract', 'inferred:base_form', 'inferred:head_template', 'inferred:invariable'
@@ -141,7 +141,7 @@ adjective_forms = Table(
     Column("degree", Text, default="positive"),  # positive, comparative, superlative
     Column("labels", JSON(none_as_null=True)),  # NULL=standard, or JSON array of labels
     # Article columns (computed from orthography)
-    Column("def_article", Text),  # 'il', 'lo', 'la', "l'", 'i', 'gli', 'le'
+    Column("definite_article", Text),  # 'il', 'lo', 'la', "l'", 'i', 'gli', 'le'
     Column("article_source", Text),  # 'inferred' or 'exception:<reason>'
     # Form origin tracking - how we determined this form exists (see documentation above)
     Column("form_origin", Text),

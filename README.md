@@ -48,21 +48,21 @@ task stats
 
 ## Example Queries
 
-### Gender-changing plurals (uovo → uova)
+### Gender-changing plural (uovo → uova)
 
 ```sql
--- "Uovo" (egg), an irregular noun whose singular is masculine but plural is feminine
-SELECT nf.written, nf.gender, nf.number
+-- "uovo" (egg), an irregular noun whose singular is masculine but plural is feminine
+SELECT nf.definite_article AS article, nf.written, nf.gender, nf.number
 FROM lemmas l
 JOIN noun_forms nf ON l.id = nf.lemma_id
 WHERE l.written = 'uovo';
 ```
 
 ```
-written  gender  number
--------  ------  --------
-uova     f       plural
-uovo     m       singular
+article  written  gender  number
+-------  -------  ------  --------
+le       uova     f       plural
+l'       uovo     m       singular
 ```
 
 ### Irregular verb conjugation (andare)
