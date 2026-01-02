@@ -10,12 +10,18 @@ This tool is optimized for learners of modern standard Italian. Archaic, poetic,
 and similar forms are not always present.
 
 > [!WARNING]
-> This database is assembled from multiple sources, with some automated inference for missing data
-> (e.g. inferring a noun's feminine plural form). _It may contain incorrect information!_
+> _This database may contain incorrect information!_
+>
+> There are two potential sources of bad information:
+> - The source data itself.
+> - Inference done by this repository. For example, we synthesize the feminine plural forms of nouns when our source data doesn't provide them.
+> (You can always tell when this happened; see the `Data Provenance` section below.)
 >
 > If you find any mistakes, please [open an issue](https://github.com/dkimbel/open-italian-db-with-anki/issues).
 
-## Example Queries
+## Schema and Example Queries
+
+[See the database schema as a Mermaid diagram here.](https://mermaid.live/edit#pako:eNrdV1tvmzAU_ivIz2mVJmkuvHbaS18q7W2KhE7gQNwZm9mmbZrmv892SArB0LSdtmkoUoTP53P9jn3YklgkSEISBCi_UMgk5EseuIdhnoMKtod3-1CuA5oEd7f1RaUl5VnwKKnWyLslkRKljNEDMH-oFCYeUSGUZ5UWcFjdLY8mH1CuolTI_Byv7aILMTKir38uoFwI37JRp3yaQBUY61PHC5RK-DzjZb5C6RFkyJOmYCUEC6hyCQPmk3DMQNOHhlv3xm7AYIXMVxerKxKSZpT7FMZUG4WCO5tdBcxRQwIa2jU8luvuduCtGJRPlFGQG1-CJXBFTThUb04Vr0Bh5Iz3M6KQgouccmCR3hTYFQGVErOSgWHJ5gNRFIY7yHVUgCGZ9FVZYi409gDSUpeyD1CA1DSmBesDqXJ1X_LYUqAHFTNQiqY03pe2sye4cVl5UsZFyf_5rm23T2fD9XeI0UIf9pmqU6h-QCBw8x-tTaxeBSnl1FTfVZB5z4y9pDvQT7apq9gn2nSfzMgRpzOlZ4k9IVoPYuOgYasleVdHH9u-n00d5aolA5J73LfIf8ThY_SZRHwPuf86N1_L8QmCUp4yq8WYabHwbOLY1EUSmXNXrWlxHuokM7XQquxa3G9hWcZEMzRXXA1Z583uO5pqDqYSf5bIY4rqA0mPhSxK5YnCqo0kPNbXUyagkjzTIu1UZ291RV9HpZq39o41zvp8PYiirlmXAc-8Q9yTLy9u9Kgq7KmchqhpcNA-qtBkvRNUM1UN7S8vFxdiWx-Iw2BJ1qCWxId8OZm8zgE3hpzWhqa-nXD7Ki0WfJy47Ba_87W54A1_mvdRC9wUt32p3Rbnb7IBdPt-eim8EYDn0Grt8GDe61X9AOn1aNto5Rq03TsVvkFxu8Gw-lX323DD7yUhA5Kj-RihifkidX2yJHqNuQnJYhKQP6zOncFBqcW3DY9JqGWJAyJFma1JmAJT5q0sTH6w-p49QArg34U4vmbSmql2u5vxxvKAhPPhzIFJuCVPJLyYjkeXk_nV8Go-nE4nw-loQDYkHE8uJ6Ox-c2ms-F8MZ9MdgPy7PSPLq_H89lsMZ8tjGwxvN79AgCSud0)
 
 ### Gender-changing plural (uovo → uova)
 
