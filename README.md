@@ -9,9 +9,10 @@ This is Python code for:
 This tool is optimized for learners of modern standard Italian. Archaic, poetic, literary,
 and similar forms are not always present.
 
-> [!NOTE]
+> [!WARNING]
 > This database is assembled from multiple sources, with some automated inference for missing data
-> (e.g. inferring a noun's feminine plural form). It may contain incorrect information!
+> (e.g. inferring a noun's feminine plural form). _It may contain incorrect information!_
+>
 > If you find any mistakes, please [open an issue](https://github.com/dkimbel/open-italian-db-with-anki/issues).
 
 ## Data Sources & Licenses
