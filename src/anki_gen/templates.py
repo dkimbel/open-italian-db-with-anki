@@ -21,6 +21,8 @@ CARD_CSS = """
     background-color: #ffffff;
     padding: 20px;
     line-height: 1.5;
+    max-width: 450px;
+    margin: 0 auto;
 }
 
 /* Dark mode - Anki's built-in class */
