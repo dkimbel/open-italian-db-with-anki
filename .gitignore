@@ -224,3 +224,4 @@ data/
 .claude/
 
 .DS_Store
+output/

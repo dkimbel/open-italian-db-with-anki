@@ -133,3 +133,14 @@ tasks:
     desc: Download all data sources
     cmds:
       - uv run italian-db download-all {{if .FORCE}}--force{{end}}
+
+  generate-deck:
+    desc: Generate Anki deck from database
+    cmds:
+      - uv run anki-gen generate {{if .OUTPUT}}-o {{.OUTPUT}}{{end}}
+
+  preview-card:
+    desc: Preview a card in browser
+    cmds:
+      - uv run anki-gen preview {{.VERB | default "parlare"}}
+      - open output/preview.html

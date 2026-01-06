@@ -1,0 +1,160 @@
+# Curated verb list for Phase 1
+#
+# 32 irregular verbs representing unique irregularity patterns,
+# plus 4 regular verbs covering all conjugation classes.
+#
+# Selection methodology from SPEC.md:
+# - Irregular verbs: one representative per unique pattern, highest frequency
+# - Regular verbs: manually selected to cover -are, -ere, -ire (non-isc), -ire (isc)
+
+# =============================================================================
+# Irregular Verbs (32)
+# =============================================================================
+
+[[verbs]]
+lemma = "fare"
+note = "Contracted from Latin facere; suppletive present (faccio)"
+
+[[verbs]]
+lemma = "potere"
+note = "Modal; suppletive present (posso/puoi)"
+
+[[verbs]]
+lemma = "essere"
+note = "Highly suppletive across all tenses"
+
+[[verbs]]
+lemma = "dovere"
+note = "Modal; suppletive present (devo/devi)"
+
+[[verbs]]
+lemma = "avere"
+note = "Auxiliary; suppletive present (ho/hai/ha)"
+
+[[verbs]]
+lemma = "volere"
+note = "Modal; suppletive present (voglio/vuoi)"
+
+[[verbs]]
+lemma = "dire"
+note = "Contracted from Latin dicere; dico/dici/dice"
+
+[[verbs]]
+lemma = "andare"
+note = "Suppletive present (vado/vai/va)"
+
+[[verbs]]
+lemma = "dare"
+note = "Suppletive present (do/dai/da)"
+
+[[verbs]]
+lemma = "sapere"
+note = "Modal-like; suppletive present (so/sai/sa)"
+
+[[verbs]]
+lemma = "stare"
+note = "Suppletive present (sto/stai/sta)"
+
+[[verbs]]
+lemma = "vedere"
+note = "Strong passato remoto (vidi); syncopated future (vedro)"
+
+[[verbs]]
+lemma = "mettere"
+note = "Strong passato remoto (misi); strong participle (messo)"
+
+[[verbs]]
+lemma = "prendere"
+note = "Strong passato remoto (presi); strong participle (preso)"
+
+[[verbs]]
+lemma = "tenere"
+note = "G-insertion present (tengo); strong remoto (tenni); syncopated future (terro)"
+
+[[verbs]]
+lemma = "riuscire"
+note = "-isc- insertion pattern"
+
+[[verbs]]
+lemma = "trarre"
+note = "Contracted from Latin trahere; double-g present (traggo)"
+
+[[verbs]]
+lemma = "conoscere"
+note = "Strong passato remoto (conobbi)"
+
+[[verbs]]
+lemma = "porre"
+note = "Contracted from Latin ponere; double-g present (pongo)"
+
+[[verbs]]
+lemma = "offrire"
+note = "Strong participle (offerto)"
+
+[[verbs]]
+lemma = "nascere"
+note = "Strong passato remoto (nacqui); strong participle (nato)"
+
+[[verbs]]
+lemma = "aggiungere"
+note = "Strong passato remoto; strong participle (aggiunto)"
+
+[[verbs]]
+lemma = "produrre"
+note = "Contracted from Latin producere"
+
+[[verbs]]
+lemma = "scegliere"
+note = "G-insertion present (scelgo); strong participle (scelto)"
+
+[[verbs]]
+lemma = "apparire"
+note = "-isc- alternation; strong participle (apparso)"
+
+[[verbs]]
+lemma = "morire"
+note = "Diphthong present (muoio); strong participle (morto)"
+
+[[verbs]]
+lemma = "vincere"
+note = "Strong passato remoto (vinsi); strong participle (vinto)"
+
+[[verbs]]
+lemma = "correre"
+note = "Strong passato remoto (corsi); strong participle (corso)"
+
+[[verbs]]
+lemma = "costringere"
+note = "Strong passato remoto; strong participle (costretto)"
+
+[[verbs]]
+lemma = "possedere"
+note = "Diphthong present (possiedo)"
+
+[[verbs]]
+lemma = "bere"
+note = "Contracted from Latin bevere; bevo/bevi; syncopated future (berro)"
+
+[[verbs]]
+lemma = "udire"
+note = "Suppletive present (odo/odi/ode)"
+
+# =============================================================================
+# Regular Verbs (4)
+# =============================================================================
+
+[[verbs]]
+lemma = "trovare"
+note = "Regular -are conjugation"
+
+[[verbs]]
+lemma = "credere"
+note = "Regular -ere conjugation"
+
+[[verbs]]
+lemma = "sentire"
+note = "Regular -ire conjugation (non-isc)"
+
+[[verbs]]
+lemma = "capire"
+note = "Regular -ire conjugation with -isc- insertion"

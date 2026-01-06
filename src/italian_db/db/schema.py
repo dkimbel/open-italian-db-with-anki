@@ -329,6 +329,9 @@ verb_irregularity = Table(
 Index(
     "idx_lemmas_stressed_pos", lemmas.c.stressed, lemmas.c.pos
 )  # For lookups by stressed form+POS
+Index(
+    "idx_lemmas_written_pos", lemmas.c.written, lemmas.c.pos
+)  # For lookups by written form+POS (used by anki_gen)
 Index("idx_verb_metadata_auxiliary", verb_metadata.c.auxiliary)
 Index("idx_verb_metadata_base", verb_metadata.c.base_verb_lemma_id)
 # noun_metadata indexes

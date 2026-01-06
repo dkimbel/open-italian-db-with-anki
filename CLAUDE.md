@@ -10,6 +10,8 @@ Generate Anki flashcard decks for learning Italian using linguistic databases.
 - **Download data**: `task download-all` (skips existing files, ~1.3GB)
 - **Import data**: `task import-wiktextract` (idempotent)
 - **Enrichment**: `task import-morphit && task import-itwac`
+- **Generate deck**: `task generate-deck` (creates `output/italian_verbs.apkg`)
+- **Preview card**: `task preview-card VERB=parlare` (opens in browser)
 
 ## Engineering Principles
 
@@ -26,13 +28,54 @@ Generate Anki flashcard decks for learning Italian using linguistic databases.
 
 Run `task stats` to see current database statistics.
 
+## Card Preview and Screenshots
+
+To preview Anki cards during development:
+
+```bash
+# Generate and open HTML preview in browser
+task preview-card VERB=parlare
+
+# Or use the CLI directly
+uv run anki-gen preview parlare
+open output/preview.html
+```
+
+The preview HTML supports:
+- Light/dark mode toggle
+- OS-level dark mode detection
+- Front and back card views
+- All CSS styling from actual Anki cards
+
+### Taking Screenshots with Chrome Headless
+
+To capture screenshots programmatically (e.g., for reviewing changes):
+
+```bash
+# Take screenshot of preview
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --headless --screenshot=output/card-preview.png \
+  --window-size=800,1000 \
+  file:///Users/dk/Workspace/Italian/open-italian-db-with-anki/output/preview.html
+
+# View the screenshot
+open output/card-preview.png
+```
+
+This is useful for:
+- Rapid iteration on card design
+- Visual regression testing
+- Documenting card appearance
+
 ## Key Files
 
 - `italian.db` - SQLite database (generated, not committed)
 - `src/italian_db/importers/` - Data importers
 - `src/italian_db/db/` - Database schema and connection
 - `src/italian_db/normalize.py` - Text normalization utilities
+- `src/anki_gen/` - Anki deck generation and card templates
 - `data/` - Source data files (not committed, ~1.3GB)
+- `output/` - Generated files (deck, previews, screenshots)
 
 ## Conventions
 
