@@ -12,44 +12,53 @@ Templates follow these design principles:
 # =============================================================================
 
 CARD_CSS = """
+/* Color variables */
+:root {
+    --color-text: #1a1a1a;
+    --color-background: #ffffff;
+    --color-prompt: #555;
+    --color-muted: #888;
+    --color-secondary: #666;
+    --color-tertiary: #999;
+    --color-quote: #999;
+}
+
+.night_mode {
+    --color-text: #e0e0e0;
+    --color-background: #1a1a1a;
+    --color-prompt: #aaa;
+    --color-muted: #808080;
+    --color-secondary: #888;
+    --color-tertiary: #808080;
+    --color-quote: #666;
+}
+
 /* Base styles */
 .card {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-size: 18px;
     text-align: center;
-    color: #1a1a1a;
-    background-color: #ffffff;
+    color: var(--color-text);
+    background-color: var(--color-background);
     padding: 20px;
     line-height: 1.5;
     max-width: 450px;
     margin: 0 auto;
 }
 
-/* Dark mode - Anki's built-in class */
-.night_mode.card,
-.night_mode .card {
-    color: #e0e0e0;
-    background-color: #1a1a1a;
-}
-
 /* English prompt on front */
 .english-prompt {
     font-size: 24px;
     font-style: italic;
-    color: #555;
+    color: var(--color-prompt);
     margin: 20px 0;
-}
-
-.night_mode .english-prompt,
-.night_mode.card .english-prompt {
-    color: #aaa;
 }
 
 /* Front card context (tense + infinitive) */
 .front-context {
     margin-top: 30px;
     font-size: 13px;
-    color: #888;
+    color: var(--color-muted);
     display: flex;
     justify-content: center;
     gap: 20px;
@@ -63,11 +72,6 @@ CARD_CSS = """
     font-style: italic;
 }
 
-.night_mode .front-context,
-.night_mode.card .front-context {
-    color: #666;
-}
-
 /* Infinitive header */
 .infinitive {
     font-size: 28px;
@@ -78,13 +82,8 @@ CARD_CSS = """
 /* IPA pronunciation */
 .ipa {
     font-size: 16px;
-    color: #666;
+    color: var(--color-secondary);
     margin-bottom: 20px;
-}
-
-.night_mode .ipa,
-.night_mode.card .ipa {
-    color: #888;
 }
 
 /* Conjugation table container */
@@ -108,28 +107,17 @@ CARD_CSS = """
 
 /* Person labels column */
 .person-label {
-    color: #666;
+    color: var(--color-secondary);
     font-size: 14px;
     min-width: 50px;
     text-align: right;
     padding-right: 8px;
 }
 
-.night_mode .person-label,
-.night_mode.card .person-label {
-    color: #888;
-}
-
 /* Verb forms */
 .verb-form {
     font-size: 20px;
     font-weight: 500;
-}
-
-/* Stress underline on vowels */
-.stress {
-    text-decoration: underline;
-    text-underline-offset: 2px;
 }
 
 /* Separator between singular and plural */
@@ -140,10 +128,10 @@ CARD_CSS = """
 /* Example sentence with decorative quote marks */
 .example {
     position: relative;
+    display: inline-block;
+    text-align: left;
     margin-top: 20px;
-    padding: 12px 45px;
-    background: #f5f5f5;
-    border-radius: 8px;
+    padding: 0 8px;
     font-size: 16px;
     font-style: italic;
 }
@@ -151,12 +139,12 @@ CARD_CSS = """
 .example::before {
     content: '\\201C';
     position: absolute;
-    left: 10px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 48px;
+    left: -7%;
+    top: 110%;
+    transform: translate(-100%, -50%);
+    font-size: 112px;
     font-family: Georgia, "Times New Roman", serif;
-    color: #999;
+    color: var(--color-quote);
     opacity: 0.4;
     line-height: 1;
 }
@@ -164,53 +152,33 @@ CARD_CSS = """
 .example::after {
     content: '\\201D';
     position: absolute;
-    right: 10px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 48px;
+    right: 0;
+    top: 110%;
+    transform: translate(100%, -50%);
+    font-size: 112px;
     font-family: Georgia, "Times New Roman", serif;
-    color: #999;
+    color: var(--color-quote);
     opacity: 0.4;
     line-height: 1;
 }
 
-.night_mode .example,
-.night_mode.card .example {
-    background: #2a2a2a;
-}
-
-.night_mode .example::before,
-.night_mode .example::after,
-.night_mode.card .example::before,
-.night_mode.card .example::after {
-    color: #666;
-}
-
 .example-italian {
     margin-bottom: 5px;
+    text-align: center;
 }
 
 .example-english {
     font-size: 14px;
-    color: #666;
-}
-
-.night_mode .example-english,
-.night_mode.card .example-english {
-    color: #888;
+    color: var(--color-secondary);
+    text-align: center;
 }
 
 /* Technical tense label */
 .tense-label {
     margin-top: 15px;
     font-size: 12px;
-    color: #999;
+    color: var(--color-tertiary);
     letter-spacing: 0.5px;
-}
-
-.night_mode .tense-label,
-.night_mode.card .tense-label {
-    color: #666;
 }
 """
 

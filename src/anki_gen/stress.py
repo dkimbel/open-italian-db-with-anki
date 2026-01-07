@@ -1,13 +1,13 @@
 """Stress marking utilities for Anki card display.
 
 This module converts pedagogical stress marks (from the `stressed` column)
-into visual underlines using HTML markup.
+into visual stress indicators using Unicode combining characters.
 
 The `written` column contains correct Italian orthography (parlo, città, può).
 The `stressed` column contains pedagogical stress marks (pàrlo, città, può).
 
-We combine these to produce display forms with underlined stressed vowels:
-- parlo + pàrlo → p<u class="stress">a</u>rlo (underlined a)
+We combine these to produce display forms with a dot below stressed vowels:
+- parlo + pàrlo → pa̤rlo (dot below a, using U+0323)
 - città + città → città (no change - accent IS the stress)
 - può + può → può (no change - accent IS the stress)
 """
@@ -60,26 +60,26 @@ def _get_vowel_positions(written: str) -> list[int]:
 
 
 def add_stress_underline(written: str, stressed: str) -> str:
-    """Add HTML underline markup to the stressed vowel in the written form.
+    """Add a combining dot below to the stressed vowel in the written form.
 
     Args:
         written: Real Italian orthography (e.g., "parlo", "città")
         stressed: Form with pedagogical stress marks (e.g., "pàrlo", "città")
 
     Returns:
-        Written form with stressed vowel wrapped in <u class="stress">.
+        Written form with stressed vowel followed by combining dot below (U+0323).
         If the stressed vowel already has an orthographic accent (è, ò, etc.),
-        no underline is added since the accent already indicates stress.
+        no dot is added since the accent already indicates stress.
 
     Examples:
         >>> add_stress_underline("parlo", "pàrlo")
-        'p<u class="stress">a</u>rlo'
+        'pa̤rlo'  # a followed by U+0323
         >>> add_stress_underline("città", "città")
         'città'  # no change - accent is orthographic
         >>> add_stress_underline("parlano", "pàrlano")
-        'p<u class="stress">a</u>rlano'
+        'pa̤rlano'
         >>> add_stress_underline("andiamo", "andiàmo")
-        'andi<u class="stress">a</u>mo'
+        'andia̤mo'
     """
     if not written or not stressed:
         return written
@@ -115,22 +115,22 @@ def add_stress_underline(written: str, stressed: str) -> str:
         # Vowel already accented in written form - no underline needed
         return written
 
-    # Wrap stressed vowel in HTML underline markup
-    return written[:char_idx] + f'<u class="stress">{char}</u>' + written[char_idx + 1 :]
+    # Add combining dot below (U+0323) after the stressed vowel
+    return written[:char_idx] + char + "\u0323" + written[char_idx + 1 :]
 
 
 def format_conjugation_with_stress(written: str | None, stressed: str) -> str:
     """Format a conjugated form with stress marking for display.
 
     If written is None, falls back to the stressed form with accent stripped
-    and stress underline added.
+    and stress dot added.
 
     Args:
         written: Real Italian orthography from database, or None
         stressed: Form with pedagogical stress marks
 
     Returns:
-        Display form with stressed vowel underlined
+        Display form with stressed vowel marked with dot below
     """
     if written is not None:
         return add_stress_underline(written, stressed)
