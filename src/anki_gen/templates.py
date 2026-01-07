@@ -17,9 +17,9 @@ CARD_CSS = """
     --color-text: #1a1a1a;
     --color-background: #ffffff;
     --color-prompt: #555;
-    --color-muted: #888;
+    --color-muted: #777;
     --color-secondary: #666;
-    --color-tertiary: #999;
+    --color-tertiary: #888;
     --color-quote: #999;
 }
 
@@ -27,9 +27,9 @@ CARD_CSS = """
     --color-text: #e0e0e0;
     --color-background: #1a1a1a;
     --color-prompt: #aaa;
-    --color-muted: #808080;
+    --color-muted: #707070;
     --color-secondary: #888;
-    --color-tertiary: #808080;
+    --color-tertiary: #707070;
     --color-quote: #666;
 }
 
@@ -120,6 +120,21 @@ CARD_CSS = """
     font-weight: 500;
 }
 
+/* Stress marking on vowels */
+.stress {
+    position: relative;
+}
+
+.stress::after {
+    content: '·';
+    position: absolute;
+    left: 50%;
+    top: 90%;
+    transform: translateX(-50%);
+    font-size: 1.1em;
+    line-height: 0;
+}
+
 /* Separator between singular and plural */
 .column-gap {
     width: 30px;
@@ -178,7 +193,7 @@ CARD_CSS = """
     margin-top: 15px;
     font-size: 12px;
     color: var(--color-tertiary);
-    letter-spacing: 0.5px;
+    letter-spacing: 0.25px;
 }
 """
 

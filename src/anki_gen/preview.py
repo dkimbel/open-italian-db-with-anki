@@ -54,7 +54,8 @@ def generate_preview_html(
     forms_dict: dict[tuple[int, str], str] = {}
     conjugated_forms: list[str] = []
     for form in forms:
-        display = format_conjugation_with_stress(form.written, form.stressed)
+        # Use CSS-based dot (non-copyable) for stress marking
+        display = format_conjugation_with_stress(form.written, form.stressed, use_css=True)
         forms_dict[(form.person, form.number)] = display
         if form.written:
             conjugated_forms.append(form.written)
