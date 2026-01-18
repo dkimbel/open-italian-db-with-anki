@@ -149,3 +149,23 @@ tasks:
     desc: Interactive DuckDB session for querying raw Wiktextract data
     cmds:
       - uv run python -i scripts/wikt_query.py
+
+  tatoeba-query:
+    desc: Interactive DuckDB session for querying raw Tatoeba data
+    cmds:
+      - uv run python -i scripts/tatoeba_query.py
+
+  morphit-query:
+    desc: Interactive DuckDB session for querying raw MorphIt data
+    cmds:
+      - uv run python -i scripts/morphit_query.py
+
+  itwac-query:
+    desc: Interactive DuckDB session for querying raw ItWaC frequency data
+    cmds:
+      - uv run python -i scripts/itwac_query.py
+
+  data-query:
+    desc: Interactive DuckDB session with ALL source data loaded
+    cmds:
+      - uv run python -i scripts/data_query.py

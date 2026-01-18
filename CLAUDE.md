@@ -28,15 +28,23 @@ Generate Anki flashcard decks for learning Italian using linguistic databases.
 
 Run `task stats` to see current database statistics.
 
-## Wiktextract Analysis
+## Source Data Exploration
 
-For ad-hoc exploration of the raw Wiktextract source data:
+DuckDB-powered interactive sessions for exploring raw source data:
+
+| Task | Data | Use case |
+|------|------|----------|
+| `task wikt-query` | Wiktextract JSONL | Dictionary entries, forms, definitions |
+| `task tatoeba-query` | Tatoeba TSV | Italian/English sentences, translations |
+| `task morphit-query` | MorphIt TSV | Surface forms, lemmas, POS tags |
+| `task itwac-query` | ItWaC CSV | Word frequencies, Zipf scores |
+| `task data-query` | **All sources** | Cross-source queries |
+
+### Wiktextract
 
 ```bash
 task wikt-query
 ```
-
-This starts an interactive Python session with DuckDB connected to the JSONL file. A `wikt` view is pre-configured:
 
 ```python
 # Count entries by POS
@@ -52,6 +60,59 @@ conn.sql("""
     WHERE pos = 'noun' AND (t.args.f IS NOT NULL OR t.args.m IS NOT NULL)
     LIMIT 10
 """)
+```
+
+### Tatoeba
+
+```bash
+task tatoeba-query
+```
+
+```python
+# Find Italian sentences with translations
+conn.sql("SELECT * FROM translations WHERE italian LIKE '%casa%' LIMIT 5")
+
+# Sentences with audio
+conn.sql("SELECT t.*, a.username FROM translations t JOIN audio a ON t.ita_id = a.sentence_id LIMIT 5")
+```
+
+### MorphIt
+
+```bash
+task morphit-query
+```
+
+```python
+# All forms of a verb
+conn.sql("SELECT * FROM morphit WHERE lemma = 'parlare'")
+
+# Verb POS tags
+conn.sql("SELECT DISTINCT pos_tag FROM morphit WHERE pos_tag LIKE 'VER:%'")
+```
+
+### ItWaC
+
+```bash
+task itwac-query
+```
+
+```python
+# Frequency of a word's forms
+conn.sql("SELECT * FROM itwac WHERE lemma = 'parlare' ORDER BY Freq DESC")
+
+# Top lemmas by frequency
+conn.sql("SELECT lemma, SUM(Freq) as total FROM itwac GROUP BY lemma ORDER BY total DESC LIMIT 20")
+```
+
+### Cross-source queries
+
+```bash
+task data-query
+```
+
+```python
+# Check if a Wiktextract word has ItWaC frequency
+conn.sql("SELECT w.word, i.Freq, i.Zipf FROM wikt w LEFT JOIN itwac i ON w.word = i.lemma WHERE w.word = 'casa'")
 ```
 
 ## Card Preview and Screenshots
