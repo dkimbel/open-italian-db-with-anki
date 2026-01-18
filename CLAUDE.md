@@ -28,6 +28,32 @@ Generate Anki flashcard decks for learning Italian using linguistic databases.
 
 Run `task stats` to see current database statistics.
 
+## Wiktextract Analysis
+
+For ad-hoc exploration of the raw Wiktextract source data:
+
+```bash
+task wikt-query
+```
+
+This starts an interactive Python session with DuckDB connected to the JSONL file. A `wikt` view is pre-configured:
+
+```python
+# Count entries by POS
+conn.sql("SELECT pos, COUNT(*) FROM wikt GROUP BY pos ORDER BY 2 DESC")
+
+# Find a specific word
+conn.sql("SELECT * FROM wikt WHERE word = 'signora'")
+
+# Analyze head_template args (UNNEST for nested arrays)
+conn.sql("""
+    SELECT word, t.args.f, t.args.m
+    FROM wikt, UNNEST(head_templates) as t
+    WHERE pos = 'noun' AND (t.args.f IS NOT NULL OR t.args.m IS NOT NULL)
+    LIMIT 10
+""")
+```
+
 ## Card Preview and Screenshots
 
 To preview Anki cards during development:

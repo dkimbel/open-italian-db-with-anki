@@ -144,3 +144,8 @@ tasks:
     cmds:
       - uv run anki-gen preview {{.VERB | default "parlare"}}
       - open output/preview.html
+
+  wikt-query:
+    desc: Interactive DuckDB session for querying raw Wiktextract data
+    cmds:
+      - uv run python -i scripts/wikt_query.py
