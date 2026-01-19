@@ -12,9 +12,10 @@ from sqlalchemy import Connection
 
 from anki_gen.generator import build_verb_tags
 from anki_gen.queries import (
+    TENSE_ID_TO_MOOD_TENSE,
     generate_english_prompt,
     get_english_infinitive,
-    get_example_sentence,
+    get_example_sentence_with_fallback,
     get_present_indicative_forms,
     get_verb_by_lemma,
 )
@@ -62,8 +63,17 @@ def generate_preview_html(
 
     table_html = build_conjugation_table_html(forms_dict)
 
-    # Get example
-    example = get_example_sentence(conn, verb.written, conjugated_forms=conjugated_forms)
+    # Extract mood/tense for morphological sentence matching
+    mood, tense = TENSE_ID_TO_MOOD_TENSE.get(tense_id, (None, None))
+
+    # Get example: try morphological match from ParTUT first, then FTS fallback
+    example = get_example_sentence_with_fallback(
+        conn,
+        verb.written,
+        mood=mood,
+        tense=tense,
+        conjugated_forms=conjugated_forms,
+    )
     example_html = ""
     if example:
         example_html = f'<div class="example-italian">{example.italian}</div>'

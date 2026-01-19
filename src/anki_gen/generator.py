@@ -25,11 +25,12 @@ from sqlalchemy import Connection
 
 from anki_gen.note_types import create_verb_conjugation_model
 from anki_gen.queries import (
+    TENSE_ID_TO_MOOD_TENSE,
     ExampleSentence,
     Verb,
     generate_english_prompt,
     get_english_infinitive,
-    get_example_sentence,
+    get_example_sentence_with_fallback,
     get_frequency_band,
     get_present_indicative_forms,
     get_verb_by_lemma,
@@ -186,8 +187,17 @@ def generate_verb_card(
     # Build conjugation table HTML
     table_html = build_conjugation_table_html(forms_dict)
 
-    # Get example sentence using the actual conjugated forms
-    example = get_example_sentence(conn, verb.written, conjugated_forms=conjugated_forms)
+    # Extract mood/tense for morphological sentence matching
+    mood, tense = TENSE_ID_TO_MOOD_TENSE.get(tense_id, (None, None))
+
+    # Get example sentence: try morphological match from ParTUT first, then FTS fallback
+    example = get_example_sentence_with_fallback(
+        conn,
+        verb.written,
+        mood=mood,
+        tense=tense,
+        conjugated_forms=conjugated_forms,
+    )
     example_html = format_example_sentence(example)
 
     # Get English infinitive (e.g., "to speak")

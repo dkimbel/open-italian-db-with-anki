@@ -22,6 +22,7 @@ from italian_db.download import (
     download_all,
     download_itwac,
     download_morphit,
+    download_partut,
     download_tatoeba,
     download_wiktextract,
 )
@@ -29,6 +30,7 @@ from italian_db.enums import POS
 from italian_db.importers import (
     import_itwac,
     import_morphit,
+    import_partut,
     import_tatoeba,
     import_verb_irregularity,
     import_wiktextract,
@@ -207,6 +209,37 @@ def cmd_import_tatoeba(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import_partut(args: argparse.Namespace) -> int:
+    """Run the ParTUT import command."""
+    db_path = Path(args.database)
+
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        print("Run 'import-wiktextract' first to create the database.", file=sys.stderr)
+        return 1
+
+    # Ensure sentence_tokens table exists (may be added after initial schema)
+    engine = get_engine(db_path)
+    init_db(engine)
+
+    print(f"Importing ParTUT corpus to: {db_path}")
+    print()
+
+    with get_connection(db_path) as conn:
+        stats = import_partut(conn, progress_callback=_make_progress_callback())
+        print()
+        if stats["cleared"] > 0:
+            print(f"  Cleared:            {stats['cleared']:,} existing ParTUT sentences")
+        print(f"  Italian sentences:  {stats['ita_sentences']:,}")
+        print(f"  English sentences:  {stats['eng_sentences']:,}")
+        print(f"  Translations:       {stats['translations']:,}")
+        print(f"  Tokens:             {stats['tokens']:,}")
+
+    print()
+    print("Import complete!")
+    return 0
+
+
 def cmd_import_verb_irregularity(args: argparse.Namespace) -> int:
     """Run the verb irregularity pattern import command."""
     db_path = Path(args.database)
@@ -300,13 +333,32 @@ def cmd_stats(args: argparse.Namespace) -> int:
             select(func.count(func.distinct(frequencies.c.lemma_id)))
         ).scalar()
 
-        # Sentences
-        ita_sentences = conn.execute(
-            select(func.count()).select_from(sentences).where(sentences.c.lang == "ita")
+        # Sentences by source
+        tatoeba_ita = conn.execute(
+            select(func.count())
+            .select_from(sentences)
+            .where(sentences.c.lang == "ita", sentences.c.source == "tatoeba")
         ).scalar()
-        eng_sentences = conn.execute(
-            select(func.count()).select_from(sentences).where(sentences.c.lang == "eng")
+        tatoeba_eng = conn.execute(
+            select(func.count())
+            .select_from(sentences)
+            .where(sentences.c.lang == "eng", sentences.c.source == "tatoeba")
         ).scalar()
+        partut_ita = conn.execute(
+            select(func.count())
+            .select_from(sentences)
+            .where(sentences.c.lang == "ita", sentences.c.source == "partut")
+        ).scalar()
+        partut_eng = conn.execute(
+            select(func.count())
+            .select_from(sentences)
+            .where(sentences.c.lang == "eng", sentences.c.source == "partut")
+        ).scalar()
+
+        # Token counts (ParTUT only)
+        from italian_db.db.schema import sentence_tokens
+
+        token_count = conn.execute(select(func.count()).select_from(sentence_tokens)).scalar()
 
     print(f"Database: {db_path}")
     print()
@@ -324,9 +376,14 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print(f"  Noun forms with gender: {nouns_with_gender:,}")
     print(f"  Lemmas with frequency:  {lemmas_with_freq:,}")
     print()
-    print("Sentences:")
-    print(f"  Italian:     {ita_sentences:,}")
-    print(f"  English:     {eng_sentences:,}")
+    print("Sentences (Tatoeba):")
+    print(f"  Italian:     {tatoeba_ita:,}")
+    print(f"  English:     {tatoeba_eng:,}")
+    print()
+    print("Sentences (ParTUT):")
+    print(f"  Italian:     {partut_ita:,}")
+    print(f"  English:     {partut_eng:,}")
+    print(f"  Tokens:      {token_count:,}")
 
     return 0
 
@@ -375,6 +432,13 @@ def cmd_download_itwac(args: argparse.Namespace) -> int:
 def cmd_download_tatoeba(args: argparse.Namespace) -> int:
     """Download Tatoeba sentences and links."""
     stats = download_tatoeba(force=args.force)
+    print(f"Downloaded: {stats['downloaded']} files, Skipped: {stats['skipped']} files")
+    return 0
+
+
+def cmd_download_partut(args: argparse.Namespace) -> int:
+    """Download ParTUT CoNLL-U files."""
+    stats = download_partut(force=args.force)
     print(f"Downloaded: {stats['downloaded']} files, Skipped: {stats['skipped']} files")
     return 0
 
@@ -550,7 +614,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     print()
 
     pos_list = list(POS)
-    total_phases = 5  # 3 POS + post-processing + Tatoeba
+    total_phases = 6  # 3 POS + post-processing + Tatoeba + ParTUT
     indent = "    "
 
     # Import each POS
@@ -707,7 +771,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
 
     # Post-processing: Cross-POS enrichments
     print("=" * 80)
-    print("Post-processing enrichments (Step 4 of 5)")
+    print("Post-processing enrichments (Step 4 of 6)")
     print("=" * 80)
     print()
 
@@ -725,15 +789,32 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print(f"  Skipped (typo):        {stats['skipped_typo']:,}")
     print()
 
-    # Final step: Tatoeba sentences (for all POS)
+    # Tatoeba sentences
     print("=" * 80)
-    print("Importing Tatoeba sentences (Step 5 of 5)")
+    print("Importing Tatoeba sentences (Step 5 of 6)")
     print("=" * 80)
     print()
     print("Importing sentences...")
 
     with get_connection(db_path) as conn:
         _run_tatoeba_import(conn, ita_path, eng_path, links_path, indent="  ")
+    print()
+
+    # ParTUT sentences with morphological annotations
+    print("=" * 80)
+    print("Importing ParTUT sentences (Step 6 of 6)")
+    print("=" * 80)
+    print()
+
+    with get_connection(db_path) as conn:
+        stats = import_partut(conn, progress_callback=_make_progress_callback())
+        print()
+        if stats["cleared"] > 0:
+            print(f"  Cleared:            {stats['cleared']:,} existing ParTUT sentences")
+        print(f"  Italian sentences:  {stats['ita_sentences']:,}")
+        print(f"  English sentences:  {stats['eng_sentences']:,}")
+        print(f"  Translations:       {stats['translations']:,}")
+        print(f"  Tokens:             {stats['tokens']:,}")
     print()
 
     print("=" * 80)
@@ -909,6 +990,20 @@ def main() -> int:
     )
     irreg_parser.set_defaults(func=cmd_import_verb_irregularity)
 
+    # import-partut subcommand
+    partut_parser = subparsers.add_parser(
+        "import-partut",
+        help="Import ParTUT corpus with morphological annotations",
+    )
+    partut_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    partut_parser.set_defaults(func=cmd_import_partut)
+
     # import-all subcommand
     import_all_parser = subparsers.add_parser(
         "import-all",
@@ -1004,6 +1099,18 @@ def main() -> int:
         help="Re-download even if files already exist",
     )
     dl_tatoeba_parser.set_defaults(func=cmd_download_tatoeba)
+
+    # download-partut subcommand
+    dl_partut_parser = subparsers.add_parser(
+        "download-partut",
+        help="Download ParTUT CoNLL-U files",
+    )
+    dl_partut_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if files already exist",
+    )
+    dl_partut_parser.set_defaults(func=cmd_download_partut)
 
     # download-all subcommand
     dl_all_parser = subparsers.add_parser(

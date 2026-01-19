@@ -115,6 +115,170 @@ def get_present_indicative_forms(conn: Connection, lemma_id: int) -> list[VerbFo
     ]
 
 
+# Mapping from internal mood names to Universal Dependencies values
+MOOD_TO_UD: dict[str, str] = {
+    "indicative": "Ind",
+    "subjunctive": "Sub",
+    "conditional": "Cnd",
+    "imperative": "Imp",
+}
+
+# Mapping from internal tense names to Universal Dependencies values
+TENSE_TO_UD: dict[str, str] = {
+    "present": "Pres",
+    "imperfect": "Imp",
+    "remote": "Past",  # passato remoto
+    "future": "Fut",
+}
+
+# Mapping from tense_id (card generator) to (mood, tense) for morphological lookup
+TENSE_ID_TO_MOOD_TENSE: dict[str, tuple[str, str]] = {
+    "presente_indicativo": ("indicative", "present"),
+    "imperfetto": ("indicative", "imperfect"),
+    "passato_remoto": ("indicative", "remote"),
+    "futuro_semplice": ("indicative", "future"),
+    # Future additions:
+    # "presente_congiuntivo": ("subjunctive", "present"),
+    # "condizionale_presente": ("conditional", "present"),
+}
+
+
+def get_morphological_example_sentence(
+    conn: Connection,
+    lemma: str,
+    *,
+    mood: str | None = None,
+    tense: str | None = None,
+    max_length: int = 120,
+    min_words: int = 7,
+    fallback_min_words: int = 3,
+) -> ExampleSentence | None:
+    """Find an example sentence with a specific morphological form from ParTUT.
+
+    This searches the morphologically-tagged ParTUT corpus for sentences
+    containing the verb lemma in a specific mood and/or tense.
+
+    Args:
+        conn: Database connection
+        lemma: The verb lemma to search for (e.g., "essere")
+        mood: Optional mood filter (indicative, subjunctive, conditional, imperative)
+        tense: Optional tense filter (present, imperfect, remote, future)
+        max_length: Maximum sentence length in characters
+        min_words: Preferred minimum number of words in sentence
+        fallback_min_words: Fallback minimum if no sentence with min_words found
+
+    Returns:
+        ExampleSentence with Italian text and optional English translation,
+        or None if no suitable sentence found
+    """
+    # Convert internal mood/tense names to UD values
+    ud_mood = MOOD_TO_UD.get(mood, mood) if mood else None
+    ud_tense = TENSE_TO_UD.get(tense, tense) if tense else None
+
+    params: dict[str, str | int] = {
+        "lemma": lemma,
+        "max_length": max_length,
+        "min_words": min_words,
+    }
+
+    # Build mood/tense filter conditions
+    # These are safe because values come from our internal MOOD_TO_UD/TENSE_TO_UD mappings
+    mood_filter = " AND st.mood = :mood" if ud_mood else ""
+    tense_filter = " AND st.tense = :tense" if ud_tense else ""
+
+    if ud_mood:
+        params["mood"] = ud_mood
+    if ud_tense:
+        params["tense"] = ud_tense
+
+    # Query with translation join
+    # Note: mood_filter and tense_filter are built from hardcoded strings, not user input
+    # sentence_tokens.sentence_id and translations.*_sentence_id reference sentences.id (surrogate)
+    query = text(
+        "SELECT DISTINCT s.id, s.text, eng.text as english "
+        "FROM sentence_tokens st "
+        "JOIN sentences s ON st.sentence_id = s.id "
+        "LEFT JOIN translations t ON t.ita_sentence_id = s.id "
+        "LEFT JOIN sentences eng ON t.eng_sentence_id = eng.id "
+        "WHERE st.lemma = :lemma" + mood_filter + tense_filter + " AND s.source = 'partut'"
+        " AND s.lang = 'ita'"
+        " AND length(s.text) <= :max_length"
+        " AND (length(s.text) - length(replace(s.text, ' ', '')) + 1) >= :min_words"
+        " ORDER BY"
+        " CASE WHEN eng.text IS NOT NULL THEN 0 ELSE 1 END,"
+        " length(s.text)"
+        " LIMIT 1"
+    )
+
+    row = conn.execute(query, params).fetchone()
+
+    # Fallback with shorter minimum
+    if row is None and fallback_min_words < min_words:
+        params["min_words"] = fallback_min_words
+        row = conn.execute(query, params).fetchone()
+
+    if row is None:
+        return None
+
+    return ExampleSentence(italian=row[1], english=row[2])
+
+
+def get_example_sentence_with_fallback(
+    conn: Connection,
+    verb_written: str,
+    *,
+    mood: str | None = None,
+    tense: str | None = None,
+    conjugated_forms: list[str] | None = None,
+    max_length: int = 120,
+    min_words: int = 7,
+    fallback_min_words: int = 3,
+) -> ExampleSentence | None:
+    """Find an example sentence with morphological preference and FTS fallback.
+
+    This function first tries to find a sentence with exact morphological
+    matching (mood/tense) from ParTUT. If no suitable sentence is found,
+    it falls back to FTS search across all sentences (Tatoeba + ParTUT).
+
+    Args:
+        conn: Database connection
+        verb_written: The verb infinitive (e.g., "parlare")
+        mood: Optional mood filter for morphological search
+        tense: Optional tense filter for morphological search
+        conjugated_forms: Optional list of specific forms to search for in FTS
+        max_length: Maximum sentence length in characters
+        min_words: Preferred minimum number of words in sentence
+        fallback_min_words: Fallback minimum if no sentence with min_words found
+
+    Returns:
+        ExampleSentence with Italian text and optional English translation,
+        or None if no suitable sentence found
+    """
+    # First, try morphological match from ParTUT if mood or tense specified
+    if mood or tense:
+        result = get_morphological_example_sentence(
+            conn,
+            verb_written,
+            mood=mood,
+            tense=tense,
+            max_length=max_length,
+            min_words=min_words,
+            fallback_min_words=fallback_min_words,
+        )
+        if result:
+            return result
+
+    # Fall back to existing FTS search
+    return get_example_sentence(
+        conn,
+        verb_written,
+        conjugated_forms=conjugated_forms,
+        max_length=max_length,
+        min_words=min_words,
+        fallback_min_words=fallback_min_words,
+    )
+
+
 def get_example_sentence(
     conn: Connection,
     verb_written: str,
@@ -167,12 +331,13 @@ def get_example_sentence(
     # Query that joins with translations and returns both Italian and English
     # Orders by: translation availability first (sentences WITH translations come first),
     # then by sentence length (shortest first)
+    # sentences_fts.id and translations.*_sentence_id reference sentences.id (surrogate)
     stmt = text("""
-        SELECT s.sentence_id, s.text, eng.text as english
+        SELECT s.id, s.text, eng.text as english
         FROM sentences_fts fts
-        JOIN sentences s ON fts.sentence_id = s.sentence_id
-        LEFT JOIN translations t ON t.ita_sentence_id = s.sentence_id
-        LEFT JOIN sentences eng ON t.eng_sentence_id = eng.sentence_id
+        JOIN sentences s ON fts.id = s.id
+        LEFT JOIN translations t ON t.ita_sentence_id = s.id
+        LEFT JOIN sentences eng ON t.eng_sentence_id = eng.id
         WHERE fts.text MATCH :query
           AND s.lang = 'ita'
           AND length(s.text) <= :max_length

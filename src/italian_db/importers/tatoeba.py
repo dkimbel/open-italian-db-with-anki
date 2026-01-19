@@ -4,7 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Connection, select, text
+from sqlalchemy import Connection, text
 
 from italian_db.db.schema import sentences, translations
 
@@ -15,17 +15,32 @@ def _clear_existing_data(conn: Connection) -> int:
     Deletes in FK-safe order: sentences_fts → translations → sentences.
     Returns the number of sentences cleared.
     """
-    # Count existing sentences
-    result = conn.execute(select(sentences.c.sentence_id))
-    existing_count = len(result.fetchall())
+    # Count existing Tatoeba sentences
+    result = conn.execute(text("SELECT COUNT(*) FROM sentences WHERE source = 'tatoeba'"))
+    existing_count = result.scalar() or 0
 
     if existing_count == 0:
         return 0
 
-    # Delete in FK-safe order
-    conn.execute(text("DELETE FROM sentences_fts"))
-    conn.execute(translations.delete())
-    conn.execute(sentences.delete())
+    # Delete FTS entries for Tatoeba sentences
+    conn.execute(
+        text("""
+            DELETE FROM sentences_fts
+            WHERE id IN (SELECT id FROM sentences WHERE source = 'tatoeba')
+        """)
+    )
+
+    # Delete translations involving Tatoeba sentences
+    conn.execute(
+        text("""
+            DELETE FROM translations
+            WHERE ita_sentence_id IN (SELECT id FROM sentences WHERE source = 'tatoeba')
+               OR eng_sentence_id IN (SELECT id FROM sentences WHERE source = 'tatoeba')
+        """)
+    )
+
+    # Delete Tatoeba sentences
+    conn.execute(text("DELETE FROM sentences WHERE source = 'tatoeba'"))
 
     return existing_count
 
@@ -133,10 +148,12 @@ def import_tatoeba(
     total_items = len(ita_sentences) + len(eng_sentences) + len(translation_pairs)
     processed_items = 0
 
-    # Step 4: Insert Italian sentences
+    # Step 4: Insert Italian sentences (with source='tatoeba')
     ita_batch: list[dict[str, Any]] = []
     for sentence_id, sent_text in ita_sentences.items():
-        ita_batch.append({"sentence_id": sentence_id, "lang": "ita", "text": sent_text})
+        ita_batch.append(
+            {"sentence_id": sentence_id, "lang": "ita", "text": sent_text, "source": "tatoeba"}
+        )
         if len(ita_batch) >= batch_size:
             conn.execute(sentences.insert(), ita_batch)
             stats["ita_sentences"] += len(ita_batch)
@@ -149,10 +166,12 @@ def import_tatoeba(
         stats["ita_sentences"] += len(ita_batch)
         processed_items += len(ita_batch)
 
-    # Step 5: Insert English sentences
+    # Step 5: Insert English sentences (with source='tatoeba')
     eng_batch: list[dict[str, Any]] = []
     for sentence_id, sent_text in eng_sentences.items():
-        eng_batch.append({"sentence_id": sentence_id, "lang": "eng", "text": sent_text})
+        eng_batch.append(
+            {"sentence_id": sentence_id, "lang": "eng", "text": sent_text, "source": "tatoeba"}
+        )
         if len(eng_batch) >= batch_size:
             conn.execute(sentences.insert(), eng_batch)
             stats["eng_sentences"] += len(eng_batch)
@@ -165,10 +184,18 @@ def import_tatoeba(
         stats["eng_sentences"] += len(eng_batch)
         processed_items += len(eng_batch)
 
-    # Step 6: Insert translation pairs
+    # Step 6: Build mapping from native sentence_id to surrogate id
+    # This is needed because translations reference the surrogate id
+    result = conn.execute(text("SELECT id, sentence_id FROM sentences WHERE source = 'tatoeba'"))
+    sentence_id_to_surrogate: dict[int, int] = {row[1]: row[0] for row in result}
+
+    # Step 7: Insert translation pairs using surrogate IDs
     trans_batch: list[dict[str, int]] = []
-    for ita_id, eng_id in translation_pairs:
-        trans_batch.append({"ita_sentence_id": ita_id, "eng_sentence_id": eng_id})
+    for ita_native_id, eng_native_id in translation_pairs:
+        ita_surrogate = sentence_id_to_surrogate.get(ita_native_id)
+        eng_surrogate = sentence_id_to_surrogate.get(eng_native_id)
+        if ita_surrogate is not None and eng_surrogate is not None:
+            trans_batch.append({"ita_sentence_id": ita_surrogate, "eng_sentence_id": eng_surrogate})
         if len(trans_batch) >= batch_size:
             conn.execute(translations.insert().prefix_with("OR IGNORE"), trans_batch)
             stats["translations"] += len(trans_batch)
@@ -185,11 +212,11 @@ def import_tatoeba(
     if progress_callback:
         progress_callback(total_items, total_items)
 
-    # Step 7: Populate FTS5 index for Italian sentences
+    # Step 8: Populate FTS5 index for Italian sentences (using surrogate id)
     conn.execute(
         text("""
-            INSERT INTO sentences_fts(sentence_id, text)
-            SELECT sentence_id, text FROM sentences WHERE lang='ita'
+            INSERT INTO sentences_fts(id, text)
+            SELECT id, text FROM sentences WHERE lang='ita' AND source='tatoeba'
         """)
     )
 

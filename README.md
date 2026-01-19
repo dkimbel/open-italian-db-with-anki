@@ -157,6 +157,7 @@ projects. See `data-licenses/` for full license texts.
 | [Morph-it!](https://docs.sslmit.unibo.it) | CC-BY-SA 2.0 + LGPL | Real Italian orthography |
 | [ItWaC](https://github.com/franfranz/Word_Frequency_Lists_ITA) | MIT | Frequency data |
 | [Tatoeba](https://tatoeba.org) | CC-BY 2.0 FR | Example sentences |
+| [ParTUT](https://universaldependencies.org) | CC-BY-NC-SA 4.0 | Morphologically-tagged sentences |
 
 ## What's In The Database
 
@@ -224,12 +225,13 @@ Where the correct Italian spelling came from:
 **Code**: MIT
 
 **Database and Anki decks**: The generated database incorporates content from
-multiple copyleft sources. The combined work is subject to **CC-BY-SA 3.0**
-(the most restrictive compatible license among the sources).
+multiple copyleft sources. The combined work is subject to **CC-BY-NC-SA 4.0**
+due to the inclusion of ParTUT data (which has a NonCommercial restriction).
 
 If you redistribute the database or Anki decks derived from it:
-1. **Attribution required**: Credit Wiktionary/Wiktextract, Morph-it!, Tatoeba, and ItWaC
-2. **Share-alike required**: Distribute under CC-BY-SA 3.0 or a compatible license
+1. **Attribution required**: Credit Wiktionary/Wiktextract, Morph-it!, Tatoeba, ItWaC, and ParTUT
+2. **NonCommercial**: You may not use the material for commercial purposes
+3. **Share-alike required**: Distribute under CC-BY-NC-SA 4.0 or a compatible license
 
 ## Development
 

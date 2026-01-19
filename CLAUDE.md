@@ -38,6 +38,7 @@ DuckDB-powered interactive sessions for exploring raw source data:
 | `task tatoeba-query` | Tatoeba TSV | Italian/English sentences, translations |
 | `task morphit-query` | MorphIt TSV | Surface forms, lemmas, POS tags |
 | `task itwac-query` | ItWaC CSV | Word frequencies, Zipf scores |
+| `task partut-query` | ParTUT CoNLL-U | Morphologically-tagged sentences |
 | `task data-query` | **All sources** | Cross-source queries |
 
 ### Wiktextract
@@ -102,6 +103,23 @@ conn.sql("SELECT * FROM itwac WHERE lemma = 'parlare' ORDER BY Freq DESC")
 
 # Top lemmas by frequency
 conn.sql("SELECT lemma, SUM(Freq) as total FROM itwac GROUP BY lemma ORDER BY total DESC LIMIT 20")
+```
+
+### ParTUT
+
+```bash
+task partut-query
+```
+
+```python
+# Find verbs in subjunctive mood
+conn.sql("SELECT DISTINCT lemma, mood, tense FROM verbs WHERE mood = 'Sub' LIMIT 20")
+
+# All forms of "essere" with their grammatical features
+conn.sql("SELECT form, lemma, mood, tense, person, number FROM verbs WHERE lemma = 'essere'")
+
+# Count verb tokens by mood and tense
+conn.sql("SELECT mood, tense, COUNT(*) as n FROM verbs GROUP BY mood, tense ORDER BY n DESC")
 ```
 
 ### Cross-source queries

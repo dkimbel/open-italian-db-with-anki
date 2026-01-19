@@ -2,6 +2,7 @@
 
 from italian_db.importers.itwac import import_itwac
 from italian_db.importers.morphit import import_morphit
+from italian_db.importers.partut import import_partut
 from italian_db.importers.tatoeba import import_tatoeba
 from italian_db.importers.verb_irregularity import import_verb_irregularity
 from italian_db.importers.wiktextract import (
@@ -15,6 +16,7 @@ __all__ = [
     "generate_gendered_participles",
     "import_itwac",
     "import_morphit",
+    "import_partut",
     "import_tatoeba",
     "import_verb_irregularity",
     "import_wiktextract",

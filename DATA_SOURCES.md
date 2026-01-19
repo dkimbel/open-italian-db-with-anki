@@ -287,6 +287,40 @@ città	città	NOUN-F:s
 4369	1277
 ```
 
+## ParTUT (data/partut/)
+
+**Source:** Universal Dependencies Italian-ParTUT Treebank
+**URL:** https://github.com/UniversalDependencies/UD_Italian-ParTUT
+**License:** CC-BY-NC-SA 4.0 (NonCommercial)
+**Files:**
+- `it_partut-ud-train.conllu` - Italian training set
+- `it_partut-ud-dev.conllu` - Italian development set
+- `it_partut-ud-test.conllu` - Italian test set
+- `en_partut-ud-*.conllu` - Parallel English translations
+
+**Why ParTUT:**
+ParTUT provides full morphological annotation for each token, enabling precise
+example sentence matching by grammatical features (mood, tense, person, number).
+For instance, we can find sentences where "essere" appears specifically in the
+subjunctive present, not just any form of "essere".
+
+**Sample Data (CoNLL-U format):**
+```conllu
+# sent_id = train-s1
+# text = Ho una lettera per te.
+1	Ho	avere	VERB	_	Mood=Ind|Number=Sing|Person=1|Tense=Pres|VerbForm=Fin	0	root	_	_
+2	una	uno	DET	_	Gender=Fem|Number=Sing|PronType=Ind	3	det	_	_
+3	lettera	lettera	NOUN	_	Gender=Fem|Number=Sing	1	obj	_	_
+4	per	per	ADP	_	_	5	case	_	_
+5	te	tu	PRON	_	Number=Sing|Person=2|PronType=Prs	1	obl	_	SpaceAfter=No
+6	.	.	PUNCT	_	_	1	punct	_	_
+```
+
+**IMPORTANT License Note:**
+ParTUT uses a CC-BY-NC-SA 4.0 license which includes a NonCommercial restriction.
+Including this data source changes the combined database license to also include
+the NC restriction.
+
 ---
 
 Each subdirectory contains a LICENSE file with the full license text.
