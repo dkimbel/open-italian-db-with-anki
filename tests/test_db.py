@@ -109,13 +109,11 @@ class TestSchema:
             init_db(engine)
 
             with get_connection(db_path) as conn:
-                # Insert a lemma with IPA (uses Unicode stress/length markers)
-                ipa = "par\u02c8la\u02d0re"
+                # Insert a basic lemma
                 conn.execute(
                     lemmas.insert().values(
                         stressed="parlare",
                         pos="verb",
-                        ipa=ipa,
                     )
                 )
 
@@ -123,7 +121,6 @@ class TestSchema:
                 assert row is not None
                 assert row.stressed == "parlare"
                 assert row.pos == "verb"
-                assert row.ipa == ipa
         finally:
             db_path.unlink()
 

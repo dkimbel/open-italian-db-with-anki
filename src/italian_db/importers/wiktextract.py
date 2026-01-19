@@ -16,6 +16,7 @@ from italian_db.db.schema import (
     adjective_metadata,
     definitions,
     frequencies,
+    lemma_relationships,
     lemmas,
     noun_forms,
     noun_metadata,
@@ -23,7 +24,7 @@ from italian_db.db.schema import (
     verb_metadata,
 )
 from italian_db.derivation import derive_participle_forms
-from italian_db.enums import POS, DerivationType, GenderClass
+from italian_db.enums import POS, DerivationType, GenderClass, LemmaRelationshipType
 from italian_db.normalize import derive_written_from_stressed, normalize
 from italian_db.tags import (
     LABEL_CANONICAL,
@@ -312,23 +313,68 @@ def _get_adjective_inflection_class(entry: dict[str, Any]) -> str:
 def _is_pure_alt_form_entry(entry: dict[str, Any]) -> bool:
     """Check if entry is PURELY an alt-of entry (no other meanings).
 
-    Returns True only if ALL senses are alt_of or form_of.
-    Returns False if entry has any regular definition senses.
+    Returns True only if ALL senses are alt_of or form_of,
+    UNLESS any sense is a clipping (clippings become their own lemmas).
 
-    This preserves entries like "toro" which is both an alt-of "Toro"
+    Returns False if entry has any regular definition senses OR if it's a clipping.
+
+    Clippings like "bici" (bicicletta), "auto" (automobile), "moto" (motocicletta)
+    are widely-used vocabulary items and should be kept as lemmas with a
+    clipping_of relationship to their full form.
+
+    This also preserves entries like "toro" which is both an alt-of "Toro"
     (Taurus) AND a standalone word meaning "bull".
+
+    See also:
+    - docs/lemmas-definitions-ipa-refactor.md for specification
+    - lemma_relationships table for storing clipping_of relationships
     """
     senses = entry.get("senses", [])
     if not senses:
         return False
 
     for sense in senses:
+        # Clippings should be kept as lemmas (they're widely-used vocabulary)
+        if "clipping" in sense.get("tags", []):
+            return False
+
         # If any sense is a regular definition (not alt_of or form_of), keep the entry
         if not sense.get("alt_of") and not sense.get("form_of"):
             return False
 
-    # All senses are alt_of or form_of - safe to filter
+    # All senses are alt_of or form_of (and not clippings) - safe to filter
     return any(sense.get("alt_of") for sense in senses)
+
+
+def _is_clipping_entry(entry: dict[str, Any]) -> bool:
+    """Check if entry is a clipping (shortened colloquial form).
+
+    Clippings like "bici" (bicicletta), "auto" (automobile), "moto" (motocicletta)
+    have become established vocabulary items and should be their own lemmas.
+
+    Returns True if ANY sense has the "clipping" tag.
+    """
+    return any("clipping" in sense.get("tags", []) for sense in entry.get("senses", []))
+
+
+def _get_clipping_target(entry: dict[str, Any]) -> str | None:
+    """Extract the target word from a clipping entry.
+
+    Returns the word that this clipping is derived from (e.g., "bicicletta" for "bici"),
+    or None if no target can be determined.
+    """
+    for sense in entry.get("senses", []):
+        if "clipping" not in sense.get("tags", []):
+            continue
+
+        # Extract the target word from alt_of
+        alt_of_list = sense.get("alt_of", [])
+        if alt_of_list:
+            target_word = alt_of_list[0].get("word")
+            if target_word:
+                return target_word
+
+    return None
 
 
 # Hardcoded mappings for irregular comparatives/superlatives
@@ -1381,9 +1427,29 @@ def _is_pos_lemma(entry: dict[str, Any], pos: str) -> bool:
 
     Works for verbs, nouns, and adjectives.
 
-    Note: Some lemmas (e.g., pluralia tantum nouns like 'forbici') have no
-    'forms' array at all. The key indicator is that lemmas don't have 'form_of'
-    in any sense, while form-of entries do.
+    CRITICAL: An entry is a lemma if it has at least one sense with independent
+    meaning (i.e., at least one sense WITHOUT a form_of reference).
+
+    This is essential for entries like "cagnolino" which have:
+    - Sense 0: "diminutive of cane" (HAS form_of)
+    - Sense 1: "puppy" (NO form_of) ← Independent meaning!
+    - Sense 2: "dog paddle" (NO form_of) ← Independent meaning!
+
+    With the old all() check, cagnolino was wrongly filtered out because
+    one sense had form_of. With any(), it's correctly kept as a lemma
+    because it has independent meanings.
+
+    Examples:
+    - "casa" (all senses lack form_of) → lemma ✓
+    - "cagnolino" (1 sense has form_of, 2 lack it) → lemma ✓ (has independent meanings)
+    - "professoressa" (only sense has form_of) → NOT a lemma (imported via forms array)
+
+    Note: Clippings (e.g., "bici") are handled separately in _is_pure_alt_form_entry(),
+    which returns False for clippings to ensure they become lemmas.
+
+    See also:
+    - docs/lemmas-definitions-ipa-refactor.md for detailed specification
+    - lemmas table docstring in schema.py for definition of "lemma"
     """
     if entry.get("pos") != pos:
         return False
@@ -1393,8 +1459,13 @@ def _is_pos_lemma(entry: dict[str, Any], pos: str) -> bool:
     if pos == "verb" and "forms" not in entry:
         return False
 
-    # Check if any sense has form_of (meaning this is a form-of entry, not a lemma)
-    return all("form_of" not in sense for sense in entry.get("senses", []))
+    senses = entry.get("senses", [])
+    if not senses:
+        return False
+
+    # FIXED: Return True if ANY sense lacks form_of (has independent meaning)
+    # Previously used all() which wrongly filtered entries with mixed senses
+    return any("form_of" not in sense for sense in senses)
 
 
 def _extract_auxiliary(entry: dict[str, Any]) -> str | None:
@@ -1530,14 +1601,6 @@ def _get_pronominal_base_form(stressed: str) -> str | None:
     elif stem.endswith("ur"):
         return stem + "re"  # -ursi → -urre (condursi → condurre)
 
-    return None
-
-
-def _extract_ipa(entry: dict[str, Any]) -> str | None:
-    """Extract IPA pronunciation for the infinitive."""
-    for sound in entry.get("sounds", []):
-        if "ipa" in sound:
-            return sound["ipa"]
     return None
 
 
@@ -2001,18 +2064,25 @@ def _iter_forms(
                     yield lemma_stressed, ["feminine", "singular"], "inferred:base_form"
 
 
-def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | None]]:
-    """Yield (gloss, filtered_tags) for each definition.
+def _iter_definitions_with_derivation(
+    entry: dict[str, Any],
+) -> Iterator[tuple[str, list[str] | None, str | None, DerivationType | None]]:
+    """Yield (gloss, filtered_tags, derived_from_word, derivation_type) for each definition.
 
-    Tags in DEFINITION_TAG_BLOCKLIST are filtered out since they're either:
-    - Already extracted to proper columns (gender → noun_forms, transitivity → verb_metadata)
-    - Noise that doesn't help learners (alt-of, alternative)
+    Unlike _iter_definitions, this function yields ALL senses including form_of senses,
+    and includes derivation information for senses that derive from another lemma.
+
+    This is used for entries with mixed senses (e.g., "cagnolino" which has:
+    - "diminutive of cane" (form_of → derived_from_word="cane", derivation_type=DIMINUTIVE)
+    - "puppy" (no form_of → derived_from_word=None, derivation_type=None)
+    - "dog paddle" (no form_of → derived_from_word=None, derivation_type=None)
+
+    The derived_from_word is resolved to a lemma_id during post-processing.
+
+    Yields:
+        (gloss, filtered_tags, derived_from_word, derivation_type) tuples
     """
     for sense in entry.get("senses", []):
-        # Skip form-of entries
-        if "form_of" in sense:
-            continue
-
         glosses = sense.get("glosses", [])
         if not glosses:
             continue
@@ -2021,14 +2091,35 @@ def _iter_definitions(entry: dict[str, Any]) -> Iterator[tuple[str, list[str] | 
         gloss = "; ".join(glosses)
 
         # Filter out blocklisted tags
-        raw_tags = sense.get("tags")
+        raw_tags = sense.get("tags", [])
         if raw_tags:
             filtered = [t for t in raw_tags if t not in DEFINITION_TAG_BLOCKLIST]
             tags = filtered if filtered else None
         else:
             tags = None
 
-        yield gloss, tags
+        # Check for derivation (form_of reference)
+        derived_from_word: str | None = None
+        derivation_type: DerivationType | None = None
+
+        form_of_list = sense.get("form_of", [])
+        if form_of_list:
+            # Extract the target word
+            derived_from_word = form_of_list[0].get("word")
+
+            # Determine derivation type from tags
+            if "diminutive" in raw_tags:
+                derivation_type = DerivationType.DIMINUTIVE
+            elif "augmentative" in raw_tags:
+                derivation_type = DerivationType.AUGMENTATIVE
+            elif "pejorative" in raw_tags:
+                derivation_type = DerivationType.PEJORATIVE
+            elif "endearing" in raw_tags:
+                derivation_type = DerivationType.ENDEARING
+            # Note: If form_of exists but no known derivation type, we still track the
+            # derived_from_word but leave derivation_type as None
+
+        yield gloss, tags, derived_from_word, derivation_type
 
 
 def _clear_existing_data(conn: Connection, pos_filter: POS) -> int:
@@ -2432,6 +2523,17 @@ def import_wiktextract(
         tuple[int, str, str, str]
     ] = []  # (lemma_id, base_word, relationship, source)
 
+    # Collect clipping relationship data for post-processing
+    # Clippings (e.g., bici → bicicletta) need target lemma lookup after all lemmas exist
+    clipping_links: list[tuple[int, str, str]] = []  # (source_lemma_id, target_word, pos)
+
+    # Collect definition derivation data for post-processing
+    # For definitions that derive from another lemma (e.g., "little dog" → cane)
+    # We store derivation_type during insert, but resolve derived_from_lemma_id in post-processing
+    definition_derivation_links: list[
+        tuple[int, str, str, str | None]
+    ] = []  # (lemma_id, gloss, derived_from_word, derivation_type)
+
     # Get POS-specific table and row builder
     pos_form_table = POS_FORM_TABLES.get(pos_filter)
     build_form_row = POS_FORM_BUILDERS.get(pos_filter)
@@ -2663,7 +2765,6 @@ def import_wiktextract(
                     written_source=None,
                     stressed=lemma_stressed,
                     pos=pos_filter,
-                    ipa=_extract_ipa(entry),
                     etymology_number=etymology_number,
                     etymology_text=etymology_text,
                 )
@@ -2673,6 +2774,12 @@ def import_wiktextract(
                 continue
             lemma_id: int = pk[0]
             stats["lemmas"] += 1
+
+            # Check if this is a clipping - collect for post-processing
+            if _is_clipping_entry(entry):
+                target_word = _get_clipping_target(entry)
+                if target_word:
+                    clipping_links.append((lemma_id, target_word, pos_filter.value))
 
             # Insert POS-specific metadata
             lemma_gender: str | None = None
@@ -3229,6 +3336,8 @@ def import_wiktextract(
                                 "gloss": gloss,
                                 "tags": def_tags or None,
                                 "form_meaning_hint": form_text,
+                                "derivation_type": None,
+                                "derived_from_lemma_id": None,
                             }
                             for form_text in matched_forms
                         )
@@ -3239,26 +3348,64 @@ def import_wiktextract(
                                 "lemma_id": lemma_id,
                                 "gloss": gloss,
                                 "tags": def_tags or None,
-                                "form_meaning_hint": None,  # Consistent keys for batch insert
+                                "form_meaning_hint": None,
+                                "derivation_type": None,
+                                "derived_from_lemma_id": None,
                             }
                         )
             else:
                 # Standard case - no form_meaning_hint
-                for gloss, def_tags in _iter_definitions(entry):
+                # Use _iter_definitions_with_derivation to get ALL senses including derivations
+                for (
+                    gloss,
+                    def_tags,
+                    derived_from_word,
+                    derivation_type,
+                ) in _iter_definitions_with_derivation(entry):
                     definition_batch.append(
                         {
                             "lemma_id": lemma_id,
                             "gloss": gloss,
                             "tags": def_tags or None,
                             "form_meaning_hint": None,  # Consistent keys for batch insert
+                            # derivation_type is stored directly, derived_from_lemma_id resolved in post-processing
+                            "derivation_type": derivation_type.value if derivation_type else None,
+                            "derived_from_lemma_id": None,  # Will be resolved in post-processing
                         }
                     )
+                    # Track for post-processing if this definition has a derivation
+                    if derived_from_word:
+                        definition_derivation_links.append(
+                            (
+                                lemma_id,
+                                gloss,
+                                derived_from_word,
+                                derivation_type.value if derivation_type else None,
+                            )
+                        )
 
     # Final flush
     flush_batches()
 
     # Post-processing: Link relationships
     # (must happen after all lemmas are inserted so we can resolve lemma IDs)
+
+    # Link clippings to their full forms (applies to all POS types)
+    if clipping_links:
+        clipping_stats = link_clippings(conn, clipping_links)
+        stats["clippings_found"] = len(clipping_links)
+        stats["clippings_linked"] = clipping_stats["linked"]
+        stats["clippings_target_not_found"] = clipping_stats["target_not_found"]
+
+    # Link definition derivations (applies to all POS types)
+    if definition_derivation_links:
+        derivation_stats = link_definition_derivations(
+            conn, definition_derivation_links, pos_filter.value
+        )
+        stats["definition_derivations_found"] = len(definition_derivation_links)
+        stats["definition_derivations_linked"] = derivation_stats["linked"]
+        stats["definition_derivations_target_not_found"] = derivation_stats["target_not_found"]
+
     if pos_filter == POS.ADJECTIVE:
         degree_stats = link_comparative_superlative(conn, degree_links)
 
@@ -3654,6 +3801,150 @@ def link_comparative_superlative(
             )
         )
         stats["linked"] += 1
+
+    return stats
+
+
+def link_clippings(
+    conn: Connection,
+    clipping_links: list[tuple[int, str, str]],
+) -> dict[str, int]:
+    """Create lemma_relationships entries for clippings.
+
+    Clippings (e.g., bici → bicicletta) are common vocabulary items that should
+    be their own lemmas with a CLIPPING_OF relationship to their full form.
+
+    Args:
+        conn: SQLAlchemy connection
+        clipping_links: List of (source_lemma_id, target_word, pos) tuples
+            collected during import.
+
+    Returns:
+        Statistics dict with counts for linked and not_found.
+    """
+    stats = {"linked": 0, "target_not_found": 0}
+
+    if not clipping_links:
+        return stats
+
+    # Build lookup: (written, pos) -> lemma_id
+    # Include both written and stressed forms for flexibility
+    lemma_lookup: dict[tuple[str, str], int] = {}
+    for row in conn.execute(select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed, lemmas.c.pos)):
+        if row.written:
+            lemma_lookup[(row.written, row.pos)] = row.id
+        if row.stressed:
+            written_from_stressed = derive_written_from_stressed(row.stressed)
+            if written_from_stressed:
+                lemma_lookup[(written_from_stressed, row.pos)] = row.id
+
+    for source_lemma_id, target_word, pos in clipping_links:
+        # Try to find the target lemma
+        target_lemma_id = lemma_lookup.get((target_word, pos))
+
+        if target_lemma_id is None:
+            # Try deriving written form from stressed (in case target_word has stress marks)
+            target_written = derive_written_from_stressed(target_word) or target_word
+            target_lemma_id = lemma_lookup.get((target_written, pos))
+
+        if target_lemma_id is None:
+            logger.debug(
+                "Target lemma '%s' (pos=%s) not found for clipping relationship",
+                target_word,
+                pos,
+            )
+            stats["target_not_found"] += 1
+            continue
+
+        # Insert the clipping relationship
+        try:
+            conn.execute(
+                lemma_relationships.insert().values(
+                    source_lemma_id=source_lemma_id,
+                    target_lemma_id=target_lemma_id,
+                    relationship_type=LemmaRelationshipType.CLIPPING_OF,
+                    source="wiktextract",
+                    bidirectional=False,
+                )
+            )
+            stats["linked"] += 1
+        except IntegrityError:
+            # Relationship already exists (shouldn't happen but handle gracefully)
+            pass
+
+    return stats
+
+
+def link_definition_derivations(
+    conn: Connection,
+    derivation_links: list[tuple[int, str, str, str | None]],
+    pos: str,
+) -> dict[str, int]:
+    """Update definitions.derived_from_lemma_id for derived definitions.
+
+    This is the "Tier 2" relationship mechanism - when only SOME definitions
+    of a lemma derive from another lemma (e.g., "cagnolino" has "little dog"
+    deriving from "cane", but "puppy" is independent).
+
+    Args:
+        conn: SQLAlchemy connection
+        derivation_links: List of (lemma_id, gloss, derived_from_word, derivation_type)
+            tuples collected during import.
+        pos: Part of speech (for looking up target lemmas)
+
+    Returns:
+        Statistics dict with counts for linked and not_found.
+    """
+    stats = {"linked": 0, "target_not_found": 0}
+
+    if not derivation_links:
+        return stats
+
+    # Build lookup: (written, pos) -> lemma_id
+    lemma_lookup: dict[tuple[str, str], int] = {}
+    for row in conn.execute(select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed, lemmas.c.pos)):
+        if row.written:
+            lemma_lookup[(row.written, row.pos)] = row.id
+        if row.stressed:
+            written_from_stressed = derive_written_from_stressed(row.stressed)
+            if written_from_stressed:
+                lemma_lookup[(written_from_stressed, row.pos)] = row.id
+
+    for lemma_id, gloss, derived_from_word, _derivation_type_str in derivation_links:
+        # Try to find the target lemma
+        target_lemma_id = lemma_lookup.get((derived_from_word, pos))
+
+        if target_lemma_id is None:
+            # Try deriving written form from stressed
+            target_written = derive_written_from_stressed(derived_from_word) or derived_from_word
+            target_lemma_id = lemma_lookup.get((target_written, pos))
+
+        if target_lemma_id is None:
+            logger.debug(
+                "Target lemma '%s' (pos=%s) not found for definition derivation",
+                derived_from_word,
+                pos,
+            )
+            stats["target_not_found"] += 1
+            continue
+
+        # Update the definition's derived_from_lemma_id
+        # Match by lemma_id and gloss (gloss should be unique per lemma for most cases)
+        result = conn.execute(
+            update(definitions)
+            .where(definitions.c.lemma_id == lemma_id)
+            .where(definitions.c.gloss == gloss)
+            .values(derived_from_lemma_id=target_lemma_id)
+        )
+        if result.rowcount > 0:
+            stats["linked"] += 1
+        else:
+            logger.debug(
+                "Definition not found for lemma_id=%d, gloss='%s'",
+                lemma_id,
+                gloss[:50],
+            )
+            stats["target_not_found"] += 1
 
     return stats
 

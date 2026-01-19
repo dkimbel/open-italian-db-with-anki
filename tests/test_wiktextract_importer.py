@@ -301,7 +301,6 @@ class TestWiktextractImporter:
                 row = conn.execute(select(lemmas).where(lemmas.c.stressed == "parlàre")).fetchone()
                 assert row is not None
                 assert row.stressed == "parlàre"
-                assert row.ipa == "/par\u02c8la\u02d0re/"
 
                 # Check verb_metadata was inserted
                 meta = conn.execute(
@@ -512,7 +511,6 @@ class TestWiktextractImporter:
                 bello = conn.execute(select(lemmas).where(lemmas.c.stressed == "bello")).fetchone()
                 assert bello is not None
                 assert bello.pos == "adjective"
-                assert bello.ipa == "/ˈbɛl.lo/"  # noqa: RUF001 (IPA stress marker)
 
                 # Check forms were inserted in adjective_forms table
                 form_rows = conn.execute(

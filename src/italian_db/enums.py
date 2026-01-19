@@ -43,15 +43,59 @@ class GenderClass(StrEnum):
 
 
 class DerivationType(StrEnum):
-    """Morphological derivation type for nouns.
+    """Morphological derivation type for definitions.
 
-    These indicate size/affect modifications from a base noun.
-    The field is nullable; None means no derivation.
+    Used in definitions.derivation_type to indicate this specific
+    definition is a derived form of another lemma. These indicate
+    size/affect modifications from a base word.
+
+    The field is nullable; None means no derivation (independent meaning).
+
+    Examples:
+    - cagnolino "little dog" → cane (DIMINUTIVE)
+    - donnone "big woman" → donna (AUGMENTATIVE)
+    - cagnaccio "bad dog" → cane (PEJORATIVE)
+    - affectionate variants (ENDEARING)
     """
 
     DIMINUTIVE = "diminutive"
     AUGMENTATIVE = "augmentative"
     PEJORATIVE = "pejorative"
+    ENDEARING = "endearing"
+
+
+class LemmaRelationshipType(StrEnum):
+    """Types of lemma-to-lemma relationships.
+
+    Use these when ALL definitions of the source lemma relate to the target.
+    For relationships that apply to only SOME definitions, use
+    definitions.derived_from_lemma_id instead.
+
+    Direction convention:
+    - source_lemma_id: The derived/dependent lemma (e.g., bici)
+    - target_lemma_id: The base/canonical lemma (e.g., bicicletta)
+
+    Examples:
+    - CLIPPING_OF: bici → bicicletta (all definitions of bici are clippings)
+    - GENDER_COUNTERPART: professore ↔ professoressa (bidirectional)
+    - COMPARATIVE_OF: migliore → buono (all definitions are comparative)
+    - REFLEXIVE_OF: lavarsi → lavare (pronominal verb link)
+    """
+
+    # Alternative forms
+    CLIPPING_OF = "clipping_of"  # bici → bicicletta
+    ALTERNATIVE_FORM_OF = "alternative_form_of"
+
+    # Gender (bidirectional)
+    GENDER_COUNTERPART = "gender_counterpart"  # professore ↔ professoressa
+
+    # Adjective degrees
+    COMPARATIVE_OF = "comparative_of"  # migliore → buono
+    SUPERLATIVE_OF = "superlative_of"  # ottimo → buono
+
+    # Pronominal verbs
+    REFLEXIVE_OF = "reflexive_of"  # lavarsi → lavare
+    RECIPROCAL_OF = "reciprocal_of"  # incontrarsi → incontrare
 
 
 # =============================================================================

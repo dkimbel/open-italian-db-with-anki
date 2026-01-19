@@ -54,14 +54,24 @@ def get_verb_by_lemma(conn: Connection, written: str) -> Verb | None:
     Returns:
         Verb dataclass or None if not found
     """
-    stmt = select(
-        lemmas.c.id,
-        lemmas.c.written,
-        lemmas.c.stressed,
-        lemmas.c.ipa,
-    ).where(
-        lemmas.c.written == written,
-        lemmas.c.pos == POS.VERB,
+    # Join with verb_forms to get IPA from the citation form (infinitive)
+    stmt = (
+        select(
+            lemmas.c.id,
+            lemmas.c.written,
+            lemmas.c.stressed,
+            verb_forms.c.ipa,
+        )
+        .select_from(
+            lemmas.outerjoin(
+                verb_forms,
+                (verb_forms.c.lemma_id == lemmas.c.id) & (verb_forms.c.is_citation_form == True),  # noqa: E712
+            )
+        )
+        .where(
+            lemmas.c.written == written,
+            lemmas.c.pos == POS.VERB,
+        )
     )
 
     row = conn.execute(stmt).fetchone()

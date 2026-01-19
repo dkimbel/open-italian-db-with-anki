@@ -645,11 +645,17 @@ def collect_metrics(conn: Connection) -> dict[str, Any]:
     """)
     metrics["avg_adjective_forms"] = round(conn.execute(avg_adj_query).scalar() or 0, 1)
 
-    # % of lemmas with IPA
+    # % of lemmas with IPA (IPA is now stored at form level, check citation forms)
     query = text("""
-        SELECT CAST(SUM(CASE WHEN ipa IS NOT NULL THEN 1 ELSE 0 END) AS FLOAT) * 100 /
-               COUNT(*)
-        FROM lemmas
+        SELECT CAST(COUNT(DISTINCT lemma_id) AS FLOAT) * 100 /
+               (SELECT COUNT(*) FROM lemmas)
+        FROM (
+            SELECT lemma_id FROM verb_forms WHERE is_citation_form = 1 AND ipa IS NOT NULL
+            UNION
+            SELECT lemma_id FROM noun_forms WHERE is_citation_form = 1 AND ipa IS NOT NULL
+            UNION
+            SELECT lemma_id FROM adjective_forms WHERE is_citation_form = 1 AND ipa IS NOT NULL
+        )
     """)
     metrics["lemmas_with_ipa_pct"] = round(conn.execute(query).scalar() or 0, 1)
 

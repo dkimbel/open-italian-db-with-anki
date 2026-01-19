@@ -179,8 +179,89 @@ This is useful for:
 - `src/italian_db/db/` - Database schema and connection
 - `src/italian_db/normalize.py` - Text normalization utilities
 - `src/anki_gen/` - Anki deck generation and card templates
-- `data/` - Source data files (not committed, ~1.3GB)
 - `output/` - Generated files (deck, previews, screenshots)
+
+### Source Data Files (`data/`, not committed, ~1.3GB)
+
+| Directory | File | Description |
+|-----------|------|-------------|
+| `data/wiktextract/` | `kaikki.org-dictionary-Italian.jsonl` | Wiktionary extract (~665MB JSONL) |
+| `data/morphit/` | `morph-it_048.txt` | MorphIt lexicon |
+| `data/itwac/` | `*.csv` | ItWaC frequency data |
+| `data/tatoeba/` | `*.tsv` | Tatoeba sentences and translations |
+| `data/partut/` | `*.conllu` | ParTUT morphologically-tagged sentences |
+
+Use `task download-all` to download these files (skips existing).
+
+## Data Model: Lemmas and Relationships
+
+A **lemma** is a vocabulary entry with independent meaning. Not all Wiktextract entries become lemmas:
+
+| Entry Type | Example | Becomes Lemma? |
+|------------|---------|----------------|
+| Has independent senses | `casa`, `parlare` | Yes |
+| Mixed senses (some form_of, some not) | `cagnolino` | Yes |
+| Clipping | `bici`, `auto`, `moto` | Yes |
+| Pure form-of reference | `professoressa` | No (becomes form) |
+
+### Definition of "Lemma"
+
+A Wiktextract entry becomes a lemma if:
+
+1. **Has independent meaning**: At least one sense WITHOUT `form_of` (uses `any()` check, not `all()`)
+2. **Is a clipping**: Tagged "clipping" in Wiktextract (common vocabulary items like `bici`)
+
+Entries that are ONLY form-of references (like "professoressa" which only says "female equivalent of professore") are NOT lemmas - they're imported as forms under their parent lemma.
+
+### Two-Tier Relationship Model
+
+Lemmas can relate to each other in two ways:
+
+**Tier 1: Lemma-to-Lemma** (`lemma_relationships` table)
+
+Use when ALL definitions of the source lemma inherit the relationship:
+- `clipping_of`: bici → bicicletta
+- `gender_counterpart`: professore ↔ professoressa
+- `comparative_of`: migliore → buono
+- `superlative_of`: ottimo → buono
+- `reflexive_of`: lavarsi → lavare
+- `reciprocal_of`: incontrarsi → incontrare
+
+**Tier 2: Definition-to-Lemma** (`definitions.derived_from_lemma_id`)
+
+Use when only SOME definitions derive from another lemma:
+- `diminutive`: cagnolino "little dog" → cane (but "puppy" is independent)
+- `augmentative`: donnone "big woman" → donna
+- `pejorative`: cagnaccio "bad dog" → cane
+- `endearing`: affectionate variants
+
+### Querying Related Words
+
+When looking for words related to a lemma, check BOTH places:
+
+```sql
+-- 1. Lemma-level relationships (e.g., bici → bicicletta)
+SELECT * FROM lemma_relationships WHERE target_lemma_id = ?;
+
+-- 2. Definition-level derivations (e.g., cagnolino "little dog" → cane)
+SELECT DISTINCT l.* FROM lemmas l
+JOIN definitions d ON d.lemma_id = l.id
+WHERE d.derived_from_lemma_id = ?;
+```
+
+### Homonyms vs Polysemy
+
+- **Homonyms**: Same spelling, different etymology → separate lemma rows with different `etymology_number` (e.g., "scordare" meaning "to put out of tune" vs "to forget")
+- **Polysemes**: Same spelling, same etymology → single lemma row with multiple definition rows
+
+### IPA Storage
+
+IPA pronunciation is stored at the **form level** (not lemma level):
+- `verb_forms.ipa`, `noun_forms.ipa`, `adjective_forms.ipa`
+- The lemma's IPA is stored on the citation form (`is_citation_form = TRUE`)
+- `lemmas.ipa` is deprecated but retained for backward compatibility
+
+See `docs/lemmas-definitions-ipa-refactor.md` for detailed specification.
 
 ## Conventions
 

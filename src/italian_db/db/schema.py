@@ -18,7 +18,54 @@ from sqlalchemy.engine import Engine
 
 metadata = MetaData()
 
-# Master lemma table
+# =============================================================================
+# Master Lemma Table
+# =============================================================================
+#
+# DEFINITION OF "LEMMA" IN THIS DATABASE
+# ======================================
+#
+# A lemma corresponds to a Wiktextract entry that meets one of these criteria:
+#
+# 1. Has at least one sense WITHOUT form_of (has independent meaning)
+#    - Example: "cagnolino" has senses for "puppy" and "dog paddle" (independent)
+#    - Example: "casa" has its own meanings, not derived from another word
+#
+# 2. Is a clipping (tagged "clipping" in Wiktextract)
+#    - Example: "bici" (clipping of "bicicletta")
+#    - Example: "auto" (clipping of "automobile")
+#    - These are widely-used vocabulary items that deserve their own lemmas
+#
+# 3. Is filtered and imported as a form of another lemma
+#    - Example: "professoressa" is NOT a lemma - its only sense says
+#      "female equivalent of professore", so it's imported as a form
+#
+# HOMONYMS vs POLYSEMY
+# ====================
+#
+# - Homonyms: Same spelling, different etymology → separate lemma rows with
+#   different etymology_number (e.g., "scordare" meaning "to put out of tune"
+#   vs "to forget" are separate lemmas)
+#
+# - Polysemes: Same spelling, same etymology → single lemma row with multiple
+#   definition rows (e.g., "casa" meaning both "house" and "home" is one lemma
+#   with two definitions)
+#
+# RELATIONSHIPS
+# =============
+#
+# Lemmas can relate to each other via two mechanisms:
+#
+# 1. lemma_relationships table ("Tier 1"): When ALL definitions inherit the
+#    relationship (e.g., clippings, comparatives, reflexive verbs)
+#
+# 2. definitions.derived_from_lemma_id ("Tier 2"): When only SOME definitions
+#    derive from another lemma (e.g., diminutives with independent meanings)
+#
+# See also:
+# - _is_pos_lemma() in wiktextract.py for the filtering logic
+# - docs/lemmas-definitions-ipa-refactor.md for detailed specification
+#
 lemmas = Table(
     "lemmas",
     metadata,
@@ -29,7 +76,6 @@ lemmas = Table(
     ),  # provenance: "from:verb_forms", "derived:orthography_rule", etc.
     Column("stressed", Text, nullable=False),  # with stress marks (e.g., "città", "parlàre")
     Column("pos", String(20), default="verb"),
-    Column("ipa", Text),  # IPA pronunciation from Wiktextract
     # Etymology data from Wiktextract
     # etymology_number: Wiktextract's section index (1, 2, 3...) when a word has multiple
     # distinct etymologies. NULL for single-etymology entries (the common case).
@@ -79,6 +125,10 @@ verb_forms = Table(
     Column("form_origin", Text),  # 'wiktextract', 'inferred:singular', etc.
     # Citation form marker - True for the canonical/dictionary form (infinitive for verbs)
     Column("is_citation_form", Boolean, default=False),
+    # IPA pronunciation (form-level storage - see docs/lemmas-definitions-ipa-refactor.md)
+    # The lemma's IPA is stored on the citation form (is_citation_form=True)
+    Column("ipa", Text),
+    Column("ipa_source", Text),  # 'wiktextract', 'propagated:lemma'
     # Unique constraint via expression index (created in init_db) handles NULLs by using
     # COALESCE. App-level deduplication via seen_verb_forms still runs for performance,
     # but the DB constraint ensures integrity.
@@ -107,6 +157,10 @@ noun_forms = Table(
     # Citation form marker - True for the canonical/dictionary form
     # (singular for standard nouns, plural for pluralia tantum)
     Column("is_citation_form", Boolean, default=False),
+    # IPA pronunciation (form-level storage - see docs/lemmas-definitions-ipa-refactor.md)
+    # The lemma's IPA is stored on the citation form (is_citation_form=True)
+    Column("ipa", Text),
+    Column("ipa_source", Text),  # 'wiktextract', 'propagated:lemma'
     # Unique constraint: prevents duplicate forms for the same lemma
     # Note: Uses stressed (not written) because written is nullable and NULL != NULL in SQL
     UniqueConstraint("lemma_id", "stressed", "gender", "number", name="uq_noun_forms_entry"),
@@ -152,6 +206,10 @@ adjective_forms = Table(
     Column("form_origin", Text),
     # Citation form marker - True for the canonical/dictionary form (masculine singular)
     Column("is_citation_form", Boolean, default=False),
+    # IPA pronunciation (form-level storage - see docs/lemmas-definitions-ipa-refactor.md)
+    # The lemma's IPA is stored on the citation form (is_citation_form=True)
+    Column("ipa", Text),
+    Column("ipa_source", Text),  # 'wiktextract', 'propagated:lemma'
     # Unique constraint: allows allomorphs (bel/bello/bell') but prevents true duplicates
     UniqueConstraint(
         "lemma_id", "stressed", "gender", "number", "degree", name="uq_adjective_forms_entry"
@@ -159,6 +217,24 @@ adjective_forms = Table(
 )
 
 # English definitions
+#
+# Definition-to-Lemma Derivation ("Tier 2" of the Two-Tier Relationship Model)
+# ===========================================================================
+#
+# When a lemma has SOME definitions that derive from another lemma (but not ALL),
+# we track this at the definition level using derived_from_lemma_id.
+#
+# Example: "cagnolino" has three senses:
+#   - "little dog" → derived_from_lemma_id = <cane>, derivation_type = "diminutive"
+#   - "puppy" → derived_from_lemma_id = NULL (independent meaning)
+#   - "dog paddle" → derived_from_lemma_id = NULL (independent meaning)
+#
+# This is "Tier 2" of our relationship model. For relationships where ALL
+# definitions of a lemma relate to another (e.g., clippings), use the
+# lemma_relationships table instead ("Tier 1").
+#
+# See docs/lemmas-definitions-ipa-refactor.md for full documentation.
+#
 definitions = Table(
     "definitions",
     metadata,
@@ -169,6 +245,14 @@ definitions = Table(
     # Optional linkage to specific forms (for nouns with meaning-dependent plurals)
     # e.g., "braccio" has different meanings for "braccia" (arms) vs "bracci" (crane arms)
     Column("form_meaning_hint", Text),  # matches noun_forms.meaning_hint
+    # Definition-level derivation tracking (Tier 2 of relationship model)
+    # For definitions that derive from another lemma (e.g., diminutive sense of cagnolino → cane)
+    Column(
+        "derived_from_lemma_id", Integer, ForeignKey("lemmas.id"), nullable=True
+    ),  # The base lemma this definition derives from
+    Column(
+        "derivation_type", Text, nullable=True
+    ),  # DerivationType enum value: diminutive, augmentative, pejorative, endearing
 )
 
 # Sentences (Tatoeba + ParTUT)
@@ -345,6 +429,58 @@ adjective_metadata = Table(
     ),  # 'wiktextract', 'wiktextract:canonical', 'hardcoded'
 )
 
+# =============================================================================
+# Lemma Relationships Table
+# =============================================================================
+#
+# This table captures lemma-to-lemma relationships where ALL definitions of the
+# source lemma inherit the relationship. This is the "Tier 1" relationship model.
+#
+# For relationships that apply to only SOME definitions (e.g., diminutives with
+# independent meanings), use definitions.derived_from_lemma_id instead ("Tier 2").
+#
+# Two-Tier Relationship Model:
+# ============================
+#
+# Tier 1 (lemma_relationships): When ALL definitions inherit the relationship
+#   - clipping_of: bici → bicicletta (all senses are "clipping of bicycle")
+#   - gender_counterpart: professore ↔ professoressa
+#   - comparative_of: migliore → buono (all senses are comparative)
+#   - reflexive_of: lavarsi → lavare
+#
+# Tier 2 (definitions.derived_from_lemma_id): When only SOME definitions relate
+#   - diminutive: cagnolino has "little dog" (→ cane) AND "puppy" (independent)
+#   - augmentative: similar pattern
+#   - pejorative: similar pattern
+#
+# Direction convention:
+#   - source_lemma_id: The derived/dependent lemma (e.g., bici)
+#   - target_lemma_id: The base/canonical lemma (e.g., bicicletta)
+#
+# Why two tiers?
+#   - Prevents duplication (no need for both lemma_relationships AND per-def links)
+#   - Prevents illegal states (can't have conflicting relationship types)
+#   - Matches the linguistic reality: some relationships are whole-lemma, some per-sense
+#
+lemma_relationships = Table(
+    "lemma_relationships",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("source_lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False),
+    Column("target_lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False),
+    Column("relationship_type", Text, nullable=False),  # LemmaRelationshipType enum value
+    Column("source", Text, nullable=False),  # 'wiktextract', 'hardcoded', 'inferred'
+    Column("bidirectional", Boolean, default=False),
+    Column("notes", Text),
+    UniqueConstraint(
+        "source_lemma_id",
+        "target_lemma_id",
+        "relationship_type",
+        name="uq_lemma_relationship",
+    ),
+)
+
+
 # Verb irregularity pattern classification
 #
 # This table classifies irregular verbs by their conjugation patterns across
@@ -406,6 +542,10 @@ Index("idx_adjective_forms_written", adjective_forms.c.written)
 Index("idx_adjective_forms_origin", adjective_forms.c.form_origin)
 # adjective_metadata indexes
 Index("idx_adjective_metadata_base", adjective_metadata.c.base_lemma_id)
+# lemma_relationships indexes
+Index("idx_lemma_rel_source", lemma_relationships.c.source_lemma_id)
+Index("idx_lemma_rel_target", lemma_relationships.c.target_lemma_id)
+Index("idx_lemma_rel_type", lemma_relationships.c.relationship_type)
 # verb_irregularity indexes
 Index("idx_verb_irregularity_present", verb_irregularity.c.present_pattern)
 Index("idx_verb_irregularity_remote", verb_irregularity.c.remote_pattern)
@@ -414,6 +554,7 @@ Index("idx_verb_irregularity_participle", verb_irregularity.c.participle_pattern
 Index("idx_verb_irregularity_subjunctive", verb_irregularity.c.subjunctive_pattern)
 # Other indexes
 Index("idx_definitions_lemma", definitions.c.lemma_id)
+Index("idx_definitions_derived_from", definitions.c.derived_from_lemma_id)
 Index("idx_frequencies_lemma", frequencies.c.lemma_id)
 Index("idx_sentences_lang", sentences.c.lang)
 Index("idx_sentences_source", sentences.c.source)
