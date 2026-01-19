@@ -63,6 +63,7 @@ CARD_CSS = """
     padding: 20px;
     line-height: 1.5;
     margin: 0 auto;
+    max-width: 450px;
 }
 
 /* English prompt on front */
@@ -96,7 +97,6 @@ CARD_CSS = """
     font-size: 20px;
     font-weight: 600;
     color: var(--color-text);
-    margin-bottom: 3px;
 }
 
 /* IPA pronunciation */
@@ -110,7 +110,7 @@ CARD_CSS = """
 .conjugation-container {
     display: inline-block;
     text-align: left;
-    margin: 30px 5px 30px auto;
+    margin: 30px 8px 30px auto;
 }
 
 /* Two-column conjugation table */
@@ -171,6 +171,7 @@ CARD_CSS = """
 
 .example-spacer {
     flex-grow: 1;
+    width: 100%;
 }
 
 .example-quote {
@@ -184,9 +185,9 @@ CARD_CSS = """
 }
 
 .example-italian {
-    max-width: 350px;
+    min-width: 250px;
     font-size: 16px;
-    line-height: 1.3;
+    line-height: 1.4;
     text-wrap: balance;
     text-align: center;
 }
@@ -194,9 +195,10 @@ CARD_CSS = """
 .example-english {
     font-size: 14px;
     margin-top: 8px;
+    line-height: 1.4;
     text-wrap: balance;
-    color: var(--color-secondary);
     text-align: center;
+    color: var(--color-secondary);
 }
 
 /* Technical tense label */
