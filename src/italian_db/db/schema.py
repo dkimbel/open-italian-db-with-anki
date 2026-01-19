@@ -30,6 +30,11 @@ lemmas = Table(
     Column("stressed", Text, nullable=False),  # with stress marks (e.g., "città", "parlàre")
     Column("pos", String(20), default="verb"),
     Column("ipa", Text),  # IPA pronunciation from Wiktextract
+    # Etymology data from Wiktextract
+    # etymology_number: Wiktextract's section index (1, 2, 3...) when a word has multiple
+    # distinct etymologies. NULL for single-etymology entries (the common case).
+    Column("etymology_number", Integer),
+    Column("etymology_text", Text),  # Human-readable etymology description
 )
 
 # Frequency data from corpora (separate table for versioning)

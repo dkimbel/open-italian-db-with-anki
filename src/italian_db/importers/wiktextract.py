@@ -1541,6 +1541,23 @@ def _extract_ipa(entry: dict[str, Any]) -> str | None:
     return None
 
 
+def _extract_etymology(entry: dict[str, Any]) -> tuple[int | None, str | None]:
+    """Extract etymology number and text from a Wiktextract entry.
+
+    Returns:
+        (etymology_number, etymology_text) - either or both may be None.
+        etymology_number is only set when multiple etymologies exist.
+    """
+    etym_num = entry.get("etymology_number")  # Already an int or None
+    etym_text = entry.get("etymology_text")  # Already a string or None
+
+    # Normalize empty string to None
+    if etym_text is not None and not etym_text.strip():
+        etym_text = None
+
+    return etym_num, etym_text
+
+
 def _extract_gender(entry: dict[str, Any]) -> str | None:
     """Extract grammatical gender for nouns.
 
@@ -2404,6 +2421,8 @@ def import_wiktextract(
         "no_counterpart_no_gender": 0,  # Nouns with no counterpart AND no gender tag on plural
         "adjective_forms_blocked": 0,  # Forms filtered by BLOCKED_ADJECTIVE_FORMS
         "noun_forms_blocked": 0,  # Forms filtered by BLOCKED_NOUN_FORMS_GENDERED
+        "etymology_has_number": 0,  # Lemmas with etymology_number (multiple etymologies)
+        "etymology_has_text": 0,  # Lemmas with etymology_text
         "cleared": cleared,
     }
 
@@ -2630,6 +2649,13 @@ def import_wiktextract(
                     stats["nouns_skipped_no_gender"] += 1
                     continue
 
+            # Extract etymology data
+            etymology_number, etymology_text = _extract_etymology(entry)
+            if etymology_number is not None:
+                stats["etymology_has_number"] += 1
+            if etymology_text is not None:
+                stats["etymology_has_text"] += 1
+
             # Insert lemma (no unique constraint - homographs create separate entries)
             result = conn.execute(
                 lemmas.insert().values(
@@ -2638,6 +2664,8 @@ def import_wiktextract(
                     stressed=lemma_stressed,
                     pos=pos_filter,
                     ipa=_extract_ipa(entry),
+                    etymology_number=etymology_number,
+                    etymology_text=etymology_text,
                 )
             )
             pk = result.inserted_primary_key
