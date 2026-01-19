@@ -1,5 +1,6 @@
 """Import Italian verb data from Wiktextract JSONL."""
 
+import contextlib
 import json
 import logging
 import re
@@ -7,7 +8,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Connection, func, select, text, update
+from sqlalchemy import Connection, func, insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from italian_db.articles import get_definite
@@ -3739,13 +3740,16 @@ def link_comparative_superlative(
     conn: Connection,
     degree_links: list[tuple[int, str, str, str]],
 ) -> dict[str, int]:
-    """Populate adjective_metadata.base_lemma_id, degree_relationship, and source.
+    """Create lemma_relationships entries for comparative/superlative adjectives.
+
+    Comparative and superlative adjectives (migliore→buono, ottimo→buono) are linked
+    to their positive base via the lemma_relationships table.
 
     Args:
         conn: SQLAlchemy connection
         degree_links: List of (lemma_id, base_lemma_word, relationship, source) tuples
-            collected during import. Source is one of: 'wiktextract',
-            'wiktextract:canonical', 'hardcoded'.
+            collected during import. Relationship is 'comparative_of' or 'superlative_of'.
+            Source is one of: 'wiktextract', 'wiktextract:canonical', 'hardcoded'.
 
     Returns:
         Statistics dict with 'linked' and 'base_not_found' counts
@@ -3791,16 +3795,19 @@ def link_comparative_superlative(
             stats["base_not_found"] += 1
             continue
 
-        conn.execute(
-            update(adjective_metadata)
-            .where(adjective_metadata.c.lemma_id == lemma_id)
-            .values(
-                base_lemma_id=base_lemma_id,
-                degree_relationship=relationship,
-                degree_relationship_source=source,
+        # Insert into lemma_relationships table
+        # relationship is already 'comparative_of' or 'superlative_of'
+        with contextlib.suppress(IntegrityError):
+            conn.execute(
+                insert(lemma_relationships).values(
+                    source_lemma_id=lemma_id,
+                    target_lemma_id=base_lemma_id,
+                    relationship_type=relationship,
+                    source=source,
+                    bidirectional=False,
+                )
             )
-        )
-        stats["linked"] += 1
+            stats["linked"] += 1
 
     return stats
 
@@ -3953,9 +3960,9 @@ def link_pronominal_verbs(conn: Connection) -> dict[str, int]:
     """Link pronominal verbs to their non-pronominal base verbs.
 
     For verbs ending in -si/-rsi (pronominal verbs), attempts to find the
-    non-pronominal base verb and updates verb_metadata with:
-    - base_verb_lemma_id: Points to the base verb (lavarsi → lavare)
-    - pronominal_type: 'reflexive' if base exists, 'inherent' if not
+    non-pronominal base verb and:
+    - Creates a lemma_relationships entry with relationship_type='reflexive_of'
+    - Updates verb_metadata.pronominal_type: 'reflexive' if base exists, 'inherent' if not
 
     Returns:
         Statistics dict with counts for each operation.
@@ -4020,14 +4027,23 @@ def link_pronominal_verbs(conn: Connection) -> dict[str, int]:
 
         if base_lemma_id is not None:
             # Base verb exists - this is a reflexive/reciprocal pronominal
+            # Update pronominal_type classification
             conn.execute(
                 update(verb_metadata)
                 .where(verb_metadata.c.lemma_id == lemma_id)
-                .values(
-                    base_verb_lemma_id=base_lemma_id,
-                    pronominal_type="reflexive",
-                )
+                .values(pronominal_type="reflexive")
             )
+            # Create relationship in lemma_relationships table
+            with contextlib.suppress(IntegrityError):
+                conn.execute(
+                    insert(lemma_relationships).values(
+                        source_lemma_id=lemma_id,
+                        target_lemma_id=base_lemma_id,
+                        relationship_type=LemmaRelationshipType.REFLEXIVE_OF,
+                        source="inferred",
+                        bidirectional=False,
+                    )
+                )
             stats["linked_to_base"] += 1
         else:
             # Base verb doesn't exist - this is an inherent pronominal
@@ -4091,7 +4107,7 @@ def link_noun_counterparts(
     """Link gender counterpart noun pairs (professore↔professoressa).
 
     Scans Wiktextract for entries with "female equivalent of" or "male equivalent of"
-    glosses and creates bidirectional links between the counterpart lemmas.
+    glosses and creates lemma_relationships entries with gender_counterpart type.
 
     Data sources used:
     1. form_of entries with "female/male equivalent of" glosses
@@ -4201,40 +4217,42 @@ def link_noun_counterparts(
     if progress_callback:
         progress_callback(total_lines, total_lines)
 
-    # Process counterpart pairs and update database
+    # Process counterpart pairs and insert into lemma_relationships
     # Build a set of all pairs for bidirectional checking
     pair_set: set[tuple[int, int]] = set()
     for a, b in counterpart_pairs:
         pair_set.add((a, b))
 
-    # Update database with counterpart links
-    updated_ids: set[int] = set()
+    # Insert relationships into lemma_relationships table
+    inserted_pairs: set[tuple[int, int]] = set()
     for word_id, counterpart_id in counterpart_pairs:
-        if word_id in updated_ids:
+        # Normalize the pair to avoid duplicates (always use smaller ID first)
+        normalized = (min(word_id, counterpart_id), max(word_id, counterpart_id))
+        if normalized in inserted_pairs:
             continue
 
         # Check if reverse exists (bidirectional)
         is_bidirectional = (counterpart_id, word_id) in pair_set
 
-        # Update this lemma's counterpart
-        conn.execute(
-            update(noun_metadata)
-            .where(noun_metadata.c.lemma_id == word_id)
-            .values(counterpart_lemma_id=counterpart_id)
-        )
-        updated_ids.add(word_id)
-
-        # Update counterpart's counterpart (for bidirectional links)
-        if is_bidirectional and counterpart_id not in updated_ids:
+        # Insert into lemma_relationships
+        try:
             conn.execute(
-                update(noun_metadata)
-                .where(noun_metadata.c.lemma_id == counterpart_id)
-                .values(counterpart_lemma_id=word_id)
+                insert(lemma_relationships).values(
+                    source_lemma_id=word_id,
+                    target_lemma_id=counterpart_id,
+                    relationship_type=LemmaRelationshipType.GENDER_COUNTERPART,
+                    source="wiktextract",
+                    bidirectional=is_bidirectional,
+                )
             )
-            updated_ids.add(counterpart_id)
-            stats["linked_bidirectional"] += 1
-        else:
-            stats["linked_unidirectional"] += 1
+            inserted_pairs.add(normalized)
+            if is_bidirectional:
+                stats["linked_bidirectional"] += 1
+            else:
+                stats["linked_unidirectional"] += 1
+        except IntegrityError:
+            # Duplicate relationship, skip
+            pass
 
     return stats
 
@@ -4245,11 +4263,14 @@ def link_noun_derivations(
     *,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
-    """Link derived nouns to their base lemmas (gattino→gatto).
+    """Link derived noun definitions to their base lemmas (cagnolino "little dog" → cane).
 
     Scans Wiktextract for entries with diminutive/augmentative/pejorative tags
-    and creates links to their base lemmas. Also updates derivation_type in
-    noun_metadata.
+    and updates the corresponding definition's derived_from_lemma_id field.
+
+    This implements "Tier 2" of the relationship model: definition-level derivations.
+    Only the specific definition that says "diminutive of X" gets the derivation link,
+    not all definitions of the lemma.
 
     Data sources used:
     1. form_of entries with "diminutive", "augmentative", or "pejorative" tags
@@ -4268,6 +4289,7 @@ def link_noun_derivations(
         "derivations_found": 0,
         "linked": 0,
         "base_not_found": 0,
+        "definition_not_found": 0,
         "diminutive": 0,
         "augmentative": 0,
         "pejorative": 0,
@@ -4282,6 +4304,14 @@ def link_noun_derivations(
         written = row.written or derive_written_from_stressed(row.stressed)
         if written is not None:
             noun_lookup[written] = row.id
+
+    # Build lookup: (lemma_id, gloss_prefix) -> definition_id
+    # We use gloss prefix matching since exact matching may fail due to minor formatting
+    def_lookup: dict[tuple[int, str], int] = {}
+    for row in conn.execute(select(definitions.c.id, definitions.c.lemma_id, definitions.c.gloss)):
+        # Store by first 50 chars of lowercase gloss for matching
+        gloss_key = row.gloss[:50].lower() if row.gloss else ""
+        def_lookup[(row.lemma_id, gloss_key)] = row.id
 
     # Count lines for progress
     total_lines = _count_lines(jsonl_path) if progress_callback else 0
@@ -4374,18 +4404,34 @@ def link_noun_derivations(
                     stats["base_not_found"] += 1
                     continue
 
-                # Update noun_metadata
+                # Find the definition that matches this sense
+                gloss_key = gloss[:50].lower() if gloss else ""
+                def_id = def_lookup.get((word_id, gloss_key))
+
+                if def_id is None:
+                    # Try to find any definition for this lemma as fallback
+                    # (in case of gloss formatting differences)
+                    for (lid, _gk), did in def_lookup.items():
+                        if lid == word_id:
+                            def_id = did
+                            break
+
+                if def_id is None:
+                    stats["definition_not_found"] += 1
+                    continue
+
+                # Update the specific definition with derivation info
                 conn.execute(
-                    update(noun_metadata)
-                    .where(noun_metadata.c.lemma_id == word_id)
+                    update(definitions)
+                    .where(definitions.c.id == def_id)
                     .values(
-                        base_lemma_id=base_id,
+                        derived_from_lemma_id=base_id,
                         derivation_type=derivation_type,
                     )
                 )
                 stats["linked"] += 1
                 stats[derivation_type] += 1
-                break  # Only process first derivation relationship per entry
+                # Don't break - process all derivation senses for this entry
 
     if progress_callback:
         progress_callback(total_lines, total_lines)

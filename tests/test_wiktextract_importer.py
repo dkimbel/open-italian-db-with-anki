@@ -15,6 +15,7 @@ from italian_db.db import (
     get_connection,
     get_engine,
     init_db,
+    lemma_relationships,
     lemmas,
     noun_forms,
     noun_metadata,
@@ -959,6 +960,7 @@ class TestWiktextractImporter:
 
         When Wiktextract data doesn't contain explicit relationship tags,
         we fall back to hardcoded mappings (e.g., pessimo -> cattivo).
+        Relationships are stored in the lemma_relationships table.
         """
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
@@ -988,13 +990,16 @@ class TestWiktextractImporter:
                 ).fetchone()
                 assert cattivo is not None
 
-                pessimo_meta = conn.execute(
-                    select(adjective_metadata).where(adjective_metadata.c.lemma_id == pessimo.id)
+                # Check relationship in lemma_relationships table
+                rel = conn.execute(
+                    select(lemma_relationships).where(
+                        lemma_relationships.c.source_lemma_id == pessimo.id
+                    )
                 ).fetchone()
-                assert pessimo_meta is not None
-                assert pessimo_meta.base_lemma_id == cattivo.id
-                assert pessimo_meta.degree_relationship == "superlative_of"
-                assert pessimo_meta.degree_relationship_source == "hardcoded"
+                assert rel is not None
+                assert rel.target_lemma_id == cattivo.id
+                assert rel.relationship_type == "superlative_of"
+                assert rel.source == "hardcoded"
 
         finally:
             db_path.unlink()

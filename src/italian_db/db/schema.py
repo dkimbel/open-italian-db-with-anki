@@ -331,19 +331,18 @@ translations = Table(
     sqlite_with_rowid=False,
 )
 
-# Verb-specific metadata (auxiliary, transitivity, and pronominal verb links)
+# Verb-specific metadata (auxiliary, transitivity, and pronominal verb classification)
 #
-# Pronominal verbs (ending in -si/-rsi like lavarsi, pentirsi) have a relationship
-# to their non-pronominal base verb. This relationship is tracked via:
-#
-# - base_verb_lemma_id: Links pronominal verb to its non-pronominal base (lavarsi → lavare).
-#   NULL for verbs that are inherently pronominal (e.g., pentirsi has no *pentire).
+# Pronominal verbs (ending in -si/-rsi like lavarsi, pentirsi) are classified by type:
 #
 # - pronominal_type: Classifies the type of pronominal construction:
 #   - 'reflexive': Subject acts on itself (lavarsi = wash oneself)
 #   - 'reciprocal': Subjects act on each other (incontrarsi = meet each other)
 #   - 'inherent': Verb only exists in pronominal form (pentirsi, accorgersi)
 #   - NULL: Not a pronominal verb
+#
+# For the relationship to base verbs (lavarsi → lavare), see the lemma_relationships
+# table with relationship_type = 'reflexive_of' or 'reciprocal_of'.
 #
 # Note: Both base verb and pronominal verb keep their full conjugations, since
 # pronominal forms include clitics (mi lavo, ti lavi) and may use different
@@ -355,22 +354,17 @@ verb_metadata = Table(
     Column("lemma_id", Integer, ForeignKey("lemmas.id"), primary_key=True),
     Column("auxiliary", String(20)),  # 'avere', 'essere', 'both', NULL
     Column("transitivity", String(20)),  # 'transitive', 'intransitive', 'both', NULL
-    # Pronominal verb linking
-    Column("base_verb_lemma_id", Integer, ForeignKey("lemmas.id")),  # lavarsi → lavare
     Column("pronominal_type", Text),  # 'reflexive', 'reciprocal', 'inherent', NULL
+    # Note: base_verb_lemma_id moved to lemma_relationships table (reflexive_of, reciprocal_of)
 )
 
-# Noun-specific metadata (gender classification, number behavior, and links)
+# Noun-specific metadata (gender classification and number behavior)
 #
-# Nouns have two distinct lemma relationship types:
-#
-# - counterpart_lemma_id: Gender counterpart pairs (professore↔professoressa).
-#   These are semantically equivalent roles with separate lemmas per gender.
-#   The two words refer to the same concept but are grammatically distinct nouns.
-#
-# - base_lemma_id: Morphological derivations (tavolino→tavola).
-#   These are distinct words derived from a base with size/affect modification.
-#   A tavolino is not "tavola but masculine" — it's a small table, a different thing.
+# For noun relationships:
+# - Gender counterpart pairs (professore↔professoressa): See lemma_relationships
+#   table with relationship_type = 'gender_counterpart'
+# - Morphological derivations (cagnolino→cane): See definitions.derived_from_lemma_id
+#   with derivation_type = 'diminutive', 'augmentative', 'pejorative', 'endearing'
 #
 noun_metadata = Table(
     "noun_metadata",
@@ -394,19 +388,14 @@ noun_metadata = Table(
     # 'inferred:greek_si' = word ends in -si (Greek-origin invariables)
     # 'default' = no signal, defaulted to 'standard'
     Column("number_class_source", Text),
-    # Links to related lemmas
-    Column("counterpart_lemma_id", Integer, ForeignKey("lemmas.id")),  # professore↔professoressa
-    Column("base_lemma_id", Integer, ForeignKey("lemmas.id")),  # tavolino→tavola
-    Column("derivation_type", Text),  # 'diminutive', 'augmentative', 'pejorative'
+    # Note: counterpart_lemma_id moved to lemma_relationships table (gender_counterpart)
+    # Note: base_lemma_id and derivation_type moved to definitions table
 )
 
-# Adjective-specific metadata (inflection class and links)
+# Adjective-specific metadata (inflection class)
 #
-# Adjectives have only one lemma relationship type:
-#
-# - base_lemma_id: Degree relationships (migliore→buono, ottimo→buono).
-#   Links comparative/superlative forms to their positive base when they are
-#   separate lemmas rather than regular inflections (più buono vs migliore).
+# For degree relationships (migliore→buono, ottimo→buono): See lemma_relationships
+# table with relationship_type = 'comparative_of' or 'superlative_of'.
 #
 # Unlike nouns, adjectives don't need counterpart_lemma_id because Italian
 # adjectives inflect for gender within a single lemma (bello/bella/belli/belle)
@@ -421,12 +410,7 @@ adjective_metadata = Table(
     # '2-form' = same form for m/f (facile/facile/facili/facili)
     # 'invariable' = same form for all (blu)
     Column("inflection_class", Text),
-    # Links to related lemmas (for comparative/superlative)
-    Column("base_lemma_id", Integer, ForeignKey("lemmas.id")),  # migliore→buono
-    Column("degree_relationship", Text),  # 'comparative_of', 'superlative_of'
-    Column(
-        "degree_relationship_source", Text
-    ),  # 'wiktextract', 'wiktextract:canonical', 'hardcoded'
+    # Note: base_lemma_id, degree_relationship moved to lemma_relationships table
 )
 
 # =============================================================================
@@ -521,11 +505,8 @@ Index(
     "idx_lemmas_written_pos", lemmas.c.written, lemmas.c.pos
 )  # For lookups by written form+POS (used by anki_gen)
 Index("idx_verb_metadata_auxiliary", verb_metadata.c.auxiliary)
-Index("idx_verb_metadata_base", verb_metadata.c.base_verb_lemma_id)
 # noun_metadata indexes
 Index("idx_noun_metadata_gender_class", noun_metadata.c.gender_class)
-Index("idx_noun_metadata_counterpart", noun_metadata.c.counterpart_lemma_id)
-Index("idx_noun_metadata_base", noun_metadata.c.base_lemma_id)
 # verb_forms indexes
 Index("idx_verb_forms_lemma", verb_forms.c.lemma_id)
 Index("idx_verb_forms_mood_tense", verb_forms.c.mood, verb_forms.c.tense)
@@ -540,8 +521,6 @@ Index("idx_noun_forms_meaning_hint", noun_forms.c.meaning_hint)
 Index("idx_adjective_forms_lemma", adjective_forms.c.lemma_id)
 Index("idx_adjective_forms_written", adjective_forms.c.written)
 Index("idx_adjective_forms_origin", adjective_forms.c.form_origin)
-# adjective_metadata indexes
-Index("idx_adjective_metadata_base", adjective_metadata.c.base_lemma_id)
 # lemma_relationships indexes
 Index("idx_lemma_rel_source", lemma_relationships.c.source_lemma_id)
 Index("idx_lemma_rel_target", lemma_relationships.c.target_lemma_id)

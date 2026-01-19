@@ -259,7 +259,11 @@ WHERE d.derived_from_lemma_id = ?;
 IPA pronunciation is stored at the **form level** (not lemma level):
 - `verb_forms.ipa`, `noun_forms.ipa`, `adjective_forms.ipa`
 - The lemma's IPA is stored on the citation form (`is_citation_form = TRUE`)
-- `lemmas.ipa` is deprecated but retained for backward compatibility
+
+To query a lemma's IPA:
+```sql
+SELECT vf.ipa FROM verb_forms vf WHERE vf.lemma_id = ? AND vf.is_citation_form = TRUE;
+```
 
 See `docs/lemmas-definitions-ipa-refactor.md` for detailed specification.
 
