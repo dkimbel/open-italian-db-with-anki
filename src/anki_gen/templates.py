@@ -176,12 +176,15 @@ CARD_CSS = """
 
 .example-quote {
     font-family: Georgia, "Times New Roman", serif;
-    font-size: 56px;
+    font-size: 64px;
     line-height: 1;
     color: var(--color-quote);
     opacity: 0.5;
     flex-shrink: 0;
-    align-self: center;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    transform: translate(-5px, 16px);  /* Compensate for curly quote glyph sitting high in em-square */
 }
 
 .example-italian {
