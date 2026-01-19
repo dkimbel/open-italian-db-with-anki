@@ -86,22 +86,21 @@ def load_verb_list(config_path: Path) -> list[str]:
     return [str(v["lemma"]) for v in verbs_list]
 
 
-def format_example_sentence(example: ExampleSentence | None) -> str:
-    """Format example sentence as HTML.
+def format_example_sentence(example: ExampleSentence | None) -> tuple[str, str]:
+    """Extract Italian and English text from example sentence.
 
     Args:
         example: ExampleSentence or None
 
     Returns:
-        HTML string for display, or empty string if no example
+        Tuple of (italian_text, english_text), empty strings if no example
     """
     if example is None:
-        return ""
+        return ("", "")
 
-    html = f'<div class="example-italian">{example.italian}</div>'
-    if example.english:
-        html += f'<div class="example-english">{example.english}</div>'
-    return html
+    italian = example.italian
+    english = example.english or ""
+    return (italian, english)
 
 
 def build_verb_tags(
@@ -198,7 +197,7 @@ def generate_verb_card(
         tense=tense,
         conjugated_forms=conjugated_forms,
     )
-    example_html = format_example_sentence(example)
+    example_italian, example_english = format_example_sentence(example)
 
     # Get English infinitive (e.g., "to speak")
     english_infinitive = get_english_infinitive(conn, verb.lemma_id) or ""
@@ -224,7 +223,8 @@ def generate_verb_card(
             tense_info["technical_name"],  # TenseTechnical
             english_prompt,  # EnglishPrompt (verb-specific)
             table_html,  # ConjugationTable
-            example_html,  # ExampleSentence
+            example_italian,  # ExampleItalian
+            example_english,  # ExampleEnglish
             verb.ipa or "",  # IPA
             tense_english,  # TenseEnglish
             english_infinitive,  # EnglishInfinitive

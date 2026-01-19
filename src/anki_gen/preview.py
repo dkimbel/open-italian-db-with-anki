@@ -74,23 +74,14 @@ def generate_preview_html(
         tense=tense,
         conjugated_forms=conjugated_forms,
     )
-    example_html = ""
+    example_section = ""
     if example:
-        example_html = f'<div class="example-italian">{example.italian}</div>'
+        italian_text = example.italian
+        example_section = f'<div class="example">\n    <span class="example-quote">\u201c</span>\n    <span class="example-italian">{italian_text}</span>\n    <span class="example-quote">\u201d</span>\n</div>'
         if example.english:
-            example_html += f'<div class="example-english">{example.english}</div>'
+            example_section += f'\n<div class="example-english">{example.english}</div>'
 
     ipa_html = f"<div class='ipa'>{verb.ipa}</div>" if verb.ipa else ""
-    example_section = ""
-    if example_html:
-        example_section = f"""<div class="example">
-    <span class="example-quote">“</span>
-    <div class="example-content">
-        {example_html}
-    </div>
-    <span class="example-quote">”</span>
-</div>"""
-
     # Get tags
     tags = build_verb_tags(conn, verb, tense_id)
 

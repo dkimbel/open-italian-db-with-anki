@@ -22,7 +22,8 @@ def create_verb_conjugation_model() -> genanki.Model:
         - TenseTechnical: Display name (e.g., "presente indicativo")
         - EnglishPrompt: The English prompt (e.g., "I speak")
         - ConjugationTable: HTML table of conjugated forms
-        - ExampleSentence: Optional example sentence HTML
+        - ExampleItalian: Italian example sentence text
+        - ExampleEnglish: English translation of example
         - IPA: Optional IPA pronunciation
         - TenseEnglish: English tense name (e.g., "present indicative")
         - EnglishInfinitive: English infinitive (e.g., "to speak")
@@ -39,7 +40,8 @@ def create_verb_conjugation_model() -> genanki.Model:
             {"name": "TenseTechnical"},
             {"name": "EnglishPrompt"},
             {"name": "ConjugationTable"},
-            {"name": "ExampleSentence"},
+            {"name": "ExampleItalian"},
+            {"name": "ExampleEnglish"},
             {"name": "IPA"},
             {"name": "TenseEnglish"},
             {"name": "EnglishInfinitive"},

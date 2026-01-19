@@ -56,13 +56,12 @@ CARD_CSS = """
 /* Base styles */
 .card {
     font-family: 'Atkinson Hyperlegible Next', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    font-size: 18px;
+    font-size: 20px;
     text-align: center;
     color: var(--color-text);
     background-color: var(--color-background);
     padding: 20px;
     line-height: 1.5;
-    max-width: 450px;
     margin: 0 auto;
 }
 
@@ -94,10 +93,10 @@ CARD_CSS = """
 
 /* Infinitive header (secondary to conjugation forms) */
 .infinitive {
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 600;
-    color: var(--color-secondary);
-    margin-bottom: 5px;
+    color: var(--color-text);
+    margin-bottom: 3px;
 }
 
 /* IPA pronunciation */
@@ -111,7 +110,7 @@ CARD_CSS = """
 .conjugation-container {
     display: inline-block;
     text-align: left;
-    padding: 15px 20px;
+    padding: 15px 20px 15px 32px;
     margin: 15px auto;
 }
 
@@ -165,8 +164,8 @@ CARD_CSS = """
 .example {
     display: flex;
     justify-content: center;
-    align-items: flex-start;
-    gap: 10px;
+    align-items: center;
+    gap: 8px;
     margin-top: 25px;
     font-style: italic;
 }
@@ -174,24 +173,25 @@ CARD_CSS = """
 .example-quote {
     font-family: Georgia, "Times New Roman", serif;
     font-size: 48px;
-    line-height: 0.8;
+    line-height: 1;
     color: var(--color-quote);
     opacity: 0.5;
     flex-shrink: 0;
-}
-
-.example-content {
-    max-width: 350px;
-    font-size: 16px;
+    align-self: center;
 }
 
 .example-italian {
-    margin-bottom: 5px;
+    max-width: 350px;
+    font-size: 16px;
+    line-height: 1.3;
+    text-wrap: balance;
     text-align: center;
 }
 
 .example-english {
     font-size: 14px;
+    margin-top: 8px;
+    text-wrap: balance;
     color: var(--color-secondary);
     text-align: center;
 }
@@ -225,15 +225,14 @@ VERB_BACK_TEMPLATE = """
 {{ConjugationTable}}
 </div>
 
-{{#ExampleSentence}}
+{{#ExampleItalian}}
 <div class="example">
-    <span class="example-quote">“</span>
-    <div class="example-content">
-        {{ExampleSentence}}
-    </div>
-    <span class="example-quote">”</span>
+    <span class="example-quote">&#x201C;</span>
+    <span class="example-italian">{{ExampleItalian}}</span>
+    <span class="example-quote">&#x201D;</span>
 </div>
-{{/ExampleSentence}}
+{{#ExampleEnglish}}<div class="example-english">{{ExampleEnglish}}</div>{{/ExampleEnglish}}
+{{/ExampleItalian}}
 
 <div class="tense-label">{{TenseTechnical}}</div>
 """
