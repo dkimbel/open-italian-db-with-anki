@@ -81,7 +81,15 @@ def generate_preview_html(
             example_html += f'<div class="example-english">{example.english}</div>'
 
     ipa_html = f"<div class='ipa'>{verb.ipa}</div>" if verb.ipa else ""
-    example_section = f"<div class='example'>{example_html}</div>" if example_html else ""
+    example_section = ""
+    if example_html:
+        example_section = f"""<div class="example">
+    <span class="example-quote">“</span>
+    <div class="example-content">
+        {example_html}
+    </div>
+    <span class="example-quote">”</span>
+</div>"""
 
     # Get tags
     tags = build_verb_tags(conn, verb, tense_id)

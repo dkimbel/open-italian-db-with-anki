@@ -906,7 +906,8 @@ def get_english_infinitive(conn: Connection, lemma_id: int) -> str | None:
         English infinitive like "to speak", or None if not found
     """
     # Prefer simple definitions (no parentheses, semicolons, or "See Category:")
-    # Order by id first (earlier = more common meaning), then by length
+    # Order by word count in first alternative (before comma), then by id as tiebreaker
+    # e.g., "to talk, to speak" counts as 2 words (just "to talk")
     stmt = text("""
         SELECT gloss FROM definitions
         WHERE lemma_id = :id
@@ -914,18 +915,26 @@ def get_english_infinitive(conn: Connection, lemma_id: int) -> str | None:
           AND gloss NOT LIKE '%(%)%'
           AND gloss NOT LIKE '%;%'
           AND gloss NOT LIKE '%See Category:%'
-        ORDER BY id, length(gloss)
+        ORDER BY (
+            length(substr(gloss, 1, instr(gloss || ',', ',') - 1))
+            - length(replace(substr(gloss, 1, instr(gloss || ',', ',') - 1), ' ', ''))
+            + 1
+        ), id
         LIMIT 1
     """)
     row = conn.execute(stmt, {"id": lemma_id}).fetchone()
     if row:
         return row[0]
 
-    # Fallback: any "to ..." definition, prefer earlier (more common) definitions
+    # Fallback: any "to ..." definition, prefer fewer words in first alternative
     stmt = text("""
         SELECT gloss FROM definitions
         WHERE lemma_id = :id AND gloss LIKE 'to %'
-        ORDER BY id, length(gloss)
+        ORDER BY (
+            length(substr(gloss, 1, instr(gloss || ',', ',') - 1))
+            - length(replace(substr(gloss, 1, instr(gloss || ',', ',') - 1), ' ', ''))
+            + 1
+        ), id
         LIMIT 1
     """)
     row = conn.execute(stmt, {"id": lemma_id}).fetchone()
