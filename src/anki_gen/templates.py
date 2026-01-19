@@ -177,6 +177,7 @@ CARD_CSS = """
 .example-quote {
     font-family: Georgia, "Times New Roman", serif;
     font-size: 64px;
+    height: 32px;
     line-height: 1;
     color: var(--color-quote);
     opacity: 0.5;
