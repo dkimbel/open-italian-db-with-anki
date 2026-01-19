@@ -46,6 +46,7 @@ from italian_db.importers.wiktextract import (
     enrich_missing_feminine_plurals,
     generate_gendered_participles,
     import_adjective_allomorphs,
+    import_form_ipa,
     import_noun_allomorphs,
 )
 from italian_db.verify import verify_database
@@ -360,6 +361,28 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
         token_count = conn.execute(select(func.count()).select_from(sentence_tokens)).scalar()
 
+        # IPA statistics
+        verb_with_ipa = (
+            conn.execute(
+                select(func.count()).select_from(verb_forms).where(verb_forms.c.ipa.isnot(None))
+            ).scalar()
+            or 0
+        )
+        noun_with_ipa = (
+            conn.execute(
+                select(func.count()).select_from(noun_forms).where(noun_forms.c.ipa.isnot(None))
+            ).scalar()
+            or 0
+        )
+        adj_with_ipa = (
+            conn.execute(
+                select(func.count())
+                .select_from(adjective_forms)
+                .where(adjective_forms.c.ipa.isnot(None))
+            ).scalar()
+            or 0
+        )
+
     print(f"Database: {db_path}")
     print()
     print("Lemmas:")
@@ -371,6 +394,14 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print("Forms:")
     print(f"  Total:         {total_forms:,}")
     print(f"  With spelling: {forms_with_spelling:,}")
+    print()
+    print("IPA Coverage:")
+    verb_pct = (verb_with_ipa / n_verb_forms * 100) if n_verb_forms else 0
+    noun_pct = (noun_with_ipa / n_noun_forms * 100) if n_noun_forms else 0
+    adj_pct = (adj_with_ipa / n_adj_forms * 100) if n_adj_forms else 0
+    print(f"  Verb forms:      {verb_with_ipa:,} ({verb_pct:.1f}%)")
+    print(f"  Noun forms:      {noun_with_ipa:,} ({noun_pct:.1f}%)")
+    print(f"  Adjective forms: {adj_with_ipa:,} ({adj_pct:.1f}%)")
     print()
     print("Metadata:")
     print(f"  Noun forms with gender: {nouns_with_gender:,}")
@@ -587,6 +618,25 @@ def _run_verb_irregularity_import(conn: Connection, indent: str = "  ") -> dict[
     return {"total": stats.total, "matched": stats.matched, "not_found": stats.not_found}
 
 
+def _run_ipa_import(
+    conn: Connection, jsonl_path: Path, pos: POS, indent: str = "  "
+) -> dict[str, Any]:
+    """Run IPA import and print stats."""
+    stats = import_form_ipa(
+        conn, jsonl_path, pos_filter=pos, progress_callback=_make_progress_callback()
+    )
+    print()
+    print(f"{indent}Entries scanned:    {stats['entries_scanned']:,}")
+    print(f"{indent}Entries with IPA:   {stats['entries_with_ipa']:,}")
+    print(f"{indent}Lemma IPA updated:  {stats['lemma_ipa_updated']:,}")
+    print(f"{indent}Form IPA updated:   {stats['form_ipa_updated']:,}")
+    if stats["lemma_not_found"] > 0:
+        print(f"{indent}Lemma not found:    {stats['lemma_not_found']:,}")
+    if stats["form_not_found"] > 0:
+        print(f"{indent}Form not found:     {stats['form_not_found']:,}")
+    return stats
+
+
 def cmd_import_all(args: argparse.Namespace) -> int:
     """Run the full import pipeline for all parts of speech."""
     db_path = Path(args.database)
@@ -628,19 +678,19 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print()
 
         # Determine step count:
-        # - adjectives: 8 steps (wiktextract, morphit-forms, lemma-written,
-        #                        allomorphs, form-of, unstressed, orthography, itwac)
-        # - nouns: 8 steps (wiktextract, morphit-forms, lemma-written, allomorphs,
-        #                   form-of, unstressed, orthography, itwac)
-        # - verbs: 6 steps (wiktextract, participles, lemma-written, form-of, itwac,
-        #                   verb-irregularity)
+        # - adjectives: 9 steps (wiktextract, morphit-forms, lemma-written,
+        #                        allomorphs, form-of, unstressed, orthography, itwac, ipa)
+        # - nouns: 9 steps (wiktextract, morphit-forms, lemma-written, allomorphs,
+        #                   form-of, unstressed, orthography, itwac, ipa)
+        # - verbs: 7 steps (wiktextract, participles, lemma-written, form-of, itwac,
+        #                   verb-irregularity, ipa)
         #          Verbs skip morphit-forms/unstressed/orthography (produce 0 updates)
         if pos == POS.ADJECTIVE:
-            total_steps = 8
+            total_steps = 9
         elif pos == POS.VERB:
-            total_steps = 6
+            total_steps = 7
         else:
-            total_steps = 8
+            total_steps = 9
 
         with get_connection(db_path) as conn:
             # Step 1: Wiktextract import
@@ -770,6 +820,18 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"[6/{total_steps}] Importing verb irregularity patterns...")
                 _run_verb_irregularity_import(conn, indent=indent)
                 print()
+
+            # IPA import (final step for each POS)
+            # verb: step 7, noun: step 9, adjective: step 9
+            if pos == POS.VERB:
+                step_ipa = 7
+            elif pos == POS.NOUN:
+                step_ipa = 9
+            else:
+                step_ipa = 9
+            print(f"[{step_ipa}/{total_steps}] Importing IPA pronunciations...")
+            _run_ipa_import(conn, jsonl_path, pos, indent=indent)
+            print()
 
     # Post-processing: Cross-POS enrichments
     print("=" * 80)

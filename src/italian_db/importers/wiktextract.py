@@ -5257,3 +5257,213 @@ def enrich_missing_feminine_plurals(
         progress_callback(len(all_f_sg_rows), len(all_f_sg_rows))
 
     return stats
+
+
+def import_form_ipa(
+    conn: Connection,
+    jsonl_path: Path,
+    pos_filter: POS,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
+    """Import IPA pronunciations from Wiktextract entries.
+
+    Wiktextract has IPA data for both lemma entries and form-of entries.
+    This function extracts that data and stores it in the form tables.
+
+    For **lemma entries**: IPA is stored on the citation form (is_citation_form=True).
+    For **form-of entries**: IPA is stored on the matching inflected form.
+
+    The `sounds` array in Wiktextract can contain:
+    - {"ipa": "/par'la.re/"} - IPA pronunciation (with stress marker)  # noqa: RUF002
+    - {"rhymes": "-are"} - Rhyme information (ignored here)
+    - {"audio": "..."} - Audio file reference (ignored here)
+
+    We only extract entries with "ipa" key. We take the FIRST IPA entry
+    (which is the standard pronunciation; others may have regional tags).
+
+    Args:
+        conn: Database connection
+        jsonl_path: Path to Wiktextract JSONL
+        pos_filter: Part of speech to process (NOUN, VERB, or ADJECTIVE)
+        progress_callback: Optional progress callback
+
+    Returns:
+        Statistics dict
+    """
+    stats = {
+        "entries_scanned": 0,
+        "entries_with_ipa": 0,
+        "lemma_ipa_updated": 0,
+        "form_ipa_updated": 0,
+        "lemma_not_found": 0,
+        "form_not_found": 0,
+    }
+
+    # Determine form table based on POS
+    form_table = POS_FORM_TABLES.get(pos_filter)
+    if form_table is None:
+        msg = f"Unsupported POS: {pos_filter}"
+        raise ValueError(msg)
+
+    # Map to Wiktextract's POS naming
+    wiktextract_pos = WIKTEXTRACT_POS.get(pos_filter, pos_filter)
+
+    # Build lemma lookup: written_form -> lemma_id
+    # Use written form (not normalized stressed) to preserve orthographic distinctions.
+    lemma_result = conn.execute(
+        select(lemmas.c.id, lemmas.c.written, lemmas.c.stressed).where(lemmas.c.pos == pos_filter)
+    )
+    lemma_lookup: dict[str, int] = {}
+    for row in lemma_result:
+        written = row.written or derive_written_from_stressed(row.stressed)
+        if written is not None:
+            lemma_lookup[written] = row.id
+
+    # Build form lookup: (lemma_id, normalized_stressed) -> list of form_ids
+    # We need to match by normalized form because Wiktextract uses different
+    # accent conventions.
+    form_result = conn.execute(
+        select(form_table.c.id, form_table.c.lemma_id, form_table.c.stressed)
+    )
+    form_lookup: dict[tuple[int, str], list[int]] = {}
+    for row in form_result:
+        normalized = normalize(row.stressed)
+        key = (row.lemma_id, normalized)
+        if key not in form_lookup:
+            form_lookup[key] = []
+        form_lookup[key].append(row.id)
+
+    # Build citation form lookup: lemma_id -> form_id for citation forms
+    citation_form_result = conn.execute(
+        select(form_table.c.id, form_table.c.lemma_id).where(
+            form_table.c.is_citation_form == True  # noqa: E712
+        )
+    )
+    citation_form_lookup: dict[int, int] = {}
+    for row in citation_form_result:
+        citation_form_lookup[row.lemma_id] = row.id
+
+    # Count lines for progress
+    total_lines = _count_lines(jsonl_path) if progress_callback else 0
+
+    with jsonl_path.open(encoding="utf-8") as f:
+        for line_num, line in enumerate(f, 1):
+            if progress_callback and line_num % 10000 == 0:
+                progress_callback(line_num, total_lines)
+
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if entry.get("pos") != wiktextract_pos:
+                continue
+
+            stats["entries_scanned"] += 1
+
+            # Extract IPA from sounds array (take first IPA only)
+            sounds = entry.get("sounds", [])
+            ipa = None
+            for sound in sounds:
+                ipa_value = sound.get("ipa")
+                if ipa_value:
+                    ipa = ipa_value
+                    break
+
+            if not ipa:
+                continue
+
+            stats["entries_with_ipa"] += 1
+
+            word = entry.get("word", "")
+            if not word:
+                continue
+
+            # Check if this is a form-of entry or a lemma entry
+            is_form_of = _is_form_of_entry(entry, wiktextract_pos)
+
+            if is_form_of:
+                # This is a form-of entry - update the matching form record
+                form_of_targets = _get_form_of_targets(entry)
+                if not form_of_targets:
+                    stats["form_not_found"] += 1
+                    continue
+
+                # Find the form record that matches this entry
+                found = False
+                for target_word in form_of_targets:
+                    target_written = derive_written_from_stressed(target_word)
+                    if target_written is None:
+                        continue
+                    lemma_id = lemma_lookup.get(target_written)
+                    if lemma_id is None:
+                        continue
+
+                    # Look up form by (lemma_id, normalized form)
+                    form_normalized = normalize(word)
+                    key = (lemma_id, form_normalized)
+                    form_ids = form_lookup.get(key)
+                    if form_ids:
+                        # Update all matching forms
+                        for form_id in form_ids:
+                            conn.execute(
+                                update(form_table)
+                                .where(form_table.c.id == form_id)
+                                .where(form_table.c.ipa.is_(None))  # Don't overwrite
+                                .values(ipa=ipa, ipa_source="wiktextract")
+                            )
+                        stats["form_ipa_updated"] += 1
+                        found = True
+                        break
+
+                if not found:
+                    stats["form_not_found"] += 1
+            else:
+                # This is a lemma entry - update the citation form
+                word_written = derive_written_from_stressed(word)
+                if word_written is None:
+                    stats["lemma_not_found"] += 1
+                    continue
+
+                lemma_id = lemma_lookup.get(word_written)
+                if lemma_id is None:
+                    stats["lemma_not_found"] += 1
+                    continue
+
+                citation_form_id = citation_form_lookup.get(lemma_id)
+                if citation_form_id is None:
+                    stats["lemma_not_found"] += 1
+                    continue
+
+                # Update the citation form's IPA
+                result = conn.execute(
+                    update(form_table)
+                    .where(form_table.c.id == citation_form_id)
+                    .where(form_table.c.ipa.is_(None))  # Don't overwrite
+                    .values(ipa=ipa, ipa_source="wiktextract")
+                )
+                if result.rowcount > 0:
+                    stats["lemma_ipa_updated"] += 1
+
+    if progress_callback:
+        progress_callback(total_lines, total_lines)
+
+    return stats
+
+
+def _get_form_of_targets(entry: dict[str, Any]) -> set[str]:
+    """Extract the lemma(s) that this entry is a form of.
+
+    Args:
+        entry: Wiktextract entry dict
+
+    Returns:
+        Set of base word strings.
+    """
+    targets: set[str] = set()
+    for sense in entry.get("senses", []):
+        for ref in sense.get("form_of", []):
+            if "word" in ref:
+                targets.add(ref["word"])
+    return targets
