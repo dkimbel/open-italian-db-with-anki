@@ -6,6 +6,7 @@ in a browser, enabling fast feedback without importing into Anki.
 The preview shows a 2x2 grid with front/back in both light and dark modes.
 """
 
+import re
 from pathlib import Path
 
 from sqlalchemy import Connection
@@ -20,7 +21,50 @@ from anki_gen.queries import (
     get_verb_by_lemma,
 )
 from anki_gen.stress import format_conjugation_with_stress
-from anki_gen.templates import CARD_CSS, TENSE_INFO, build_conjugation_table_html
+from anki_gen.templates import (
+    CARD_CSS,
+    TENSE_INFO,
+    VERB_BACK_TEMPLATE,
+    VERB_FRONT_TEMPLATE,
+    build_conjugation_table_html,
+)
+
+
+def render_template(template: str, fields: dict[str, str]) -> str:
+    """Render a Mustache-style template with field values.
+
+    Supports:
+    - {{FieldName}} - simple substitution
+    - {{#FieldName}}...{{/FieldName}} - conditional blocks (render if truthy)
+
+    Args:
+        template: Template string with Mustache-style placeholders
+        fields: Dictionary mapping field names to values
+
+    Returns:
+        Rendered template string
+    """
+    result = template
+
+    # Handle conditional blocks: {{#Field}}content{{/Field}}
+    # These render content only if field is truthy
+    conditional_pattern = r"\{\{#(\w+)\}\}(.*?)\{\{/\1\}\}"
+    while re.search(conditional_pattern, result, re.DOTALL):
+        result = re.sub(
+            conditional_pattern,
+            lambda m: m.group(2) if fields.get(m.group(1)) else "",
+            result,
+            flags=re.DOTALL,
+        )
+
+    # Handle simple substitutions: {{Field}}
+    result = re.sub(
+        r"\{\{(\w+)\}\}",
+        lambda m: fields.get(m.group(1), ""),
+        result,
+    )
+
+    return result
 
 
 def generate_preview_html(
@@ -74,14 +118,6 @@ def generate_preview_html(
         tense=tense,
         conjugated_forms=conjugated_forms,
     )
-    example_section = ""
-    if example:
-        italian_text = example.italian
-        example_section = f'<div class="example">\n    <span class="example-quote">\u201c</span>\n    <span class="example-italian">{italian_text}</span>\n    <span class="example-quote">\u201d</span>\n</div>'
-        if example.english:
-            example_section += f'\n<div class="example-english">{example.english}</div>'
-
-    ipa_html = f"<div class='ipa'>{verb.ipa}</div>" if verb.ipa else ""
     # Get tags
     tags = build_verb_tags(conn, verb, tense_id)
 
@@ -90,26 +126,22 @@ def generate_preview_html(
     english_prompt = generate_english_prompt(english_infinitive, tense_id)
     tense_english = tense_info.get("english_name", tense_id.replace("_", " "))
 
-    # Front card content
-    infinitive_span = (
-        f'<span class="english-infinitive">{english_infinitive}</span>'
-        if english_infinitive
-        else ""
-    )
-    front_content = f"""<div class="english-prompt">{english_prompt}</div>
-<div class="front-context">
-    <span class="tense-english">{tense_english}</span>
-    {infinitive_span}
-</div>"""
+    # Build field values for template rendering
+    fields = {
+        "EnglishPrompt": english_prompt,
+        "TenseEnglish": tense_english,
+        "EnglishInfinitive": english_infinitive or "",
+        "Infinitive": verb.written,
+        "IPA": verb.ipa or "",
+        "ConjugationTable": table_html,
+        "ExampleItalian": example.italian if example else "",
+        "ExampleEnglish": example.english if example and example.english else "",
+        "TenseTechnical": tense_info["technical_name"],
+    }
 
-    # Back card content
-    back_content = f"""<div class="infinitive">{verb.written}</div>
-{ipa_html}
-<div class="conjugation-container">
-    {table_html}
-</div>
-{example_section}
-<div class="tense-label">{tense_info["technical_name"]}</div>"""
+    # Render templates
+    front_content = render_template(VERB_FRONT_TEMPLATE, fields)
+    back_content = render_template(VERB_BACK_TEMPLATE, fields)
 
     # Build complete HTML document
     html = f"""<!DOCTYPE html>

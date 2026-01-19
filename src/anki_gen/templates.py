@@ -110,8 +110,7 @@ CARD_CSS = """
 .conjugation-container {
     display: inline-block;
     text-align: left;
-    padding: 15px 20px 15px 32px;
-    margin: 15px auto;
+    margin: 30px 5px 30px auto;
 }
 
 /* Two-column conjugation table */
@@ -166,13 +165,17 @@ CARD_CSS = """
     justify-content: center;
     align-items: center;
     gap: 8px;
-    margin-top: 25px;
+    margin-top: 10px;
     font-style: italic;
+}
+
+.example-spacer {
+    flex-grow: 1;
 }
 
 .example-quote {
     font-family: Georgia, "Times New Roman", serif;
-    font-size: 48px;
+    font-size: 56px;
     line-height: 1;
     color: var(--color-quote);
     opacity: 0.5;
@@ -227,9 +230,11 @@ VERB_BACK_TEMPLATE = """
 
 {{#ExampleItalian}}
 <div class="example">
-    <span class="example-quote">&#x201C;</span>
-    <span class="example-italian">{{ExampleItalian}}</span>
-    <span class="example-quote">&#x201D;</span>
+    <div class="example-spacer"></div>
+    <div class="example-quote">&#x201C;</div>
+    <div class="example-italian">{{ExampleItalian}}</div>
+    <div class="example-quote">&#x201D;</div>
+    <div class="example-spacer"></div>
 </div>
 {{#ExampleEnglish}}<div class="example-english">{{ExampleEnglish}}</div>{{/ExampleEnglish}}
 {{/ExampleItalian}}
