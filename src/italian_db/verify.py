@@ -149,8 +149,8 @@ def check_orphaned_translations(conn: Connection) -> CheckResult:
     query = text("""
         SELECT t.ita_sentence_id
         FROM translations t
-        LEFT JOIN sentences s ON t.ita_sentence_id = s.sentence_id
-        WHERE s.sentence_id IS NULL
+        LEFT JOIN sentences s ON t.ita_sentence_id = s.id
+        WHERE s.id IS NULL
     """)
     result = conn.execute(query).fetchall()
     issues.extend(f"ita_sentence_id={row[0]}" for row in result)
@@ -159,8 +159,8 @@ def check_orphaned_translations(conn: Connection) -> CheckResult:
     query = text("""
         SELECT t.eng_sentence_id
         FROM translations t
-        LEFT JOIN sentences s ON t.eng_sentence_id = s.sentence_id
-        WHERE s.sentence_id IS NULL
+        LEFT JOIN sentences s ON t.eng_sentence_id = s.id
+        WHERE s.id IS NULL
     """)
     result = conn.execute(query).fetchall()
     issues.extend(f"eng_sentence_id={row[0]}" for row in result)

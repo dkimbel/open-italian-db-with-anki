@@ -347,6 +347,63 @@ def _is_pure_alt_form_entry(entry: dict[str, Any]) -> bool:
     return any(sense.get("alt_of") for sense in senses)
 
 
+def _is_head_template_form(entry: dict[str, Any]) -> bool:
+    """Check if entry's head_templates indicate it's a form, not a lemma.
+
+    Background: Wiktextract entries have a `head_templates` array that describes
+    the entry's grammatical category. This is separate from `senses` which contain
+    definitions. The head_template tells us what KIND of entry this is.
+
+    Problem: Some inflected form entries (like past participles) have BOTH:
+    1. A form_of sense: "past participle of incazzarsi"
+    2. A secondary adjectival sense: "pissed off, angry"
+
+    Our `_is_pos_lemma()` function checks if ANY sense lacks form_of to determine
+    if something is a lemma. This causes these entries to become lemmas because
+    of their secondary sense. But they shouldn't be lemmas because:
+
+    1. They don't have their own conjugation tables - their forms come from
+       the parent lemma (e.g., "incazzato" forms come from "incazzare")
+    2. Form processing already skips them (checks head_template)
+    3. Creating them as lemmas results in entries with no/incomplete forms,
+       causing "citation form marker" verification failures
+
+    Solution: Check head_templates BEFORE checking senses. If head_templates
+    says this is a form entry, skip it regardless of secondary senses.
+
+    Two patterns indicate form entries:
+
+    1. Template name "it-pp" (Italian past participle):
+       ```json
+       {"name": "it-pp", "args": {}, "expansion": "incazzato (feminine...)"}
+       ```
+       Examples: incazzato, andatosene, smerdato, trasferitosi
+
+    2. Generic "head" template with args.2 = "X form":
+       ```json
+       {"name": "head", "args": {"1": "it", "2": "verb form"}, ...}
+       {"name": "head", "args": {"1": "it", "2": "adjective form"}, ...}
+       {"name": "head", "args": {"1": "it", "2": "past participle form"}, ...}
+       ```
+       Examples: sta, fieri, nata, ricca, nutriti
+
+    See also: _is_pos_lemma() which calls this function.
+    """
+    # Form-specific template names (e.g., "it-pp" = Italian past participle)
+    form_templates = {"it-pp"}
+
+    for ht in entry.get("head_templates", []):
+        # Check template name (e.g., it-pp for past participles)
+        if ht.get("name") in form_templates:
+            return True
+        # Check args.2 for "X form" pattern (e.g., "verb form", "adjective form")
+        args = ht.get("args", {})
+        pos_desc = args.get("2", "")
+        if pos_desc.endswith(" form"):
+            return True
+    return False
+
+
 def _is_clipping_entry(entry: dict[str, Any]) -> bool:
     """Check if entry is a clipping (shortened colloquial form).
 
@@ -1428,31 +1485,45 @@ def _is_pos_lemma(entry: dict[str, Any], pos: str) -> bool:
 
     Works for verbs, nouns, and adjectives.
 
-    CRITICAL: An entry is a lemma if it has at least one sense with independent
-    meaning (i.e., at least one sense WITHOUT a form_of reference).
+    Two-stage check:
 
-    This is essential for entries like "cagnolino" which have:
-    - Sense 0: "diminutive of cane" (HAS form_of)
-    - Sense 1: "puppy" (NO form_of) ← Independent meaning!
-    - Sense 2: "dog paddle" (NO form_of) ← Independent meaning!
+    1. HEAD_TEMPLATE CHECK (structural): Does head_templates say this is a form?
+       - If yes → NOT a lemma (even if it has independent senses)
+       - Examples: "incazzato" (it-pp template), "sta" (args.2 = "verb form")
+       - See _is_head_template_form() for details
 
-    With the old all() check, cagnolino was wrongly filtered out because
-    one sense had form_of. With any(), it's correctly kept as a lemma
-    because it has independent meanings.
+    2. SENSES CHECK (semantic): Does it have independent meaning?
+       - If ANY sense lacks form_of → lemma (has independent meaning)
+       - If ALL senses have form_of → NOT a lemma
+
+    Why check head_templates first? Some form entries have secondary senses
+    that lack form_of (e.g., "incazzato" = "past participle of incazzarsi" AND
+    "pissed off"). Without the head_template check, these would become lemmas,
+    but they shouldn't because they don't have their own conjugation tables.
 
     Examples:
     - "casa" (all senses lack form_of) → lemma ✓
     - "cagnolino" (1 sense has form_of, 2 lack it) → lemma ✓ (has independent meanings)
     - "professoressa" (only sense has form_of) → NOT a lemma (imported via forms array)
+    - "incazzato" (it-pp template, has secondary sense) → NOT a lemma (form entry)
+    - "sta" (args.2 = "verb form", has phrase usage) → NOT a lemma (form entry)
 
     Note: Clippings (e.g., "bici") are handled separately in _is_pure_alt_form_entry(),
     which returns False for clippings to ensure they become lemmas.
 
     See also:
+    - _is_head_template_form() for head_template detection logic
     - docs/lemmas-definitions-ipa-refactor.md for detailed specification
     - lemmas table docstring in schema.py for definition of "lemma"
     """
     if entry.get("pos") != pos:
+        return False
+
+    # STAGE 1: Check head_templates for form indicators.
+    # This catches entries like "incazzato" (it-pp template) and "sta" (args.2 = "verb form")
+    # that have secondary senses without form_of but are still inflected forms, not lemmas.
+    # Must check BEFORE senses because these entries would pass the senses check.
+    if _is_head_template_form(entry):
         return False
 
     # For verbs, require forms array (all verbs have conjugation tables)
@@ -1464,8 +1535,10 @@ def _is_pos_lemma(entry: dict[str, Any], pos: str) -> bool:
     if not senses:
         return False
 
-    # FIXED: Return True if ANY sense lacks form_of (has independent meaning)
-    # Previously used all() which wrongly filtered entries with mixed senses
+    # STAGE 2: Check senses for independent meaning.
+    # Return True if ANY sense lacks form_of (has independent meaning).
+    # This correctly handles entries like "cagnolino" which have both
+    # a form_of sense ("diminutive of cane") AND independent senses ("puppy").
     return any("form_of" not in sense for sense in senses)
 
 
