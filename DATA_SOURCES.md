@@ -324,3 +324,27 @@ the NC restriction.
 ---
 
 Each subdirectory contains a LICENSE file with the full license text.
+
+---
+
+## Evaluated but Not Used
+
+### KELLY Project Italian CEFR Vocabulary
+
+**Source:** KELLY Project (Keywords for Language Learning for Young and adults alike)
+**URL:** https://ssharoff.github.io/kelly/it_m3.xls
+**License:** CC BY-ND-NC-SA 2.0
+**Evaluated:** January 2025
+**Decision:** Not integrated
+
+The KELLY project provides ~5,300 Italian lemmas with CEFR levels (A1-C2). However, investigation revealed the levels are derived from **corpus frequency** rather than pedagogical sequencing, producing unusable results:
+
+| Word | KELLY Level | Expected |
+|------|-------------|----------|
+| gatto (cat) | B2 | A1 |
+| pranzo (lunch) | B2 | A1 |
+| inverno (winter) | B1 | A1 |
+| madre (mother) | A2 | A1 |
+| rendiconto (financial statement) | A1 | B2+ |
+
+The methodology prioritizes newspaper/business vocabulary frequency over learner needs, making it unsuitable for pedagogical CEFR tagging.
