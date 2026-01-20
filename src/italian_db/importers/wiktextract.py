@@ -2117,8 +2117,27 @@ def _iter_definitions_with_derivation(
                 derivation_type = DerivationType.PEJORATIVE
             elif "endearing" in raw_tags:
                 derivation_type = DerivationType.ENDEARING
-            # Note: If form_of exists but no known derivation type, we still track the
-            # derived_from_word but leave derivation_type as None
+            # WHY derivation_type can be NULL even when derived_from_word is set:
+            #
+            # derivation_type only covers MORPHOLOGICAL derivation types (DerivationType enum):
+            # - DIMINUTIVE: cagnolino "little dog" ← cane
+            # - AUGMENTATIVE: donnone "big woman" ← donna
+            # - PEJORATIVE: cagnaccio "bad dog" ← cane
+            # - ENDEARING: affectionate variants
+            #
+            # Other form_of relationships DON'T have a derivation_type because they're
+            # not morphological derivations:
+            # - "reflexive of X": lavarsi ← lavare (tracked in lemma_relationships.reflexive_of)
+            # - "third-person singular of X": parla ← parlare (inflected form, not a lemma)
+            # - "plural of X": parole ← parola (should be handled as form, not definition)
+            # - "female equivalent of X": professoressa ← professore (gender counterpart)
+            #
+            # For these cases, we still set derived_from_lemma_id (to track the relationship)
+            # but leave derivation_type as NULL (it's not a morphological derivation type).
+            #
+            # NOTE: Some of these (reflexives, gender counterparts) are ALSO tracked in
+            # lemma_relationships. This duplication is intentional during the transition
+            # period and may be cleaned up in a future phase.
 
         yield gloss, tags, derived_from_word, derivation_type
 
@@ -3933,6 +3952,13 @@ def link_definition_derivations(
                 pos,
             )
             stats["target_not_found"] += 1
+            # Clear derivation_type since a type without a target is meaningless
+            conn.execute(
+                update(definitions)
+                .where(definitions.c.lemma_id == lemma_id)
+                .where(definitions.c.gloss == gloss)
+                .values(derivation_type=None)
+            )
             continue
 
         # Update the definition's derived_from_lemma_id

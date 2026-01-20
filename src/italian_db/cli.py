@@ -535,7 +535,89 @@ def _run_wiktextract_import(
         print(f"{indent}  No gender:          {stats['nouns_skipped_no_gender']:,}")
     if stats.get("counterpart_wrong_gender", 0) > 0:
         print(f"{indent}  Wrong gender:       {stats['counterpart_wrong_gender']:,}")
+
+    # Print relationship statistics (from post-processing in import_wiktextract)
+    _print_relationship_stats(stats, pos, indent)
+
     return stats
+
+
+def _print_relationship_stats(stats: dict[str, Any], pos: POS, indent: str = "  ") -> None:
+    """Print relationship statistics from wiktextract import.
+
+    These stats come from post-processing steps that link lemmas:
+    - Pronominal verbs: lavarsi → lavare (reflexive_of)
+    - Noun counterparts: professore ↔ professoressa (gender_counterpart)
+    - Noun derivations: cagnolino → cane (definitions.derived_from_lemma_id)
+    - Adjective degrees: migliore → buono (comparative_of, superlative_of)
+    - Definition derivations: senses with form_of that were linked to base lemmas
+    """
+    has_any = False
+
+    # Verb: pronominal linking (reflexive verbs)
+    if pos == POS.VERB and stats.get("pronominal_verbs", 0) > 0:
+        if not has_any:
+            print(f"{indent}Relationships:")
+            has_any = True
+        print(f"{indent}  Pronominal verbs:   {stats['pronominal_verbs']:,}")
+        print(f"{indent}    Linked (reflexive_of):  {stats.get('pronominal_linked', 0):,}")
+        print(f"{indent}    Inherent (no base):     {stats.get('pronominal_inherent', 0):,}")
+
+    # Noun: counterpart pairs (gender relationships)
+    if pos == POS.NOUN and stats.get("counterparts_found", 0) > 0:
+        if not has_any:
+            print(f"{indent}Relationships:")
+            has_any = True
+        print(f"{indent}  Counterpart pairs:  {stats['counterparts_found']:,}")
+        bi = stats.get("counterparts_linked_bidirectional", 0)
+        uni = stats.get("counterparts_linked_unidirectional", 0)
+        print(f"{indent}    Linked (bidirectional):   {bi:,}")
+        print(f"{indent}    Linked (unidirectional):  {uni:,}")
+        if stats.get("counterparts_base_not_found", 0) > 0:
+            print(f"{indent}    Base not found:           {stats['counterparts_base_not_found']:,}")
+
+    # Noun: derivation linking (diminutives, augmentatives, etc.)
+    if pos == POS.NOUN and stats.get("derivations_found", 0) > 0:
+        if not has_any:
+            print(f"{indent}Relationships:")
+            has_any = True
+        print(f"{indent}  Noun derivations:   {stats['derivations_found']:,}")
+        print(f"{indent}    Linked:                   {stats.get('derivations_linked', 0):,}")
+        dim = stats.get("derivations_diminutive", 0)
+        aug = stats.get("derivations_augmentative", 0)
+        pej = stats.get("derivations_pejorative", 0)
+        if dim > 0:
+            print(f"{indent}      Diminutive:   {dim:,}")
+        if aug > 0:
+            print(f"{indent}      Augmentative: {aug:,}")
+        if pej > 0:
+            print(f"{indent}      Pejorative:   {pej:,}")
+        if stats.get("derivations_base_not_found", 0) > 0:
+            print(f"{indent}    Base not found:           {stats['derivations_base_not_found']:,}")
+
+    # Adjective: degree linking (comparatives, superlatives)
+    if pos == POS.ADJECTIVE and stats.get("degree_linked", 0) > 0:
+        if not has_any:
+            print(f"{indent}Relationships:")
+            has_any = True
+        print(f"{indent}  Degree relationships:  {stats['degree_linked']:,}")
+        if stats.get("degree_base_not_found", 0) > 0:
+            print(f"{indent}    Base not found:      {stats['degree_base_not_found']:,}")
+
+    # All POS: definition-level derivations (from form_of senses)
+    if stats.get("definition_derivations_found", 0) > 0:
+        if not has_any:
+            print(f"{indent}Relationships:")
+            has_any = True
+        print(f"{indent}  Definition derivations: {stats['definition_derivations_found']:,}")
+        print(
+            f"{indent}    Linked:               {stats.get('definition_derivations_linked', 0):,}"
+        )
+        if stats.get("definition_derivations_target_not_found", 0) > 0:
+            print(
+                f"{indent}    Target not found:     "
+                f"{stats['definition_derivations_target_not_found']:,}"
+            )
 
 
 def _run_formof_combined_enrichment(

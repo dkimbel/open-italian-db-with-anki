@@ -34,6 +34,7 @@ class VerbForm:
     stressed: str  # With pedagogical stress marks
     person: int  # 1, 2, 3
     number: str  # "singular" or "plural"
+    ipa: str | None = None  # IPA pronunciation (from verb_forms.ipa)
 
 
 @dataclass(frozen=True)
@@ -87,14 +88,15 @@ def get_verb_by_lemma(conn: Connection, written: str) -> Verb | None:
 
 
 def get_present_indicative_forms(conn: Connection, lemma_id: int) -> list[VerbForm]:
-    """Get all present indicative forms for a verb.
+    """Get all present indicative forms for a verb, including IPA pronunciations.
 
     Args:
         conn: Database connection
         lemma_id: The lemma ID
 
     Returns:
-        List of VerbForm dataclasses, ordered by person and number
+        List of VerbForm dataclasses, ordered by person and number.
+        Each form includes IPA pronunciation if available in the database.
     """
     stmt = (
         select(
@@ -102,6 +104,7 @@ def get_present_indicative_forms(conn: Connection, lemma_id: int) -> list[VerbFo
             verb_forms.c.stressed,
             verb_forms.c.person,
             verb_forms.c.number,
+            verb_forms.c.ipa,
         )
         .where(
             verb_forms.c.lemma_id == lemma_id,
@@ -120,6 +123,7 @@ def get_present_indicative_forms(conn: Connection, lemma_id: int) -> list[VerbFo
             stressed=row.stressed,
             person=row.person,
             number=row.number,
+            ipa=row.ipa,
         )
         for row in rows
     ]

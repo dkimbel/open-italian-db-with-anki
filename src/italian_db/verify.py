@@ -180,9 +180,106 @@ def check_orphaned_translations(conn: Connection) -> CheckResult:
         )
 
 
+def check_orphaned_lemma_relationships(conn: Connection) -> CheckResult:
+    """Check that all lemma_relationships reference existing lemmas."""
+    issues: list[str] = []
+
+    # Check source_lemma_id references
+    query = text("""
+        SELECT lr.id, lr.source_lemma_id, lr.relationship_type
+        FROM lemma_relationships lr
+        LEFT JOIN lemmas l ON lr.source_lemma_id = l.id
+        WHERE l.id IS NULL
+    """)
+    result = conn.execute(query).fetchall()
+    issues.extend(f"source_lemma_id={row[1]} (rel_id={row[0]}, type={row[2]})" for row in result)
+
+    # Check target_lemma_id references
+    query = text("""
+        SELECT lr.id, lr.target_lemma_id, lr.relationship_type
+        FROM lemma_relationships lr
+        LEFT JOIN lemmas l ON lr.target_lemma_id = l.id
+        WHERE l.id IS NULL
+    """)
+    result = conn.execute(query).fetchall()
+    issues.extend(f"target_lemma_id={row[1]} (rel_id={row[0]}, type={row[2]})" for row in result)
+
+    if not issues:
+        return CheckResult(
+            name="orphaned_lemma_relationships",
+            passed=True,
+            message="No orphaned lemma relationships",
+        )
+    else:
+        return CheckResult(
+            name="orphaned_lemma_relationships",
+            passed=False,
+            message=f"Orphaned lemma relationships: {len(issues)} invalid references",
+            details=issues[:10],
+        )
+
+
+def check_orphaned_definition_derivations(conn: Connection) -> CheckResult:
+    """Check that all definitions.derived_from_lemma_id reference existing lemmas."""
+    query = text("""
+        SELECT d.id, d.lemma_id, d.derived_from_lemma_id, d.gloss
+        FROM definitions d
+        LEFT JOIN lemmas l ON d.derived_from_lemma_id = l.id
+        WHERE d.derived_from_lemma_id IS NOT NULL AND l.id IS NULL
+    """)
+    result = conn.execute(query).fetchall()
+
+    if not result:
+        return CheckResult(
+            name="orphaned_definition_derivations",
+            passed=True,
+            message="No orphaned definition derivations",
+        )
+    else:
+        details = [
+            f"def_id={row[0]} lemma_id={row[1]} derived_from={row[2]} ({row[3][:30]}...)"
+            for row in result[:10]
+        ]
+        return CheckResult(
+            name="orphaned_definition_derivations",
+            passed=False,
+            message=f"Orphaned definition derivations: {len(result)} invalid references",
+            details=details,
+        )
+
+
 # =============================================================================
 # Consistency Checks
 # =============================================================================
+
+
+def check_derivation_type_consistency(conn: Connection) -> CheckResult:
+    """Check that definitions with derivation_type also have derived_from_lemma_id.
+
+    A derivation_type without a target lemma is meaningless.
+    """
+    query = text("""
+        SELECT d.id, l.written, d.derivation_type, d.gloss
+        FROM definitions d
+        JOIN lemmas l ON d.lemma_id = l.id
+        WHERE d.derivation_type IS NOT NULL AND d.derived_from_lemma_id IS NULL
+    """)
+    result = conn.execute(query).fetchall()
+
+    if not result:
+        return CheckResult(
+            name="derivation_type_consistency",
+            passed=True,
+            message="Derivation type consistency",
+        )
+    else:
+        details = [f"{row[1]}: {row[2]} without target ({row[3][:30]}...)" for row in result[:10]]
+        return CheckResult(
+            name="derivation_type_consistency",
+            passed=False,
+            message=f"Derivation type consistency: {len(result)} without target lemma",
+            details=details,
+        )
 
 
 def check_number_class_consistency(conn: Connection) -> CheckResult:
@@ -357,6 +454,11 @@ COVERAGE_THRESHOLDS = {
     "written_source_pct": 100.0,
     "frequency_coverage_pct": 60.0,
     "italian_sentences": 900_000,
+    # Relationship coverage thresholds
+    "clipping_relationships": 20,  # bici, auto, moto, etc.
+    "reflexive_relationships": 2000,  # lavarsi, alzarsi, etc.
+    "gender_counterpart_relationships": 150,  # professore↔professoressa
+    "definition_derivations": 1500,  # diminutives, augmentatives, etc.
 }
 
 
@@ -506,6 +608,58 @@ def check_coverage_thresholds(conn: Connection) -> list[CheckResult]:
         )
     )
 
+    # Clipping relationships (bici→bicicletta, auto→automobile, etc.)
+    query = text("SELECT COUNT(*) FROM lemma_relationships WHERE relationship_type = 'clipping_of'")
+    count = conn.execute(query).scalar() or 0
+    threshold = COVERAGE_THRESHOLDS["clipping_relationships"]
+    results.append(
+        CheckResult(
+            name="clipping_relationships",
+            passed=count >= threshold,
+            message=f"Clipping relationships: {count:,} (min: {threshold:,})",
+        )
+    )
+
+    # Reflexive relationships (lavarsi→lavare, alzarsi→alzare, etc.)
+    query = text(
+        "SELECT COUNT(*) FROM lemma_relationships WHERE relationship_type = 'reflexive_of'"
+    )
+    count = conn.execute(query).scalar() or 0
+    threshold = COVERAGE_THRESHOLDS["reflexive_relationships"]
+    results.append(
+        CheckResult(
+            name="reflexive_relationships",
+            passed=count >= threshold,
+            message=f"Reflexive relationships: {count:,} (min: {threshold:,})",
+        )
+    )
+
+    # Gender counterpart relationships (professore↔professoressa)
+    query = text(
+        "SELECT COUNT(*) FROM lemma_relationships WHERE relationship_type = 'gender_counterpart'"
+    )
+    count = conn.execute(query).scalar() or 0
+    threshold = COVERAGE_THRESHOLDS["gender_counterpart_relationships"]
+    results.append(
+        CheckResult(
+            name="gender_counterpart_relationships",
+            passed=count >= threshold,
+            message=f"Gender counterpart relationships: {count:,} (min: {threshold:,})",
+        )
+    )
+
+    # Definition-level derivations (cagnolino "little dog" → cane)
+    query = text("SELECT COUNT(*) FROM definitions WHERE derived_from_lemma_id IS NOT NULL")
+    count = conn.execute(query).scalar() or 0
+    threshold = COVERAGE_THRESHOLDS["definition_derivations"]
+    results.append(
+        CheckResult(
+            name="definition_derivations",
+            passed=count >= threshold,
+            message=f"Definition derivations: {count:,} (min: {threshold:,})",
+        )
+    )
+
     return results
 
 
@@ -529,6 +683,12 @@ SPOT_CHECKS: list[tuple[str, str, dict[str, Any]]] = [
     ("bello", "adjective", {"inflection_class": "4-form"}),
     ("blu", "adjective", {"inflection_class": "invariable"}),
     ("facile", "adjective", {"inflection_class": "2-form"}),
+    # Clippings (should have clipping_of relationship)
+    ("bici", "noun", {"has_clipping_relationship": True, "clipping_target": "bicicletta"}),
+    ("auto", "noun", {"has_clipping_relationship": True, "clipping_target": "automobile"}),
+    ("moto", "noun", {"has_clipping_relationship": True, "clipping_target": "motocicletta"}),
+    # Reflexive verbs (should have reflexive_of relationship)
+    ("lavàrsi", "verb", {"has_reflexive_relationship": True, "reflexive_target": "lavare"}),
 ]
 
 
@@ -592,6 +752,36 @@ def run_spot_checks(conn: Connection) -> list[CheckResult]:
             ic = conn.execute(query, {"id": lemma_id}).scalar()
             if ic != checks["inflection_class"]:
                 issues.append(f"inflection_class: {ic} != {checks['inflection_class']}")
+
+        # Check clipping relationship (e.g., bici → bicicletta)
+        if checks.get("has_clipping_relationship"):
+            target_written = checks.get("clipping_target")
+            query = text("""
+                SELECT l2.written
+                FROM lemma_relationships lr
+                JOIN lemmas l2 ON lr.target_lemma_id = l2.id
+                WHERE lr.source_lemma_id = :id AND lr.relationship_type = 'clipping_of'
+            """)
+            row = conn.execute(query, {"id": lemma_id}).fetchone()
+            if not row:
+                issues.append("clipping relationship: not found")
+            elif target_written and row[0] != target_written:
+                issues.append(f"clipping target: {row[0]} != {target_written}")
+
+        # Check reflexive relationship (e.g., lavarsi → lavare)
+        if checks.get("has_reflexive_relationship"):
+            target_written = checks.get("reflexive_target")
+            query = text("""
+                SELECT l2.written
+                FROM lemma_relationships lr
+                JOIN lemmas l2 ON lr.target_lemma_id = l2.id
+                WHERE lr.source_lemma_id = :id AND lr.relationship_type = 'reflexive_of'
+            """)
+            row = conn.execute(query, {"id": lemma_id}).fetchone()
+            if not row:
+                issues.append("reflexive relationship: not found")
+            elif target_written and row[0] != target_written:
+                issues.append(f"reflexive target: {row[0]} != {target_written}")
 
         if issues:
             results.append(
@@ -706,6 +896,8 @@ def verify_database(conn: Connection, *, verbose: bool = False) -> VerificationR
     report.integrity_checks = [
         check_orphaned_frequencies(conn),
         check_orphaned_translations(conn),
+        check_orphaned_lemma_relationships(conn),
+        check_orphaned_definition_derivations(conn),
     ]
 
     # Consistency checks
@@ -714,6 +906,7 @@ def verify_database(conn: Connection, *, verbose: bool = False) -> VerificationR
         check_adjective_class_consistency(conn),
         check_citation_form_existence(conn),
         check_metadata_row_existence(conn),
+        check_derivation_type_consistency(conn),
     ]
 
     # Coverage checks
