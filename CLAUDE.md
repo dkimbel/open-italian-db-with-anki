@@ -225,7 +225,6 @@ Use when ALL definitions of the source lemma inherit the relationship:
 - `comparative_of`: migliore → buono
 - `superlative_of`: ottimo → buono
 - `reflexive_of`: lavarsi → lavare
-- `reciprocal_of`: incontrarsi → incontrare
 
 **Tier 2: Definition-to-Lemma** (`definitions.derived_from_lemma_id`)
 

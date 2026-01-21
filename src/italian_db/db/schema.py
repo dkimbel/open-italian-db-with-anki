@@ -337,12 +337,11 @@ translations = Table(
 #
 # - pronominal_type: Classifies the type of pronominal construction:
 #   - 'reflexive': Subject acts on itself (lavarsi = wash oneself)
-#   - 'reciprocal': Subjects act on each other (incontrarsi = meet each other)
 #   - 'inherent': Verb only exists in pronominal form (pentirsi, accorgersi)
 #   - NULL: Not a pronominal verb
 #
 # For the relationship to base verbs (lavarsi → lavare), see the lemma_relationships
-# table with relationship_type = 'reflexive_of' or 'reciprocal_of'.
+# table with relationship_type = 'reflexive_of'.
 #
 # Note: Both base verb and pronominal verb keep their full conjugations, since
 # pronominal forms include clitics (mi lavo, ti lavi) and may use different
@@ -354,8 +353,8 @@ verb_metadata = Table(
     Column("lemma_id", Integer, ForeignKey("lemmas.id"), primary_key=True),
     Column("auxiliary", String(20)),  # 'avere', 'essere', 'both', NULL
     Column("transitivity", String(20)),  # 'transitive', 'intransitive', 'both', NULL
-    Column("pronominal_type", Text),  # 'reflexive', 'reciprocal', 'inherent', NULL
-    # Note: base_verb_lemma_id moved to lemma_relationships table (reflexive_of, reciprocal_of)
+    Column("pronominal_type", Text),  # 'reflexive', 'inherent', NULL
+    # Note: base_verb_lemma_id moved to lemma_relationships table (reflexive_of)
 )
 
 # Noun-specific metadata (gender classification and number behavior)

@@ -95,7 +95,6 @@ class LemmaRelationshipType(StrEnum):
 
     # Pronominal verbs
     REFLEXIVE_OF = "reflexive_of"  # lavarsi → lavare
-    RECIPROCAL_OF = "reciprocal_of"  # incontrarsi → incontrare
 
 
 # =============================================================================

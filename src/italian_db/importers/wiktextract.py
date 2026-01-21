@@ -4125,7 +4125,7 @@ def link_pronominal_verbs(conn: Connection) -> dict[str, int]:
         base_lemma_id = lemma_lookup.get(base_written)
 
         if base_lemma_id is not None:
-            # Base verb exists - this is a reflexive/reciprocal pronominal
+            # Base verb exists - this is a reflexive pronominal
             # Update pronominal_type classification
             conn.execute(
                 update(verb_metadata)
