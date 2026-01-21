@@ -348,3 +348,21 @@ The KELLY project provides ~5,300 Italian lemmas with CEFR levels (A1-C2). Howev
 | rendiconto (financial statement) | A1 | B2+ |
 
 The methodology prioritizes newspaper/business vocabulary frequency over learner needs, making it unsuitable for pedagogical CEFR tagging.
+
+### Italian WordNet (IWN-OMW)
+
+**Source:** IWN-OMW (Italian WordNet - Open Multilingual Wordnet)
+**URL:** https://github.com/valeq/IWN-OMW
+**License:** CC-BY-SA 4.0
+**Evaluated:** January 2025
+**Decision:** Not integrated
+
+IWN-OMW provides ~49K synsets with semantic relations (hypernym/hyponym chains), potentially enabling semantic category tagging (animal, food, etc.) and vocabulary organization.
+
+However, IWN only provides `(written_form, pos)` for matching, creating two insurmountable problems:
+
+1. **Homonyms**: Our database has separate lemmas for homonyms (same spelling, different etymology). "lama" has 4 noun lemmas (llama, blade, monk, mud). IWN can't tell us which synsets belong to which lemma.
+
+2. **Polysemy**: A single lemma may have multiple senses. "banco" maps to 9 synsets (bank, bench, counter, desk, etc.). Any category assignment would reflect ALL senses, not the one being studied - a card for "banco" (bank) could get tagged `category::furniture`.
+
+~31% of matchable lemmas have multiple synsets, making semantic categories unreliable for vocabulary study.
