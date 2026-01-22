@@ -422,6 +422,25 @@ def get_frequency_rank(conn: Connection, lemma_id: int) -> int | None:
     return row[0] if row else None
 
 
+def get_frequency_rank_in_pos(conn: Connection, lemma_id: int) -> int | None:
+    """Get the frequency rank within the lemma's part of speech.
+
+    Returns the pre-computed freq_rank_in_pos from the frequencies table,
+    which represents the lemma's rank among all lemmas of the same POS
+    (e.g., "5th most frequent noun").
+
+    Args:
+        conn: Database connection
+        lemma_id: The lemma ID
+
+    Returns:
+        Rank as integer (1-based), or None if lemma has no frequency data
+    """
+    stmt = select(frequencies.c.freq_rank_in_pos).where(frequencies.c.lemma_id == lemma_id)
+    row = conn.execute(stmt).fetchone()
+    return row[0] if row else None
+
+
 def get_frequency_band(conn: Connection, lemma_id: int) -> str:
     """Get frequency band tag for a lemma.
 

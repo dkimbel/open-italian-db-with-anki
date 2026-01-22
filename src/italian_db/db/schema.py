@@ -92,6 +92,7 @@ frequencies = Table(
     Column("freq_raw", Integer),  # raw count
     Column("freq_zipf", Float),  # type: ignore[arg-type] # zipf score (normalized)
     Column("corpus_version", String(20)),  # e.g., '2.1.0', '2024-01'
+    Column("freq_rank_in_pos", Integer),  # Rank within POS (1 = most frequent)
 )
 
 # Verb conjugations with explicit grammatical features

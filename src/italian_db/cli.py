@@ -35,7 +35,7 @@ from italian_db.importers import (
     import_verb_irregularity,
     import_wiktextract,
 )
-from italian_db.importers.itwac import ITWAC_CSV_FILES
+from italian_db.importers.itwac import ITWAC_CSV_FILES, compute_pos_frequency_ranks
 from italian_db.importers.morphit import (
     apply_orthography_fallback,
     apply_unstressed_fallback,
@@ -933,6 +933,13 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print(f"  Skipped (blocklisted): {stats['skipped_blocklisted']:,}")
         print(f"  Skipped (multi-word):  {stats['skipped_multiword']:,}")
         print(f"  Skipped (typo):        {stats['skipped_typo']:,}")
+        print()
+
+        # Compute per-POS frequency rankings
+        print("Computing per-POS frequency rankings...")
+        rank_stats = compute_pos_frequency_ranks(conn)
+        for pos_name, count in sorted(rank_stats.items()):
+            print(f"  {pos_name.capitalize()}: {count:,} lemmas ranked")
     print()
 
     # Tatoeba sentences

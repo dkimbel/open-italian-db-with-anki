@@ -438,6 +438,84 @@ def check_metadata_row_existence(conn: Connection) -> CheckResult:
         )
 
 
+def check_frequency_rank_completeness(conn: Connection) -> CheckResult:
+    """Check that all frequency records with freq_zipf have a freq_rank_in_pos."""
+    query = text("""
+        SELECT f.lemma_id, l.written, l.pos, f.freq_zipf
+        FROM frequencies f
+        JOIN lemmas l ON f.lemma_id = l.id
+        WHERE f.freq_zipf IS NOT NULL AND f.freq_rank_in_pos IS NULL
+    """)
+    result = conn.execute(query).fetchall()
+
+    if not result:
+        return CheckResult(
+            name="frequency_rank_completeness",
+            passed=True,
+            message="Frequency rank completeness",
+        )
+    else:
+        details = [f"{row[1]} ({row[2]}): zipf={row[3]:.2f}" for row in result[:10]]
+        return CheckResult(
+            name="frequency_rank_completeness",
+            passed=False,
+            message=f"Frequency rank completeness: {len(result)} records missing rank",
+            details=details,
+        )
+
+
+def check_frequency_rank_contiguity(conn: Connection) -> CheckResult:
+    """Check that frequency ranks are contiguous (1, 2, 3... N) within each POS.
+
+    Uses DENSE_RANK semantics: ties get the same rank, and the next rank is
+    consecutive. For example, ranks 1, 1, 2, 3 are valid (two items tied for 1st).
+    """
+    issues: list[str] = []
+
+    # Check each POS separately
+    for pos in ["verb", "noun", "adjective"]:
+        # Get max rank for this POS
+        max_query = text("""
+            SELECT MAX(f.freq_rank_in_pos)
+            FROM frequencies f
+            JOIN lemmas l ON f.lemma_id = l.id
+            WHERE l.pos = :pos
+        """)
+        max_rank = conn.execute(max_query, {"pos": pos}).scalar()
+
+        if max_rank is None:
+            continue
+
+        # Count distinct ranks for this POS
+        count_query = text("""
+            SELECT COUNT(DISTINCT f.freq_rank_in_pos)
+            FROM frequencies f
+            JOIN lemmas l ON f.lemma_id = l.id
+            WHERE l.pos = :pos AND f.freq_rank_in_pos IS NOT NULL
+        """)
+        distinct_count = conn.execute(count_query, {"pos": pos}).scalar() or 0
+
+        # With DENSE_RANK, max_rank should equal distinct_count
+        if max_rank != distinct_count:
+            issues.append(
+                f"{pos}: max_rank={max_rank} but distinct_count={distinct_count} (gap detected)"
+            )
+
+    if not issues:
+        return CheckResult(
+            name="frequency_rank_contiguity",
+            passed=True,
+            message="Frequency rank contiguity",
+        )
+    else:
+        return CheckResult(
+            name="frequency_rank_contiguity",
+            passed=False,
+            message=f"Frequency rank contiguity: {len(issues)} POS with gaps",
+            details=issues,
+        )
+
+
 # =============================================================================
 # Coverage Checks
 # =============================================================================
@@ -907,6 +985,8 @@ def verify_database(conn: Connection, *, verbose: bool = False) -> VerificationR
         check_citation_form_existence(conn),
         check_metadata_row_existence(conn),
         check_derivation_type_consistency(conn),
+        check_frequency_rank_completeness(conn),
+        check_frequency_rank_contiguity(conn),
     ]
 
     # Coverage checks
