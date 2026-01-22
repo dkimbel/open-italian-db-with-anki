@@ -31,7 +31,7 @@ from anki_gen.queries import (
     generate_english_prompt,
     get_english_infinitive,
     get_example_sentence_with_fallback,
-    get_frequency_band,
+    get_frequency_bands,
     get_present_indicative_forms,
     get_verb_by_lemma,
     validate_verb_list,
@@ -129,13 +129,13 @@ def build_verb_tags(
     tense_english = tense_info.get("english_name", tense_id.replace("_", " "))
     tense_tag = f"tense::{tense_english.replace(' ', '-')}"
 
-    # Get frequency band
-    freq_band = get_frequency_band(conn, verb.lemma_id)
+    # Get frequency bands (global and POS-specific)
+    freq_bands = get_frequency_bands(conn, verb.lemma_id)
 
     return [
         "pos::verb",
         tense_tag,
-        freq_band,
+        *freq_bands,
         f"infinitive::{verb.written}",
     ]
 

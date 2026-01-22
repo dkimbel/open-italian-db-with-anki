@@ -269,3 +269,4 @@ See `docs/lemmas-definitions-ipa-refactor.md` for detailed specification.
 ## Conventions
 
 - **Taskfile variables over CLI_ARGS**: Prefer `{{if .VAR}}--flag{{end}}` syntax over `{{.CLI_ARGS}}` passthrough. This allows `task foo VAR=1` instead of `task foo -- --flag`.
+- **Top-level imports**: Prefer module-level imports over inline imports inside functions. Inline imports should only be used to avoid circular import issues.

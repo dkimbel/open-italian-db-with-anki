@@ -13,6 +13,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.engine import Engine
 
@@ -558,8 +559,6 @@ def init_db(engine: Engine) -> None:
     Creates all tables and indexes if they don't exist.
     Safe to call multiple times (uses checkfirst=True by default).
     """
-    from sqlalchemy import text
-
     metadata.create_all(engine)
 
     # Create FTS5 virtual table for sentence search (can't be done via SQLAlchemy Table)

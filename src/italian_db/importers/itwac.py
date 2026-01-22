@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
-from sqlalchemy import Connection, select
+from sqlalchemy import Connection, select, text
 
 from italian_db.db.schema import frequencies, lemmas
 from italian_db.enums import POS
@@ -184,8 +184,6 @@ def compute_pos_frequency_ranks(
         Stats dict mapping POS name to count of ranked lemmas:
         {'verb': N, 'noun': M, 'adjective': P}
     """
-    from sqlalchemy import text
-
     # Use a CTE to compute DENSE_RANK() for each POS, then update in one pass
     # DENSE_RANK ensures ties get the same rank and next rank is consecutive
     update_sql = text("""
