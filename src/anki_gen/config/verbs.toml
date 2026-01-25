@@ -6,6 +6,8 @@
 # Selection methodology from SPEC.md:
 # - Irregular verbs: one representative per unique pattern, highest frequency
 # - Regular verbs: manually selected to cover -are, -ere, -ire (non-isc), -ire (isc)
+#
+# Updated 2025-01: Re-selected using PAISA frequency data (previously ItWaC)
 
 # =============================================================================
 # Irregular Verbs (32)
@@ -30,6 +32,10 @@ note = "Modal; suppletive present (devo/devi)"
 [[verbs]]
 lemma = "avere"
 note = "Auxiliary; suppletive present (ho/hai/ha)"
+
+[[verbs]]
+lemma = "venire"
+note = "G-insertion present (vengo); strong remoto (venni); syncopated future (verro)"
 
 [[verbs]]
 lemma = "volere"
@@ -68,10 +74,6 @@ lemma = "prendere"
 note = "Strong passato remoto (presi); strong participle (preso)"
 
 [[verbs]]
-lemma = "tenere"
-note = "G-insertion present (tengo); strong remoto (tenni); syncopated future (terro)"
-
-[[verbs]]
 lemma = "riuscire"
 note = "-isc- insertion pattern"
 
@@ -88,16 +90,16 @@ lemma = "porre"
 note = "Contracted from Latin ponere; double-g present (pongo)"
 
 [[verbs]]
-lemma = "offrire"
-note = "Strong participle (offerto)"
+lemma = "scoprire"
+note = "Strong participle (scoperto)"
 
 [[verbs]]
 lemma = "nascere"
 note = "Strong passato remoto (nacqui); strong participle (nato)"
 
 [[verbs]]
-lemma = "aggiungere"
-note = "Strong passato remoto; strong participle (aggiunto)"
+lemma = "raggiungere"
+note = "Strong passato remoto (raggiunsi); strong participle (raggiunto)"
 
 [[verbs]]
 lemma = "produrre"
