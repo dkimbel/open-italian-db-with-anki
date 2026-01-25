@@ -1,0 +1,94 @@
+# Curated semantic categories for learner-friendly tagging.
+#
+# Each category is anchored to one or more real IWN synset IDs.
+# The derivation algorithm walks hypernym chains from a lemma's synsets
+# and assigns the category when any synset in the chain matches an anchor.
+#
+# Selection criteria for categories:
+# - Learner utility: Would a student want to study "all animal words" together?
+# - Reasonable size: 50-500 lemmas (not 2, not 10,000)
+# - Clear boundaries: "animal" is clear; "thing" is too vague
+#
+# To find anchor synset IDs, use: task iwn-query
+# Example:
+#   find_synsets_for_lemma(conn, 'animale')
+#   walk_hypernym_chain(conn, 'iwn-00000228-n')
+#
+# NOTE: Categories without anchor_synsets are placeholders for future research.
+
+[categories.animal]
+display_name = "Animals"
+# iwn-00000228-n: "essere vivente che si nutre di sostanze organiche"
+anchor_synsets = ["iwn-00000228-n"]
+
+[categories.color]
+display_name = "Colors"
+# iwn-00005593-n: "elemento dello spettro di luce / chromatic color"
+anchor_synsets = ["iwn-00005593-n"]
+
+[categories.food]
+display_name = "Food"
+# iwn-00025895-n: "quanto serve a mantenere in vita"
+anchor_synsets = ["iwn-00025895-n"]
+
+[categories.body_part]
+display_name = "Body Parts"
+# iwn-00003055-n: "parte del corpo" (body part)
+anchor_synsets = ["iwn-00003055-n"]
+
+[categories.emotion]
+display_name = "Emotions"
+# iwn-00022855-n: "impulso dell'animo"
+anchor_synsets = ["iwn-00022855-n"]
+
+[categories.person]
+display_name = "People"
+# iwn-00000863-n: "essere umano"
+anchor_synsets = ["iwn-00000863-n"]
+
+[categories.place]
+display_name = "Places"
+# iwn-00010671-n: "spazio occupato" / geographic area
+anchor_synsets = ["iwn-00010671-n"]
+
+[categories.time]
+display_name = "Time"
+# Needs investigation - time expressions are often abstract
+anchor_synsets = []
+
+[categories.family]
+display_name = "Family"
+# iwn-00007525-n: "gruppo di persone legate da vincoli di parentela"
+anchor_synsets = ["iwn-00007525-n"]
+
+[categories.profession]
+display_name = "Professions"
+# Needs investigation - many professions share "person who..." hypernyms
+anchor_synsets = []
+
+[categories.clothing]
+display_name = "Clothing"
+# iwn-00002676-n: "capo di vestiario" (garment)
+anchor_synsets = ["iwn-00002676-n"]
+
+[categories.plant]
+display_name = "Plants"
+# iwn-00011547-n: "organismo vegetale"
+anchor_synsets = ["iwn-00011547-n"]
+
+[categories.vehicle]
+display_name = "Vehicles"
+# iwn-00003754-n: "mezzo di trasporto"
+anchor_synsets = ["iwn-00003754-n"]
+
+[categories.building]
+display_name = "Buildings"
+# iwn-00008022-n: "struttura costruita" (building, edifice)
+anchor_synsets = ["iwn-00008022-n"]
+
+# Manual overrides for words that don't fit hypernym derivation well.
+# Format: lemma_written_form = ["category_name1", "category_name2"]
+#
+# Example:
+# rosso = ["color"]  # if hypernym chain doesn't work for this adjective
+[overrides]
