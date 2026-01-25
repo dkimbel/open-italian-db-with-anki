@@ -1,4 +1,18 @@
-"""Import Tatoeba sentences with FTS5 search index."""
+"""Import Tatoeba sentences with FTS5 search index.
+
+Tatoeba File Structure
+----------------------
+Downloaded from https://downloads.tatoeba.org/exports/per_language/ita/
+
+Files used:
+- ita_sentences.tsv: sentence_id <TAB> lang <TAB> text (no header)
+- eng_sentences.tsv: sentence_id <TAB> lang <TAB> text (no header)
+- ita_eng_links.tsv: ita_sentence_id <TAB> eng_sentence_id (no header)
+
+Additional files (not currently used):
+- sentences_with_audio.csv: sentence_id, audio_id, username, license, attribution_url
+- tags.csv: sentence_id, tag_name (sparse coverage)
+"""
 
 from collections.abc import Callable
 from pathlib import Path
