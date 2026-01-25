@@ -155,7 +155,8 @@ projects. See `data-licenses/` for full license texts.
 |--------|---------|------|
 | [Wiktextract](https://kaikki.org) | CC-BY-SA 3.0 + GFDL | Lemmas, conjugations, definitions |
 | [Morph-it!](https://docs.sslmit.unibo.it) | CC-BY-SA 2.0 + LGPL | Real Italian orthography |
-| [ItWaC](https://github.com/franfranz/Word_Frequency_Lists_ITA) | MIT | Frequency data |
+| [PAISA](https://clarin.eurac.edu/repository/xmlui/handle/20.500.12124/3) | CC-BY-NC-SA 4.0 | Verb frequency data |
+| [OpenSubtitles](https://github.com/hermitdave/FrequencyWords) | CC-BY-SA 4.0 | Noun/adjective frequency data |
 | [Tatoeba](https://tatoeba.org) | CC-BY 2.0 FR | Example sentences |
 | [ParTUT](https://universaldependencies.org) | CC-BY-NC-SA 4.0 | Morphologically-tagged sentences |
 
@@ -163,7 +164,7 @@ projects. See `data-licenses/` for full license texts.
 
 - **100k+ lemmas** (verbs, nouns, adjectives) with stress-marked forms to aid pronunciation
 - **945k+ inflected forms** like verb conjugations and gendered versions of nouns and adjectives
-- **Frequency data** from 1.5B word Italian web corpus (ItWaC)
+- **Frequency data** from PAISA (verbs) and OpenSubtitles (nouns/adjectives)
 - **950k+ example sentences** with English translations (Tatoeba)
 - **Full data provenance**: every form tracks where it came from (`form_origin`, `written_source`)
 
@@ -179,14 +180,16 @@ open-italian-db-with-anki/
 │   ├── importers/          #   Data import modules
 │   │   ├── wiktextract.py  #     Lemmas, forms, definitions from Wiktionary
 │   │   ├── morphit.py      #     Fallback functions for written form derivation
-│   │   ├── itwac.py        #     Word frequency data
+│   │   ├── paisa.py        #     PAISA frequency data (verbs)
+│   │   ├── opensubtitles.py#     OpenSubtitles frequency data (nouns/adj)
 │   │   └── tatoeba.py      #     Example sentences with translations
 │   ├── normalize.py        #   Text normalization (accents, unicode)
 │   ├── articles.py         #   Italian definite article rules
 │   └── cli.py              #   Command-line interface
 ├── data/                   # Downloaded source data (~1.3GB, not committed)
 │   ├── wiktextract/        #   Kaikki.org dictionary extract
-│   ├── itwac/              #   ItWaC frequency lists
+│   ├── paisa/              #   PAISA lemma frequencies
+│   ├── opensubtitles/      #   OpenSubtitles word frequencies
 │   └── tatoeba/            #   Sentence corpus
 ├── data-licenses/          # Full license texts for each data source
 ├── tests/                  # Test suite
@@ -227,7 +230,7 @@ multiple copyleft sources. The combined work is subject to **CC-BY-NC-SA 4.0**
 due to the inclusion of ParTUT data (which has a NonCommercial restriction).
 
 If you redistribute the database or Anki decks derived from it:
-1. **Attribution required**: Credit Wiktionary/Wiktextract, Morph-it!, Tatoeba, ItWaC, and ParTUT
+1. **Attribution required**: Credit Wiktionary/Wiktextract, Morph-it!, Tatoeba, PAISA, OpenSubtitles, and ParTUT
 2. **NonCommercial**: You may not use the material for commercial purposes
 3. **Share-alike required**: Distribute under CC-BY-NC-SA 4.0 or a compatible license
 

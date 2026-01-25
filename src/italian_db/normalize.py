@@ -215,7 +215,7 @@ def _derive_single_word(word: str, *, warn: bool = True) -> str | None:
     Args:
         word: Single word to derive written form for
         warn: If True (default), log warning for multi-accent words. Set False
-            when processing external corpora (like ItWaC) with known data quality issues.
+            when processing external corpora with known data quality issues.
     """
     if not word:
         return None
@@ -282,7 +282,7 @@ def derive_written_from_stressed(stressed: str, *, warn: bool = True) -> str | N
         stressed: Form with pedagogical stress marks (e.g., "pàrlo", "parlò",
             or multi-word like "volùto dìre")
         warn: If True (default), log warning for multi-accent words. Set False
-            when processing external corpora (like ItWaC) with known data quality issues.
+            when processing external corpora with known data quality issues.
 
     Returns:
         The correct written form, or None if derivation is not confident

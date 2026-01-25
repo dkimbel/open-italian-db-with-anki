@@ -74,10 +74,10 @@ tasks:
     cmds:
       - uv run italian-db enrich-formof {{if .POS}}--pos {{.POS}}{{end}}
 
-  import-itwac:
-    desc: Import frequency data from ItWaC corpus
+  import-frequencies:
+    desc: Import frequency data from PAISA (verbs) and OpenSubtitles (nouns/adjectives)
     cmds:
-      - uv run italian-db import-itwac {{if .POS}}--pos {{.POS}}{{end}}
+      - uv run italian-db import-frequencies
 
   import-tatoeba:
     desc: Import Tatoeba sentences and link to verbs
@@ -114,11 +114,6 @@ tasks:
     cmds:
       - uv run italian-db download-wiktextract {{if .FORCE}}--force{{end}}
 
-  download-itwac:
-    desc: Download ItWaC frequency lists
-    cmds:
-      - uv run italian-db download-itwac {{if .FORCE}}--force{{end}}
-
   download-tatoeba:
     desc: Download Tatoeba sentences and links
     cmds:
@@ -133,6 +128,16 @@ tasks:
     desc: Download all data sources
     cmds:
       - uv run italian-db download-all {{if .FORCE}}--force{{end}}
+
+  download-opensubtitles:
+    desc: Download OpenSubtitles frequency lists (for evaluation)
+    cmds:
+      - uv run italian-db download-opensubtitles {{if .FORCE}}--force{{end}}
+
+  download-paisa:
+    desc: Download PAISA lemma frequencies (NC license, evaluation only)
+    cmds:
+      - uv run italian-db download-paisa {{if .FORCE}}--force{{end}}
 
   generate-deck:
     desc: Generate Anki deck from database
@@ -155,11 +160,6 @@ tasks:
     cmds:
       - uv run python -i scripts/tatoeba_query.py
 
-  itwac-query:
-    desc: Interactive DuckDB session for querying raw ItWaC frequency data
-    cmds:
-      - uv run python -i scripts/itwac_query.py
-
   partut-query:
     desc: Interactive DuckDB session for querying raw ParTUT CoNLL-U data
     cmds:
@@ -169,3 +169,13 @@ tasks:
     desc: Interactive DuckDB session with ALL source data loaded
     cmds:
       - uv run python -i scripts/data_query.py
+
+  opensub-query:
+    desc: Interactive DuckDB session for querying OpenSubtitles frequency data
+    cmds:
+      - uv run python -i scripts/opensub_query.py
+
+  paisa-query:
+    desc: Interactive DuckDB session for querying PAISA frequency data (NC license)
+    cmds:
+      - uv run python -i scripts/paisa_query.py

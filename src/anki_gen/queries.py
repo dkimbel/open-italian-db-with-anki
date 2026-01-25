@@ -397,31 +397,6 @@ def get_verb_frequency(conn: Connection, lemma_id: int) -> float | None:
     return row[0] if row else None
 
 
-def get_frequency_rank(conn: Connection, lemma_id: int) -> int | None:
-    """Get the frequency rank for a lemma (1 = most common).
-
-    Uses a window function to compute exact rank based on freq_zipf values
-    across all lemmas in the frequencies table.
-
-    Args:
-        conn: Database connection
-        lemma_id: The lemma ID
-
-    Returns:
-        Rank as integer (1-based), or None if lemma has no frequency data
-    """
-    stmt = text("""
-        WITH ranked AS (
-            SELECT lemma_id,
-                   ROW_NUMBER() OVER (ORDER BY freq_zipf DESC) as rank
-            FROM frequencies
-        )
-        SELECT rank FROM ranked WHERE lemma_id = :id
-    """)
-    row = conn.execute(stmt, {"id": lemma_id}).fetchone()
-    return row[0] if row else None
-
-
 def get_frequency_rank_in_pos(conn: Connection, lemma_id: int) -> int | None:
     """Get the frequency rank within the lemma's part of speech.
 
@@ -476,23 +451,24 @@ def _rank_to_pos_band(rank: int | None, pos: str) -> str:
 
 
 def get_frequency_bands(conn: Connection, lemma_id: int) -> list[str]:
-    """Get both global and POS-specific frequency band tags for a lemma.
+    """Get POS-specific frequency band tag for a lemma.
 
-    Returns two tags:
-        1. Global frequency band (e.g., "freq::top-500")
-        2. POS-specific frequency band (e.g., "freq-verb::top-100")
+    With the hybrid frequency approach (PAISA for verbs, OpenSubtitles for
+    nouns/adjectives), global frequency rankings are not meaningful since
+    different corpora are used for different POS. Only POS-specific rankings
+    are returned.
 
     Args:
         conn: Database connection
         lemma_id: The lemma ID
 
     Returns:
-        List of two tag strings: [global_band, pos_band]
+        List with single tag string: [pos_band]
+        e.g., ["freq-verb::top-100"]
     """
-    # Get global rank, POS rank, and POS in a single query
+    # Get POS rank and POS
     stmt = text("""
-        SELECT f.freq_rank_in_pos, l.pos,
-               (SELECT COUNT(*) + 1 FROM frequencies f2 WHERE f2.freq_zipf > f.freq_zipf) as global_rank
+        SELECT f.freq_rank_in_pos, l.pos
         FROM frequencies f
         JOIN lemmas l ON f.lemma_id = l.id
         WHERE f.lemma_id = :id
@@ -500,33 +476,20 @@ def get_frequency_bands(conn: Connection, lemma_id: int) -> list[str]:
     row = conn.execute(stmt, {"id": lemma_id}).fetchone()
 
     if row is None:
-        # No frequency data - return "other" for both
+        # No frequency data - return "other"
         # We need to get the POS from lemmas table
         pos_stmt = select(lemmas.c.pos).where(lemmas.c.id == lemma_id)
         pos_row = conn.execute(pos_stmt).fetchone()
         pos = pos_row[0].value if pos_row else "unknown"
-        return ["freq::other", f"freq-{pos}::other"]
+        return [f"freq-{pos}::other"]
 
     pos_rank = row[0]
     pos = row[1]  # Raw SQL returns string directly
-    global_rank = row[2]
-
-    # Convert global rank to band
-    if global_rank <= 100:
-        global_band = "freq::top-100"
-    elif global_rank <= 500:
-        global_band = "freq::top-500"
-    elif global_rank <= 2000:
-        global_band = "freq::top-2000"
-    elif global_rank <= 5000:
-        global_band = "freq::top-5000"
-    else:
-        global_band = "freq::other"
 
     # Get POS-specific band
     pos_band = _rank_to_pos_band(pos_rank, pos)
 
-    return [global_band, pos_band]
+    return [pos_band]
 
 
 # Irregular English verb conjugations for prompt generation

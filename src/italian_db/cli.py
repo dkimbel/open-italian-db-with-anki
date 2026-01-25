@@ -20,20 +20,22 @@ from italian_db.db import (
 )
 from italian_db.download import (
     download_all,
-    download_itwac,
+    download_opensubtitles,
+    download_paisa,
     download_partut,
     download_tatoeba,
     download_wiktextract,
 )
 from italian_db.enums import POS
 from italian_db.importers import (
-    import_itwac,
+    compute_pos_frequency_ranks,
+    import_opensubtitles,
+    import_paisa,
     import_partut,
     import_tatoeba,
     import_verb_irregularity,
     import_wiktextract,
 )
-from italian_db.importers.itwac import ITWAC_CSV_FILES, compute_pos_frequency_ranks
 from italian_db.importers.morphit import (
     apply_orthography_fallback,
     apply_unstressed_fallback,
@@ -50,7 +52,8 @@ from italian_db.importers.wiktextract import (
 from italian_db.verify import verify_database
 
 DEFAULT_WIKTEXTRACT_PATH = Path("data/wiktextract/kaikki.org-dictionary-Italian.jsonl")
-DEFAULT_ITWAC_DIR = Path("data/itwac")
+DEFAULT_PAISA_PATH = Path("data/paisa/lemma-frequencies-paisa.txt")
+DEFAULT_OPENSUBTITLES_PATH = Path("data/opensubtitles/it_full.txt")
 DEFAULT_ITA_SENTENCES_PATH = Path("data/tatoeba/ita_sentences.tsv")
 DEFAULT_ENG_SENTENCES_PATH = Path("data/tatoeba/eng_sentences.tsv")
 DEFAULT_LINKS_PATH = Path("data/tatoeba/ita_eng_links.tsv")
@@ -109,23 +112,13 @@ def cmd_enrich_formof(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_import_itwac(args: argparse.Namespace) -> int:
-    """Run the ItWaC frequency import command."""
+def cmd_import_frequencies(args: argparse.Namespace) -> int:
+    """Import frequency data from PAISA (verbs) and OpenSubtitles (nouns/adjectives)."""
     db_path = Path(args.database)
-
-    # Determine CSV path: use explicit --input, or derive from --pos
-    if args.input:
-        csv_path = Path(args.input)
-    else:
-        csv_filename = ITWAC_CSV_FILES.get(args.pos)
-        if csv_filename is None:
-            print(f"Error: No ItWaC file configured for POS '{args.pos}'", file=sys.stderr)
-            return 1
-        csv_path = DEFAULT_ITWAC_DIR / csv_filename
-
-    if not csv_path.exists():
-        print(f"Error: Input file not found: {csv_path}", file=sys.stderr)
-        return 1
+    paisa_path = Path(args.paisa) if args.paisa else DEFAULT_PAISA_PATH
+    opensubtitles_path = (
+        Path(args.opensubtitles) if args.opensubtitles else DEFAULT_OPENSUBTITLES_PATH
+    )
 
     if not db_path.exists():
         print(f"Error: Database not found: {db_path}", file=sys.stderr)
@@ -133,12 +126,60 @@ def cmd_import_itwac(args: argparse.Namespace) -> int:
         return 1
 
     print(f"Importing frequencies to: {db_path}")
-    print(f"Using ItWaC data from: {csv_path}")
-    print(f"Filtering to: {POS(args.pos).plural}")
     print()
 
     with get_connection(db_path) as conn:
-        _run_itwac_import(conn, csv_path, args.pos)
+        # Import PAISA for verbs
+        if paisa_path.exists():
+            print("=" * 60)
+            print("Importing PAISA frequencies (verbs)")
+            print("=" * 60)
+            print(f"Using: {paisa_path}")
+            _run_paisa_import(conn, paisa_path, POS.VERB)
+            print()
+        else:
+            print(f"Skipping PAISA: file not found at {paisa_path}")
+            print()
+
+        # Import OpenSubtitles for nouns
+        if opensubtitles_path.exists():
+            print("=" * 60)
+            print("Importing OpenSubtitles frequencies (nouns)")
+            print("=" * 60)
+            print(f"Using: {opensubtitles_path}")
+            _run_opensubtitles_import(conn, opensubtitles_path, POS.NOUN)
+            print()
+
+            # Import OpenSubtitles for adjectives
+            print("=" * 60)
+            print("Importing OpenSubtitles frequencies (adjectives)")
+            print("=" * 60)
+            print(f"Using: {opensubtitles_path}")
+            _run_opensubtitles_import(conn, opensubtitles_path, POS.ADJECTIVE)
+            print()
+        else:
+            print(f"Skipping OpenSubtitles: file not found at {opensubtitles_path}")
+            print()
+
+        # Compute per-POS rankings
+        print("=" * 60)
+        print("Computing per-POS frequency rankings")
+        print("=" * 60)
+        print()
+
+        # Rank PAISA (verbs)
+        if paisa_path.exists():
+            print("Ranking verbs (PAISA)...")
+            paisa_stats = compute_pos_frequency_ranks(conn, "paisa")
+            for pos_name, count in sorted(paisa_stats.items()):
+                print(f"  {pos_name.capitalize()}: {count:,} ranked")
+
+        # Rank OpenSubtitles (nouns, adjectives)
+        if opensubtitles_path.exists():
+            print("Ranking nouns/adjectives (OpenSubtitles)...")
+            opensub_stats = compute_pos_frequency_ranks(conn, "opensubtitles")
+            for pos_name, count in sorted(opensub_stats.items()):
+                print(f"  {pos_name.capitalize()}: {count:,} ranked")
 
     print()
     print("Import complete!")
@@ -415,13 +456,6 @@ def cmd_download_wiktextract(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_download_itwac(args: argparse.Namespace) -> int:
-    """Download ItWaC frequency lists."""
-    stats = download_itwac(force=args.force)
-    print(f"Downloaded: {stats['downloaded']} files, Skipped: {stats['skipped']} files")
-    return 0
-
-
 def cmd_download_tatoeba(args: argparse.Namespace) -> int:
     """Download Tatoeba sentences and links."""
     stats = download_tatoeba(force=args.force)
@@ -433,6 +467,24 @@ def cmd_download_partut(args: argparse.Namespace) -> int:
     """Download ParTUT CoNLL-U files."""
     stats = download_partut(force=args.force)
     print(f"Downloaded: {stats['downloaded']} files, Skipped: {stats['skipped']} files")
+    return 0
+
+
+def cmd_download_opensubtitles(args: argparse.Namespace) -> int:
+    """Download OpenSubtitles frequency lists (for evaluation)."""
+    stats = download_opensubtitles(force=args.force)
+    print(f"Downloaded: {stats['downloaded']} files, Skipped: {stats['skipped']} files")
+    return 0
+
+
+def cmd_download_paisa(args: argparse.Namespace) -> int:
+    """Download PAISA lemma frequencies (for evaluation, NC license)."""
+    print("NOTE: PAISA has a CC-BY-NC-SA license (NonCommercial).")
+    print("      Use for evaluation/comparison only, not as primary data source.")
+    print()
+    stats = download_paisa(force=args.force)
+    if stats["downloaded"] > 0:
+        print("Download complete!")
     return 0
 
 
@@ -602,13 +654,13 @@ def _run_formof_combined_enrichment(
     return stats
 
 
-def _run_itwac_import(
+def _run_paisa_import(
     conn: Connection, csv_path: Path, pos: POS, indent: str = "  "
 ) -> dict[str, Any] | None:
-    """Run ItWaC frequency import and print stats. Returns None if file doesn't exist."""
+    """Run PAISA frequency import and print stats. Returns None if file doesn't exist."""
     if not csv_path.exists():
         return None
-    stats = import_itwac(
+    stats = import_paisa(
         conn, csv_path, pos_filter=pos, progress_callback=_make_progress_callback()
     )
     print()
@@ -618,8 +670,30 @@ def _run_itwac_import(
     freq_pct = (matched_freq / total_freq * 100) if total_freq > 0 else 0
     print(f"{indent}Lemmas matched:     {stats['matched']:,} ({freq_pct:.0f}% of corpus frequency)")
     print(f"{indent}Lemmas not found:   {stats['not_found']:,}")
-    if stats.get("multi_accent", 0) > 0:
-        print(f"{indent}  Multi-accent:   {stats['multi_accent']:,}")
+    return stats
+
+
+def _run_opensubtitles_import(
+    conn: Connection, file_path: Path, pos: POS, indent: str = "  "
+) -> dict[str, Any] | None:
+    """Run OpenSubtitles frequency import and print stats. Returns None if file doesn't exist."""
+    if not file_path.exists():
+        return None
+    stats = import_opensubtitles(
+        conn, file_path, pos_filter=pos, progress_callback=_make_progress_callback()
+    )
+    print()
+    # Calculate match percentage
+    total_freq = stats.get("total_corpus_freq", 0)
+    matched_freq = stats.get("matched_freq", 0)
+    freq_pct = (matched_freq / total_freq * 100) if total_freq > 0 else 0
+    print(
+        f"{indent}Surface forms matched: {stats['matched']:,} ({freq_pct:.0f}% of corpus frequency)"
+    )
+    print(f"{indent}Lemmas updated:        {stats['lemmas_updated']:,}")
+    print(f"{indent}Forms not found:       {stats['not_found']:,}")
+    if stats.get("collisions", 0) > 0:
+        print(f"{indent}Form collisions:       {stats['collisions']:,}")
     return stats
 
 
@@ -708,10 +782,10 @@ def cmd_import_all(args: argparse.Namespace) -> int:
 
         # Determine step count:
         # - adjectives: 8 steps (wiktextract, form-of, lemma-written, allomorphs,
-        #                        unstressed, orthography, itwac, ipa)
+        #                        unstressed, orthography, frequencies, ipa)
         # - nouns: 8 steps (wiktextract, form-of, lemma-written, allomorphs,
-        #                   unstressed, orthography, itwac, ipa)
-        # - verbs: 7 steps (wiktextract, participles, lemma-written, form-of, itwac,
+        #                   unstressed, orthography, frequencies, ipa)
+        # - verbs: 7 steps (wiktextract, participles, lemma-written, form-of, frequencies,
         #                   verb-irregularity, ipa)
         # Note: For nouns/adj, form-of is primary source for written forms.
         if pos == POS.ADJECTIVE:
@@ -821,22 +895,23 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                     print(f"{indent}Failed:        {stats['failed']:,}")
                 print()
 
-            # ItWaC frequency import - verb: step 5, noun: step 7, adjective: step 7
+            # Frequency import - verb: step 5 (PAISA), noun/adj: step 7 (OpenSubtitles)
             if pos == POS.VERB:
-                step_itwac = 5
-            elif pos == POS.NOUN:
-                step_itwac = 7
+                step_freq = 5
+                print(f"[{step_freq}/{total_steps}] Importing PAISA frequencies...")
+                paisa_path = DEFAULT_PAISA_PATH
+                if paisa_path.exists():
+                    _run_paisa_import(conn, paisa_path, pos, indent=indent)
+                else:
+                    print(f"{indent}Skipped: PAISA file not found at {paisa_path}")
             else:
-                step_itwac = 7
-            csv_filename = ITWAC_CSV_FILES.get(pos)
-            if csv_filename:
-                csv_path = DEFAULT_ITWAC_DIR / csv_filename
-                print(f"[{step_itwac}/{total_steps}] Importing ItWaC frequencies...")
-                result = _run_itwac_import(conn, csv_path, pos, indent=indent)
-                if result is None:
-                    print(f"{indent}Skipped: ItWaC file not found")
-            else:
-                print(f"[{step_itwac}/{total_steps}] Skipped: No ItWaC file for this POS")
+                step_freq = 7
+                print(f"[{step_freq}/{total_steps}] Importing OpenSubtitles frequencies...")
+                opensub_path = DEFAULT_OPENSUBTITLES_PATH
+                if opensub_path.exists():
+                    _run_opensubtitles_import(conn, opensub_path, pos, indent=indent)
+                else:
+                    print(f"{indent}Skipped: OpenSubtitles file not found at {opensub_path}")
             print()
 
             # Step 6 (verb only): Import verb irregularity patterns
@@ -877,11 +952,22 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print(f"  Skipped (typo):        {stats['skipped_typo']:,}")
         print()
 
-        # Compute per-POS frequency rankings
+        # Compute per-POS frequency rankings for both corpora
         print("Computing per-POS frequency rankings...")
-        rank_stats = compute_pos_frequency_ranks(conn)
-        for pos_name, count in sorted(rank_stats.items()):
-            print(f"  {pos_name.capitalize()}: {count:,} lemmas ranked")
+
+        # Rank PAISA (verbs)
+        if DEFAULT_PAISA_PATH.exists():
+            print("  Ranking verbs (PAISA)...")
+            paisa_stats = compute_pos_frequency_ranks(conn, "paisa")
+            for pos_name, count in sorted(paisa_stats.items()):
+                print(f"    {pos_name.capitalize()}: {count:,} ranked")
+
+        # Rank OpenSubtitles (nouns, adjectives)
+        if DEFAULT_OPENSUBTITLES_PATH.exists():
+            print("  Ranking nouns/adjectives (OpenSubtitles)...")
+            opensub_stats = compute_pos_frequency_ranks(conn, "opensubtitles")
+            for pos_name, count in sorted(opensub_stats.items()):
+                print(f"    {pos_name.capitalize()}: {count:,} ranked")
     print()
 
     # Tatoeba sentences
@@ -983,33 +1069,31 @@ def main() -> int:
     )
     enrich_parser.set_defaults(func=cmd_enrich_formof)
 
-    # import-itwac subcommand
-    itwac_parser = subparsers.add_parser(
-        "import-itwac",
-        help="Import frequency data from ItWaC corpus",
+    # import-frequencies subcommand
+    freq_parser = subparsers.add_parser(
+        "import-frequencies",
+        help="Import frequency data from PAISA (verbs) and OpenSubtitles (nouns/adjectives)",
     )
-    itwac_parser.add_argument(
-        "-i",
-        "--input",
-        type=str,
-        default=None,
-        help="Path to ItWaC CSV file (auto-detected from --pos if not specified)",
-    )
-    itwac_parser.add_argument(
+    freq_parser.add_argument(
         "-d",
         "--database",
         type=str,
         default=str(DEFAULT_DB_PATH),
         help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
     )
-    itwac_parser.add_argument(
-        "--pos",
-        type=POS,
-        default=POS.VERB,
-        choices=list(POS),
-        help="Part of speech to import (default: verb)",
+    freq_parser.add_argument(
+        "--paisa",
+        type=str,
+        default=None,
+        help=f"Path to PAISA frequency file (default: {DEFAULT_PAISA_PATH})",
     )
-    itwac_parser.set_defaults(func=cmd_import_itwac)
+    freq_parser.add_argument(
+        "--opensubtitles",
+        type=str,
+        default=None,
+        help=f"Path to OpenSubtitles frequency file (default: {DEFAULT_OPENSUBTITLES_PATH})",
+    )
+    freq_parser.set_defaults(func=cmd_import_frequencies)
 
     # import-tatoeba subcommand
     tatoeba_parser = subparsers.add_parser(
@@ -1131,18 +1215,6 @@ def main() -> int:
     )
     dl_wikt_parser.set_defaults(func=cmd_download_wiktextract)
 
-    # download-itwac subcommand
-    dl_itwac_parser = subparsers.add_parser(
-        "download-itwac",
-        help="Download ItWaC frequency lists",
-    )
-    dl_itwac_parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Re-download even if files already exist",
-    )
-    dl_itwac_parser.set_defaults(func=cmd_download_itwac)
-
     # download-tatoeba subcommand
     dl_tatoeba_parser = subparsers.add_parser(
         "download-tatoeba",
@@ -1166,6 +1238,30 @@ def main() -> int:
         help="Re-download even if files already exist",
     )
     dl_partut_parser.set_defaults(func=cmd_download_partut)
+
+    # download-opensubtitles subcommand (evaluation)
+    dl_opensub_parser = subparsers.add_parser(
+        "download-opensubtitles",
+        help="Download OpenSubtitles frequency lists (for evaluation)",
+    )
+    dl_opensub_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if files already exist",
+    )
+    dl_opensub_parser.set_defaults(func=cmd_download_opensubtitles)
+
+    # download-paisa subcommand (evaluation, NC license)
+    dl_paisa_parser = subparsers.add_parser(
+        "download-paisa",
+        help="Download PAISA lemma frequencies (for evaluation, NC license)",
+    )
+    dl_paisa_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if file already exists",
+    )
+    dl_paisa_parser.set_defaults(func=cmd_download_paisa)
 
     # download-all subcommand
     dl_all_parser = subparsers.add_parser(

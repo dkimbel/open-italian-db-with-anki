@@ -9,19 +9,11 @@ import requests
 # Data directory paths
 DATA_DIR = Path("data")
 WIKTEXTRACT_DIR = DATA_DIR / "wiktextract"
-ITWAC_DIR = DATA_DIR / "itwac"
 TATOEBA_DIR = DATA_DIR / "tatoeba"
 PARTUT_DIR = DATA_DIR / "partut"
 
 # Download URLs
 WIKTEXTRACT_URL = "https://kaikki.org/dictionary/Italian/kaikki.org-dictionary-Italian.jsonl"
-
-ITWAC_BASE_URL = "https://raw.githubusercontent.com/franfranz/Word_Frequency_Lists_ITA/main"
-ITWAC_FILES = [
-    "itwac_verbs_lemmas_notail_2_1_0.csv",
-    "itwac_nouns_lemmas_notail_2_0_0.csv",
-    "itwac_adj_lemmas_notail_2_1_0.csv",
-]
 
 TATOEBA_BASE_URL = "https://downloads.tatoeba.org/exports"
 TATOEBA_FILES = {
@@ -47,6 +39,24 @@ PARTUT_ENG_FILES = [
     "en_partut-ud-dev.conllu",
     "en_partut-ud-test.conllu",
 ]
+
+# OpenSubtitles Frequency (hermitdave/FrequencyWords) - CC-BY-SA 4.0
+# Derived from OpenSubtitles2018 corpus (conversational/dialogue text)
+OPENSUBTITLES_DIR = DATA_DIR / "opensubtitles"
+OPENSUBTITLES_50K_URL = (
+    "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/it/it_50k.txt"
+)
+OPENSUBTITLES_FULL_URL = (
+    "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/it/it_full.txt"
+)
+
+# PAISA Lemma Frequencies - CC-BY-NC-SA 4.0 (NonCommercial!)
+# Web corpus from .it domain (2010), evaluation only due to NC license
+PAISA_DIR = DATA_DIR / "paisa"
+PAISA_URL = (
+    "https://clarin.eurac.edu/repository/xmlui/bitstream/handle/20.500.12124/3/"
+    "lemma-frequencies-paisa.txt.gz"
+)
 
 
 def _file_exists_and_nonempty(path: Path) -> bool:
@@ -128,31 +138,6 @@ def download_wiktextract(force: bool = False) -> dict[str, int]:
     return {"downloaded": 1, "skipped": 0}
 
 
-def download_itwac(force: bool = False) -> dict[str, int]:
-    """Download ItWaC frequency list CSV files.
-
-    Returns stats dict with 'downloaded' and 'skipped' counts.
-    """
-    downloaded = 0
-    skipped = 0
-
-    ITWAC_DIR.mkdir(parents=True, exist_ok=True)
-
-    for filename in ITWAC_FILES:
-        dest = ITWAC_DIR / filename
-        url = f"{ITWAC_BASE_URL}/{filename}"
-
-        if not force and _file_exists_and_nonempty(dest):
-            print(f"Skipping ItWaC file (already exists): {dest}")
-            skipped += 1
-            continue
-
-        _download_to_file(url, dest, f"ItWaC {filename}")
-        downloaded += 1
-
-    return {"downloaded": downloaded, "skipped": skipped}
-
-
 def download_tatoeba(force: bool = False) -> dict[str, int]:
     """Download Tatoeba sentence files.
 
@@ -230,6 +215,74 @@ def download_partut(force: bool = False) -> dict[str, int]:
     return {"downloaded": downloaded, "skipped": skipped}
 
 
+def download_opensubtitles(force: bool = False) -> dict[str, int]:
+    """Download OpenSubtitles frequency lists from hermitdave/FrequencyWords.
+
+    License: CC-BY-SA 4.0
+    Format: Space-separated 'word count' pairs, no header.
+
+    Downloads:
+    - it_50k.txt: Top 50K words with frequencies
+    - it_full.txt: Complete word list with frequencies
+
+    Returns stats dict with 'downloaded' and 'skipped' counts.
+    """
+    downloaded = 0
+    skipped = 0
+
+    OPENSUBTITLES_DIR.mkdir(parents=True, exist_ok=True)
+
+    files = {
+        "it_50k.txt": OPENSUBTITLES_50K_URL,
+        "it_full.txt": OPENSUBTITLES_FULL_URL,
+    }
+
+    for filename, url in files.items():
+        dest = OPENSUBTITLES_DIR / filename
+
+        if not force and _file_exists_and_nonempty(dest):
+            print(f"Skipping OpenSubtitles file (already exists): {dest}")
+            skipped += 1
+            continue
+
+        _download_to_file(url, dest, f"OpenSubtitles {filename}")
+        downloaded += 1
+
+    return {"downloaded": downloaded, "skipped": skipped}
+
+
+def download_paisa(force: bool = False) -> dict[str, int]:
+    """Download PAISA lemma frequencies.
+
+    License: CC-BY-NC-SA 4.0 (NonCommercial - evaluation only!)
+
+    PAISA is a large web corpus of Italian from the .it domain (2010).
+    Due to the NC license, this should only be used for evaluation/comparison,
+    not as a primary data source.
+
+    Returns stats dict with 'downloaded' and 'skipped' counts.
+    """
+    import gzip
+
+    dest = PAISA_DIR / "lemma-frequencies-paisa.txt"
+
+    if not force and _file_exists_and_nonempty(dest):
+        print(f"Skipping PAISA (already exists): {dest}")
+        return {"downloaded": 0, "skipped": 1}
+
+    # Download the gzipped file
+    content = _download_with_progress(PAISA_URL, "PAISA lemma frequencies")
+
+    # Decompress and save
+    print("  Decompressing gzip...")
+    PAISA_DIR.mkdir(parents=True, exist_ok=True)
+    decompressed = gzip.decompress(content)
+    dest.write_bytes(decompressed)
+    print(f"  Saved: {dest} ({dest.stat().st_size / (1024 * 1024):.1f} MB)")
+
+    return {"downloaded": 1, "skipped": 0}
+
+
 def download_all(force: bool = False) -> dict[str, dict[str, int]]:
     """Download all data sources.
 
@@ -244,9 +297,16 @@ def download_all(force: bool = False) -> dict[str, dict[str, int]]:
     print()
 
     print("=" * 60)
-    print("Downloading ItWaC")
+    print("Downloading PAISA (verb frequencies)")
     print("=" * 60)
-    results["itwac"] = download_itwac(force)
+    print("NOTE: PAISA has a CC-BY-NC-SA license (NonCommercial).")
+    results["paisa"] = download_paisa(force)
+    print()
+
+    print("=" * 60)
+    print("Downloading OpenSubtitles (noun/adjective frequencies)")
+    print("=" * 60)
+    results["opensubtitles"] = download_opensubtitles(force)
     print()
 
     print("=" * 60)

@@ -89,7 +89,7 @@ frequencies = Table(
     "frequencies",
     metadata,
     Column("lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False, primary_key=True),
-    Column("corpus", String(20), nullable=False, primary_key=True),  # 'itwac', 'colfis'
+    Column("corpus", String(20), nullable=False, primary_key=True),  # 'paisa', 'opensubtitles'
     Column("freq_raw", Integer),  # raw count
     Column("freq_zipf", Float),  # type: ignore[arg-type] # zipf score (normalized)
     Column("corpus_version", String(20)),  # e.g., '2.1.0', '2024-01'

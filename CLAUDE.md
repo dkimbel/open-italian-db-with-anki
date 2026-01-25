@@ -9,13 +9,13 @@ Generate Anki flashcard decks for learning Italian using linguistic databases.
 - `task stats` - Database statistics
 - `task download-all` - Download source data (~1.3GB, skips existing)
 - `task import-wiktextract` - Import dictionary data (idempotent)
-- `task import-itwac` - Frequency enrichment
+- `task import-frequencies` - Frequency enrichment (PAISA + OpenSubtitles)
 - `task generate-deck` - Create `output/italian_verbs.apkg`
 - `task preview-card VERB=parlare` - Preview card in browser
 
 ### Data Exploration
 
-DuckDB sessions for exploring raw source data: `task wikt-query`, `task tatoeba-query`, `task itwac-query`, `task partut-query`, `task opensub-query`, `task paisa-query`, `task data-query` (all sources).
+DuckDB sessions for exploring raw source data: `task wikt-query`, `task tatoeba-query`, `task partut-query`, `task opensub-query`, `task paisa-query`, `task data-query` (all sources).
 
 ## Engineering Principles
 

@@ -62,33 +62,25 @@ conn.execute("""
 """)
 
 # =============================================================================
-# ITWAC
+# FREQUENCY DATA (PAISA + OpenSubtitles)
 # =============================================================================
 conn.execute("""
-    CREATE VIEW itwac_verbs AS
-    SELECT * FROM read_csv_auto('data/itwac/itwac_verbs_lemmas_notail_2_1_0.csv',
-        encoding='latin-1')
+    CREATE VIEW paisa AS
+    SELECT
+        column0 as lemma,
+        column1::INTEGER as freq
+    FROM read_csv_auto('data/paisa/lemma-frequencies-paisa.txt',
+        delim=',', header=false, skip=2)
 """)
 
 conn.execute("""
-    CREATE VIEW itwac_nouns AS
-    SELECT * FROM read_csv_auto('data/itwac/itwac_nouns_lemmas_notail_2_0_0.csv',
-        encoding='latin-1')
-""")
-
-conn.execute("""
-    CREATE VIEW itwac_adj AS
-    SELECT * FROM read_csv_auto('data/itwac/itwac_adj_lemmas_notail_2_1_0.csv',
-        encoding='latin-1')
-""")
-
-conn.execute("""
-    CREATE VIEW itwac AS
-    SELECT Form, Freq, lemma, 'verb' as pos, fpmw, Zipf FROM itwac_verbs
-    UNION ALL
-    SELECT Form, Freq, lemma, 'noun' as pos, fpmw, Zipf FROM itwac_nouns
-    UNION ALL
-    SELECT Form, Freq, lemma, 'adj' as pos, fpmw, Zipf FROM itwac_adj
+    CREATE VIEW opensub AS
+    SELECT
+        column0 as word,
+        column1::INTEGER as freq,
+        ROW_NUMBER() OVER (ORDER BY column1::INTEGER DESC) as rank
+    FROM read_csv_auto('data/opensubtitles/it_full.txt',
+        delim=' ', header=false)
 """)
 
 # =============================================================================
@@ -141,18 +133,16 @@ print("  tatoeba_links   - Translation links (ita_id, eng_id)")
 print("  tatoeba_audio   - Sentences with audio (sentence_id, audio_id, ...)")
 print("  translations    - Pre-joined Italian-English pairs")
 print()
-print("ITWAC:")
-print("  itwac_verbs     - Verb frequencies")
-print("  itwac_nouns     - Noun frequencies")
-print("  itwac_adj       - Adjective frequencies")
-print("  itwac           - Unified frequency view (Form, Freq, lemma, pos, fpmw, Zipf)")
+print("FREQUENCY DATA:")
+print("  paisa           - PAISA lemma frequencies (lemma, freq) - used for verbs")
+print("  opensub         - OpenSubtitles frequencies (word, freq, rank) - used for nouns/adj")
 print()
 print("PARTUT:")
 print("  partut_ita_tokens - Italian tokens with morphological features")
 print("  partut_verbs      - Italian verbs (form, lemma, mood, tense, person, number)")
 print()
 print("Cross-source query examples:")
-print("  # Check if a Wiktextract word has ItWaC frequency")
+print("  # Check if a Wiktextract word has OpenSubtitles frequency")
 print(
-    "  conn.sql(\"SELECT w.word, i.Freq, i.Zipf FROM wikt w LEFT JOIN itwac i ON w.word = i.lemma WHERE w.word = 'casa'\")"
+    "  conn.sql(\"SELECT w.word, o.freq, o.rank FROM wikt w LEFT JOIN opensub o ON w.word = o.word WHERE w.word = 'casa'\")"
 )

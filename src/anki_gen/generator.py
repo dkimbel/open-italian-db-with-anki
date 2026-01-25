@@ -129,7 +129,7 @@ def build_verb_tags(
     tense_english = tense_info.get("english_name", tense_id.replace("_", " "))
     tense_tag = f"tense::{tense_english.replace(' ', '-')}"
 
-    # Get frequency bands (global and POS-specific)
+    # Get frequency bands (POS-specific only)
     freq_bands = get_frequency_bands(conn, verb.lemma_id)
 
     return [

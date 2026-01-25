@@ -18,10 +18,10 @@ Build a Python system to generate Anki flashcard decks for learning Italian, usi
 | Auxiliary (avere/essere) | Wiktextract | In forms array and categories |
 | Transitivity | Wiktextract | Tagged in senses |
 | IPA (infinitives only) | Wiktextract | ~63% coverage, includes ɛ/ɔ distinction |
-| Frequency | ItWaC | 1.5B word web corpus (MIT license) |
+| Frequency | PAISA + OpenSubtitles | Lemmatized corpus (verbs) + conversational (nouns/adj) |
 | Example sentences | Tatoeba | With translations and audio links |
 
-**Summary**: Wiktextract provides conjugations with stress marks for learning; Morph-it! provides authoritative real Italian spelling; ItWaC provides frequency data for prioritization; Tatoeba provides example sentences.
+**Summary**: Wiktextract provides conjugations with stress marks for learning; Morph-it! provides authoritative real Italian spelling; PAISA/OpenSubtitles provide frequency data for prioritization; Tatoeba provides example sentences.
 
 ---
 
@@ -48,17 +48,19 @@ Build a Python system to generate Anki flashcard decks for learning Italian, usi
 - **License**: CC-BY-SA 2.0 + LGPL
 - **Role**: Authoritative source for real written Italian spelling
 
-### Frequency: ItWaC
-- **URL**: https://github.com/franfranz/Word_Frequency_Lists_ITA
-- **Format**: CSV (ISO-8859-1 encoding)
-- **Size**: ~1.5 billion word corpus (web Italian)
-- **Files**:
-  - `itwac_verbs_lemmas_notail_2_1_0.csv`
-  - `itwac_nouns_lemmas_notail_2_0_0.csv`
-  - `itwac_adj_lemmas_notail_2_1_0.csv`
-- **Columns**: Form, Freq, lemma, POS, mode, POS2, fpmw, Zipf
-- **License**: MIT
-- **Role**: Frequency data for verb prioritization
+### Frequency: PAISA (verbs)
+- **URL**: https://clarin.eurac.edu/repository/xmlui/handle/20.500.12124/3
+- **Format**: CSV (lemma, frequency pairs)
+- **Size**: ~250M word corpus (Italian web, 2010)
+- **License**: CC-BY-NC-SA 4.0
+- **Role**: Lemmatized frequency data for verbs (avoids surface form collisions)
+
+### Frequency: OpenSubtitles (nouns/adjectives)
+- **URL**: https://github.com/hermitdave/FrequencyWords
+- **Format**: Space-separated word/frequency pairs
+- **Size**: ~500M word corpus (movie subtitles)
+- **License**: CC-BY-SA 4.0
+- **Role**: Conversational frequency data for nouns/adjectives
 
 ### Tertiary: Tatoeba
 - **URL**: https://tatoeba.org/en/downloads (or per-language: downloads.tatoeba.org/exports/per_language/ita/)
@@ -104,7 +106,7 @@ Example: `Mangiare` → `mangiare`, `reiterare` from both LeFFI and Wiktextract 
 
 ## ETL Pipeline
 
-Data flows through a pipeline: Wiktextract provides lemmas, forms, and definitions → Form-of entries provide written forms (written_source="wiktionary") → Orthography rules derive remaining written forms → ItWaC adds frequency data → Tatoeba links example sentences. Each step is idempotent and can be run with `task import-*` commands. Run `task stats` to see current database state.
+Data flows through a pipeline: Wiktextract provides lemmas, forms, and definitions → Form-of entries provide written forms (written_source="wiktionary") → Orthography rules derive remaining written forms → PAISA/OpenSubtitles add frequency data → Tatoeba links example sentences. Each step is idempotent and can be run with `task import-*` commands. Run `task stats` to see current database state.
 
 ---
 
@@ -141,7 +143,8 @@ Data flows through a pipeline: Wiktextract provides lemmas, forms, and definitio
 |--------|-----|
 | Wiktextract | https://kaikki.org/dictionary/Italian/kaikki.org-dictionary-Italian.jsonl.gz |
 | Morph-it! | https://docs.sslmit.unibo.it/lib/exe/fetch.php?media=resources:morph-it.tgz |
-| ItWaC | https://github.com/franfranz/Word_Frequency_Lists_ITA |
+| PAISA | https://clarin.eurac.edu/repository/xmlui/handle/20.500.12124/3 |
+| OpenSubtitles | https://github.com/hermitdave/FrequencyWords |
 | Tatoeba | https://tatoeba.org/en/downloads |
 | Kaikki audio | https://kaikki.org/dictionary/rawdata.html (deferred)
 
@@ -162,4 +165,4 @@ Nouns and adjectives use the same pipeline as verbs:
 2. **Card templates**: Specific Anki note types TBD
 3. **Frequency threshold**: Currently importing all; may want to prioritize by frequency for deck ordering
 4. **Audio download**: Kaikki audio dump (20.4 GB) deferred to later phase
-5. **CoLFIS frequency**: Download infrastructure currently unavailable; using ItWaC only
+5. **CoLFIS frequency**: Download infrastructure currently unavailable; using PAISA/OpenSubtitles

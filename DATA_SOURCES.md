@@ -15,9 +15,10 @@ All data can be downloaded programmatically using the provided tasks:
 task download-all
 
 # Or download individual sources:
-task download-wiktextract   # Italian dictionary (634 MB)
-task download-itwac         # Frequency lists (45 MB)
-task download-tatoeba       # Sentences and links (660 MB)
+task download-wiktextract     # Italian dictionary (634 MB)
+task download-paisa           # PAISA lemma frequencies (verbs)
+task download-opensubtitles   # OpenSubtitles frequencies (nouns/adj)
+task download-tatoeba         # Sentences and links (660 MB)
 
 # Force re-download (even if files exist):
 task download-all FORCE=1
@@ -105,11 +106,19 @@ The import runs in stages for each part of speech (verb, noun, adjective):
                 │
                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ STEP 3: Import ItWaC Frequencies                                            │
+│ STEP 3: Import Frequency Data (PAISA + OpenSubtitles)                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│ Adds word frequency data from a 1.5 billion word Italian web corpus.        │
-│ Used to prioritize common words for Anki deck generation.                   │
+│ Adds word frequency data for prioritizing vocabulary in Anki decks:         │
+│                                                                             │
+│ VERBS: PAISA corpus (~250M words)                                           │
+│   - Already lemmatized, avoiding verb form collision issues                 │
+│   - E.g., "parte" as verb vs noun would be confused in surface forms        │
+│                                                                             │
+│ NOUNS/ADJECTIVES: OpenSubtitles (~500M words)                               │
+│   - Surface forms aggregated to lemma level                                 │
+│   - Better conversational vocabulary than formal web corpora                │
+│   - E.g., "ciao" ranks #153 vs #289K in formal corpora                      │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
                 │
@@ -206,24 +215,50 @@ Wiktextract Italian dictionary. See `FRENCH_LOANWORD_WHITELIST` in
 }]}
 ```
 
-## ItWaC Frequency Lists (data/itwac/)
+## PAISA Lemma Frequencies (data/paisa/)
 
-**Source:** Word frequency lists derived from the Italian Web as Corpus (itWaC)
-**URL:** https://github.com/franfranz/Word_Frequency_Lists_ITA
-**Corpus:** itWaC (~1.5 billion words of web Italian)
-**License:** MIT
+**Source:** PAISA corpus (Paisà - Piattaforma per l'Apprendimento dell'Italiano Su corpora Annotati)
+**URL:** https://clarin.eurac.edu/repository/xmlui/handle/20.500.12124/3
+**Corpus:** Large Italian web corpus (~250M words from .it domains, 2010)
+**License:** CC-BY-NC-SA 4.0 (NonCommercial)
 **Files:**
-- `itwac_verbs_lemmas_notail_2_1_0.csv`
-- `itwac_nouns_lemmas_notail_2_0_0.csv`
-- `itwac_adj_lemmas_notail_2_1_0.csv`
+- `lemma-frequencies-paisa.txt` - Pre-lemmatized frequency data
 
-**Note:** Files are encoded in ISO-8859-1 (Latin-1), not UTF-8.
+**Why PAISA for Verbs:**
+PAISA provides already-lemmatized frequency data, avoiding the verb surface form collision
+problem. For example, "parte" appears as both a verb form (from "partire") and a common
+noun, which would confuse surface-form frequency aggregation.
 
-**Sample Data:**
+**Sample Data:** (CSV with 2 comment lines, lemma,frequency format)
 ```csv
-"Form","Freq","lemma","POS","fpmw","Zipf"
-"sono",3317859,"essere","VER",1737.257,6.24
-"parte",2068220,"parte","NOUN",1082.936,6.035
+# lemma frequencies for paisa corpus
+# source: ...
+essere,2500000
+avere,1800000
+fare,1200000
+```
+
+## OpenSubtitles Frequency Data (data/opensubtitles/)
+
+**Source:** hermitdave/FrequencyWords (derived from OpenSubtitles2018 corpus)
+**URL:** https://github.com/hermitdave/FrequencyWords
+**Corpus:** OpenSubtitles2018 (~500M words of conversational Italian from movie subtitles)
+**License:** CC-BY-SA 4.0
+**Files:**
+- `it_50k.txt` - Top 50K words with frequencies
+- `it_full.txt` - Complete word list with frequencies
+
+**Why OpenSubtitles for Nouns/Adjectives:**
+OpenSubtitles represents conversational vocabulary much better than formal web corpora.
+Common words like "ciao" (hello) rank #153 in OpenSubtitles vs #289,038 in ItWaC.
+Surface form aggregation works well for nouns/adjectives since collisions are less
+problematic than for verbs.
+
+**Sample Data:** (space-separated word frequency pairs)
+```
+non 12500000
+che 11800000
+io 8200000
 ```
 
 ## Tatoeba (data/tatoeba/)
@@ -290,6 +325,36 @@ Each subdirectory contains a LICENSE file with the full license text.
 ---
 
 ## Evaluated but Not Used
+
+### ItWaC Frequency Lists
+
+**Source:** Word frequency lists derived from the Italian Web as Corpus (itWaC)
+**URL:** https://github.com/franfranz/Word_Frequency_Lists_ITA
+**Corpus:** itWaC (~1.5 billion words of web Italian)
+**License:** MIT
+**Evaluated:** January 2025
+**Decision:** Replaced by PAISA + OpenSubtitles hybrid approach
+
+ItWaC was the original frequency source but analysis revealed significant issues:
+
+1. **Heavy legal/bureaucratic bias**: Web crawling of .it domains captured disproportionate
+   amounts of legal and governmental text. Words like "decreto" (decree) and "comma" (clause)
+   rank in the top 100, while "ciao" (hello) ranks #289,038.
+
+2. **Poor conversational vocabulary rankings**: Common everyday words are severely underranked
+   compared to conversational corpora like OpenSubtitles.
+
+3. **Surface form issues for verbs**: Lemmatization in ItWaC is less reliable, causing
+   collisions between homographic forms (e.g., "parte" as noun vs verb).
+
+| Word | ItWaC Rank | OpenSubtitles Rank | Issue |
+|------|------------|-------------------|-------|
+| decreto | 69 | 16,121 | Bureaucratic bias |
+| comma | 27 | 33,158 | Legal jargon |
+| ciao | 289,038 | 153 | Missing conversational |
+| mamma | 1,725 | 191 | Underranked |
+
+**Replacement:** PAISA for verbs (lemmatized), OpenSubtitles for nouns/adjectives (conversational).
 
 ### KELLY Project Italian CEFR Vocabulary
 
