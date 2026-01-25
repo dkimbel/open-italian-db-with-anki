@@ -178,7 +178,7 @@ open-italian-db-with-anki/
 │   │   └── connection.py   #     Database session management
 │   ├── importers/          #   Data import modules
 │   │   ├── wiktextract.py  #     Lemmas, forms, definitions from Wiktionary
-│   │   ├── morphit.py      #     Real Italian orthography enrichment
+│   │   ├── morphit.py      #     Fallback functions for written form derivation
 │   │   ├── itwac.py        #     Word frequency data
 │   │   └── tatoeba.py      #     Example sentences with translations
 │   ├── normalize.py        #   Text normalization (accents, unicode)
@@ -186,7 +186,6 @@ open-italian-db-with-anki/
 │   └── cli.py              #   Command-line interface
 ├── data/                   # Downloaded source data (~1.3GB, not committed)
 │   ├── wiktextract/        #   Kaikki.org dictionary extract
-│   ├── morphit/            #   Morph-it! lexicon
 │   ├── itwac/              #   ItWaC frequency lists
 │   └── tatoeba/            #   Sentence corpus
 ├── data-licenses/          # Full license texts for each data source
@@ -214,7 +213,6 @@ Where the grammatical form itself came from:
 ### Written source (`written_source` column)
 
 Where the correct Italian spelling came from:
-- `morphit` — authoritative spelling from Morph-it! academic lexicon
 - `wiktionary` — from Wiktionary form-of entry
 - `derived:orthography_rule` — computed using Italian spelling rules
 - `fallback:no_accent` — stress mark simply removed (for unaccented words)

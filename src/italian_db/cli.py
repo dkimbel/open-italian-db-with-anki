@@ -21,7 +21,6 @@ from italian_db.db import (
 from italian_db.download import (
     download_all,
     download_itwac,
-    download_morphit,
     download_partut,
     download_tatoeba,
     download_wiktextract,
@@ -29,7 +28,6 @@ from italian_db.download import (
 from italian_db.enums import POS
 from italian_db.importers import (
     import_itwac,
-    import_morphit,
     import_partut,
     import_tatoeba,
     import_verb_irregularity,
@@ -52,7 +50,6 @@ from italian_db.importers.wiktextract import (
 from italian_db.verify import verify_database
 
 DEFAULT_WIKTEXTRACT_PATH = Path("data/wiktextract/kaikki.org-dictionary-Italian.jsonl")
-DEFAULT_MORPHIT_PATH = Path("data/morphit/morph-it.txt")
 DEFAULT_ITWAC_DIR = Path("data/itwac")
 DEFAULT_ITA_SENTENCES_PATH = Path("data/tatoeba/ita_sentences.tsv")
 DEFAULT_ENG_SENTENCES_PATH = Path("data/tatoeba/eng_sentences.tsv")
@@ -106,33 +103,6 @@ def cmd_enrich_formof(args: argparse.Namespace) -> int:
 
     with get_connection(db_path) as conn:
         _run_formof_combined_enrichment(conn, jsonl_path, args.pos)
-
-    print()
-    print("Enrichment complete!")
-    return 0
-
-
-def cmd_import_morphit(args: argparse.Namespace) -> int:
-    """Run the Morph-it! enrichment command."""
-    morphit_path = Path(args.input)
-    db_path = Path(args.database)
-
-    if not morphit_path.exists():
-        print(f"Error: Input file not found: {morphit_path}", file=sys.stderr)
-        return 1
-
-    if not db_path.exists():
-        print(f"Error: Database not found: {db_path}", file=sys.stderr)
-        print("Run 'import-wiktextract' first to create the database.", file=sys.stderr)
-        return 1
-
-    print(f"Enriching database: {db_path}")
-    print(f"Using Morph-it! data from: {morphit_path}")
-    print(f"Filtering to: {POS(args.pos).plural}")
-    print()
-
-    with get_connection(db_path) as conn:
-        _run_morphit_import(conn, morphit_path, args.pos)
 
     print()
     print("Enrichment complete!")
@@ -445,14 +415,6 @@ def cmd_download_wiktextract(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_download_morphit(args: argparse.Namespace) -> int:
-    """Download Morph-it! morphological lexicon."""
-    stats = download_morphit(force=args.force)
-    if stats["downloaded"] > 0:
-        print("Download complete!")
-    return 0
-
-
 def cmd_download_itwac(args: argparse.Namespace) -> int:
     """Download ItWaC frequency lists."""
     stats = download_itwac(force=args.force)
@@ -640,19 +602,6 @@ def _run_formof_combined_enrichment(
     return stats
 
 
-def _run_morphit_import(
-    conn: Connection, morphit_path: Path, pos: POS, indent: str = "  "
-) -> dict[str, Any]:
-    """Run Morph-it! enrichment and print stats."""
-    stats = import_morphit(
-        conn, morphit_path, pos_filter=pos, progress_callback=_make_progress_callback()
-    )
-    print()
-    print(f"{indent}Forms updated:    {stats['updated']:,}")
-    print(f"{indent}Forms not found:  {stats['not_found']:,}")
-    return stats
-
-
 def _run_itwac_import(
     conn: Connection, csv_path: Path, pos: POS, indent: str = "  "
 ) -> dict[str, Any] | None:
@@ -723,7 +672,6 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     """Run the full import pipeline for all parts of speech."""
     db_path = Path(args.database)
     jsonl_path = DEFAULT_WIKTEXTRACT_PATH
-    morphit_path = DEFAULT_MORPHIT_PATH
     ita_path = DEFAULT_ITA_SENTENCES_PATH
     eng_path = DEFAULT_ENG_SENTENCES_PATH
     links_path = DEFAULT_LINKS_PATH
@@ -731,7 +679,6 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     # Validate input files exist
     for path, name in [
         (jsonl_path, "Wiktextract JSONL"),
-        (morphit_path, "Morph-it!"),
         (ita_path, "Italian sentences"),
         (eng_path, "English sentences"),
         (links_path, "Links"),
@@ -760,19 +707,19 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print()
 
         # Determine step count:
-        # - adjectives: 9 steps (wiktextract, morphit-forms, lemma-written,
-        #                        allomorphs, form-of, unstressed, orthography, itwac, ipa)
-        # - nouns: 9 steps (wiktextract, morphit-forms, lemma-written, allomorphs,
-        #                   form-of, unstressed, orthography, itwac, ipa)
+        # - adjectives: 8 steps (wiktextract, form-of, lemma-written, allomorphs,
+        #                        unstressed, orthography, itwac, ipa)
+        # - nouns: 8 steps (wiktextract, form-of, lemma-written, allomorphs,
+        #                   unstressed, orthography, itwac, ipa)
         # - verbs: 7 steps (wiktextract, participles, lemma-written, form-of, itwac,
         #                   verb-irregularity, ipa)
-        #          Verbs skip morphit-forms/unstressed/orthography (produce 0 updates)
+        # Note: For nouns/adj, form-of is primary source for written forms.
         if pos == POS.ADJECTIVE:
-            total_steps = 9
+            total_steps = 8
         elif pos == POS.VERB:
             total_steps = 7
         else:
-            total_steps = 9
+            total_steps = 8
 
         with get_connection(db_path) as conn:
             # Step 1: Wiktextract import
@@ -792,11 +739,11 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Duplicates skipped:    {stats['duplicates_skipped']:,}")
                 print()
 
-            # Step 2 (noun/adjective only): Morph-it! form enrichment
-            # Verbs skip this - Morph-it! has no accented verb forms
+            # Step 2 (noun/adjective only): Form-of enrichment (labels + spelling)
+            # For nouns/adjectives, form-of entries are the primary source for written forms.
             if pos != POS.VERB:
-                print(f"[2/{total_steps}] Enriching forms with Morph-it! spelling...")
-                _run_morphit_import(conn, morphit_path, pos, indent=indent)
+                print(f"[2/{total_steps}] Enriching from form-of entries...")
+                _run_formof_combined_enrichment(conn, jsonl_path, pos, indent=indent)
                 print()
 
             # Step 3 (verb/noun/adjective): Lemma written enrichment (from citation forms)
@@ -844,22 +791,17 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print(f"{indent}Hardcoded added:      {stats['hardcoded_added']:,}")
                 print()
 
-            # Form-of enrichment (labels + spelling) - combined single pass
-            # verb: step 4, noun: step 5, adjective: step 5
+            # Form-of enrichment for verbs only at step 4
+            # (nouns/adjectives already ran this at step 2)
             if pos == POS.VERB:
-                step_formof = 4
-            elif pos == POS.NOUN:
-                step_formof = 5
-            else:
-                step_formof = 5
-            print(f"[{step_formof}/{total_steps}] Enriching from form-of entries...")
-            _run_formof_combined_enrichment(conn, jsonl_path, pos, indent=indent)
-            print()
+                print(f"[4/{total_steps}] Enriching from form-of entries...")
+                _run_formof_combined_enrichment(conn, jsonl_path, pos, indent=indent)
+                print()
 
             # Unstressed fallback (noun/adjective only)
             # Verbs skip this - all written values derived during lemma enrichment
             if pos != POS.VERB:
-                step_unstressed = 6
+                step_unstressed = 5
                 print(f"[{step_unstressed}/{total_steps}] Applying unstressed form fallback...")
                 stats = apply_unstressed_fallback(conn, pos_filter=pos)
                 print(f"{indent}Forms updated: {stats['updated']:,}")
@@ -868,7 +810,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             # Orthography-based written derivation (noun/adjective only)
             # Verbs skip this - all written values derived during lemma enrichment
             if pos != POS.VERB:
-                step_ortho = 7
+                step_ortho = 6
                 print(
                     f"[{step_ortho}/{total_steps}] Applying orthography-based written derivation..."
                 )
@@ -879,13 +821,13 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                     print(f"{indent}Failed:        {stats['failed']:,}")
                 print()
 
-            # ItWaC frequency import - verb: step 5, noun: step 8, adjective: step 8
+            # ItWaC frequency import - verb: step 5, noun: step 7, adjective: step 7
             if pos == POS.VERB:
                 step_itwac = 5
             elif pos == POS.NOUN:
-                step_itwac = 8
+                step_itwac = 7
             else:
-                step_itwac = 8
+                step_itwac = 7
             csv_filename = ITWAC_CSV_FILES.get(pos)
             if csv_filename:
                 csv_path = DEFAULT_ITWAC_DIR / csv_filename
@@ -904,13 +846,13 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print()
 
             # IPA import (final step for each POS)
-            # verb: step 7, noun: step 9, adjective: step 9
+            # verb: step 7, noun: step 8, adjective: step 8
             if pos == POS.VERB:
                 step_ipa = 7
             elif pos == POS.NOUN:
-                step_ipa = 9
+                step_ipa = 8
             else:
-                step_ipa = 9
+                step_ipa = 8
             print(f"[{step_ipa}/{total_steps}] Importing IPA pronunciations...")
             _run_ipa_import(conn, jsonl_path, pos, indent=indent)
             print()
@@ -1040,34 +982,6 @@ def main() -> int:
         help="Part of speech to enrich (default: verb)",
     )
     enrich_parser.set_defaults(func=cmd_enrich_formof)
-
-    # import-morphit subcommand
-    morphit_parser = subparsers.add_parser(
-        "import-morphit",
-        help="Enrich forms with real Italian spelling from Morph-it!",
-    )
-    morphit_parser.add_argument(
-        "-i",
-        "--input",
-        type=str,
-        default=str(DEFAULT_MORPHIT_PATH),
-        help=f"Path to Morph-it! file (default: {DEFAULT_MORPHIT_PATH})",
-    )
-    morphit_parser.add_argument(
-        "-d",
-        "--database",
-        type=str,
-        default=str(DEFAULT_DB_PATH),
-        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
-    )
-    morphit_parser.add_argument(
-        "--pos",
-        type=POS,
-        default=POS.VERB,
-        choices=list(POS),
-        help="Part of speech to enrich (default: verb)",
-    )
-    morphit_parser.set_defaults(func=cmd_import_morphit)
 
     # import-itwac subcommand
     itwac_parser = subparsers.add_parser(
@@ -1216,18 +1130,6 @@ def main() -> int:
         help="Re-download even if file already exists",
     )
     dl_wikt_parser.set_defaults(func=cmd_download_wiktextract)
-
-    # download-morphit subcommand
-    dl_morphit_parser = subparsers.add_parser(
-        "download-morphit",
-        help="Download Morph-it! morphological lexicon",
-    )
-    dl_morphit_parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Re-download even if file already exists",
-    )
-    dl_morphit_parser.set_defaults(func=cmd_download_morphit)
 
     # download-itwac subcommand
     dl_itwac_parser = subparsers.add_parser(

@@ -1280,7 +1280,7 @@ class TestEnrichFormSpellingFromFormOf:
             jsonl_path.unlink()
 
     def test_does_not_overwrite_existing_written_source(self) -> None:
-        """Form-of enrichment doesn't overwrite forms already filled (orthography rule or morphit)."""
+        """Form-of enrichment doesn't overwrite forms already filled by orthography rule."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
@@ -2238,10 +2238,7 @@ class TestImportAdjAllomorphs:
             jsonl_path.unlink()
 
     def test_hardcoded_allomorph_forms_added(self) -> None:
-        """Hardcoded allomorph forms (san) should be added to santo.
-
-        Note: sant' is NOT hardcoded - it comes from Morphit via fill_missing_adjective_forms().
-        """
+        """Hardcoded allomorph forms (san) should be added to santo."""
         # Parent adjective with standard forms
         santo = {
             "pos": "adj",
@@ -2268,7 +2265,7 @@ class TestImportAdjAllomorphs:
                 import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
                 stats = import_adjective_allomorphs(conn, jsonl_path)
 
-            # Should have added 1 hardcoded form: san (sant' comes from Morphit)
+            # Should have added 1 hardcoded form: san
             assert stats["hardcoded_added"] == 1
 
             with get_connection(db_path) as conn:

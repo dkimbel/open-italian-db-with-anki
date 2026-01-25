@@ -16,7 +16,6 @@ task download-all
 
 # Or download individual sources:
 task download-wiktextract   # Italian dictionary (634 MB)
-task download-morphit       # Morphological lexicon (19 MB)
 task download-itwac         # Frequency lists (45 MB)
 task download-tatoeba       # Sentences and links (660 MB)
 
@@ -54,7 +53,7 @@ The import runs in stages for each part of speech (verb, noun, adjective):
 │  │   {form: "pàrli", ...}  │       │   tags: ["1st-person"]  │              │
 │  │   ... (66 forms)        │       │ }]                      │              │
 │  │ ]                       │       │                         │              │
-│  │ senses: [{gloss: ...}]  │       │ * Re-scanned in Step 3  │              │
+│  │ senses: [{gloss: ...}]  │       │ * Re-scanned in Step 2  │              │
 │  └─────────────────────────┘       └─────────────────────────┘              │
 └─────────────────────────────────────────────────────────────────────────────┘
                                       │
@@ -79,60 +78,34 @@ The import runs in stages for each part of speech (verb, noun, adjective):
                 │
                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ STEP 2: Enrich with Morph-it! Spelling (written_source = "morphit")         │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│ Wiktextract provides STRESSED forms: "pàrlo", "parlàto", "parlerà"          │
-│ These show pronunciation but aren't how Italian is normally written.        │
-│                                                                             │
-│ Morph-it! provides WRITTEN forms: "parlo", "parlato", "parlerà"             │
-│                                                                             │
-│   stressed (from Wiktextract)       │  written (from Morph-it!)             │
-│   ─────────────────────────────────│──────────────────────────────────────  │
-│   pàrlo                            │  parlo     (stress accent removed)     │
-│   parlàto                          │  parlato   (stress accent removed)     │
-│   parlerà                          │  parlerà   (accent kept - written!)    │
-│   cantò                            │  cantò     (accent kept - written!)    │
-│                                                                             │
-│ The difference: stress marks vs actual written Italian.                     │
-│ Future tense (-rà, -rò) and passato remoto 3rd person (-ò) keep accents.    │
-│                                                                             │
-│ Morph-it! is an academic resource (higher quality, but dated 2009).         │
-│ ~30% of noun/adjective forms are found in Morph-it!.                        │
-│                                                                             │
-│ NOTE: VERBS SKIP THIS STEP - they have zero Morph-it! coverage because      │
-│ Morph-it! stores verbs without accents. Verb spelling is derived directly   │
-│ from Wiktextract stressed forms using Italian orthography rules.            │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                │
-                ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ STEP 3: Enrich from Form-of Entries (combined labels + spelling)            │
+│ STEP 2: Enrich from Form-of Entries (written_source = "wiktionary")         │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │ Single pass through form-of entries extracting TWO types of data:           │
 │                                                                             │
-│ A) USAGE LABELS - For forms with special tags:                              │
+│ A) WRITTEN FORMS - The `word` field of form-of entries has the correct      │
+│   written spelling. Example: entry for "parlo" with form_of="parlare"       │
+│   tells us the written form of stressed "pàrlo" is "parlo".                 │
+│                                                                             │
+│   Wiktextract provides STRESSED forms: "pàrlo", "parlàto", "parlerà"        │
+│   Form-of entries provide WRITTEN forms: "parlo", "parlato", "parlerà"      │
+│                                                                             │
+│   The difference: stress marks (for pronunciation) vs actual written        │
+│   Italian. Future tense (-rà) and passato remoto (-ò) keep accents.         │
+│                                                                             │
+│ B) USAGE LABELS - For forms with special tags:                              │
 │   "fo"  → form_of: "fare", tags: ["literary", "regional"]                   │
 │   "diè" → form_of: "dare", tags: ["archaic"]                                │
 │   Only ~0.1% of form-of entries have labels (e.g., 226 of 353k for verbs)   │
 │                                                                             │
-│ B) SPELLING FALLBACK (written_source = "wiktionary"):                       │
-│   For forms where Morph-it! didn't have the spelling, use the form-of       │
-│   entry's word field as the written form.                                   │
-│   Example: If "pàrlo" has no Morph-it! match, get "parlo" from form-of.     │
-│                                                                             │
-│ The written_source column tracks which source provided the spelling:        │
-│   - "morphit"    = from Morph-it! (academic, higher quality)                │
-│   - "wiktionary" = from Wiktionary form-of entries (fallback)               │
-│   - "derived:*"  = from orthography rules or fallback                       │
+│ NOTE: VERBS derive spelling using Italian orthography rules during lemma    │
+│ enrichment (Step 3), since form-of matching for verbs is less reliable.     │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
                 │
                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ STEP 4: Import ItWaC Frequencies                                            │
+│ STEP 3: Import ItWaC Frequencies                                            │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │ Adds word frequency data from a 1.5 billion word Italian web corpus.        │
@@ -159,18 +132,25 @@ Italian has two types of accents in learning materials:
 1. **Required orthographic accents**: Must appear in standard written Italian (e.g., `città`, `parlò`, `perché`)
 2. **Pedagogical stress marks**: Show pronunciation but are stripped for normal writing (e.g., `pàrlo` → `parlo`)
 
+### All POS: Form-of entries provide written forms
+
+Wiktextract's form-of entries have a `word` field that contains the correct written form.
+For example, the form-of entry for "parlo" (with `form_of: "parlare"`) tells us that
+the stressed form "pàrlo" should be written as "parlo".
+
+This approach works for all parts of speech because form-of entries are generated
+from the same Wiktionary data that provides the stressed forms, ensuring consistency.
+
 ### Verbs: Derive from Wiktextract stressed forms
 
-Wiktextract provides complete verb conjugations with accurate accent marks, including required orthographic accents like `parlò`, `sarà`, `darà`.
+For verbs, we derive `written` forms directly from Wiktextract's `stressed` values
+using Italian orthography rules during the lemma enrichment phase. This is because
+verb conjugations are regular enough that the rules apply reliably.
 
-Morph-it! has **zero accented verb forms** - it stores all verbs unaccented (e.g., `parlo` not `parlò`). Therefore we derive verb `written` forms directly from Wiktextract's `stressed` values using Italian orthography rules during the Wiktextract import phase.
+### Nouns and Adjectives: Form-of entries + fallback derivation
 
-### Nouns and Adjectives: Prefer Morph-it!, fallback to derivation
-
-For nouns and adjectives, Wiktextract's stressed values sometimes **lack required orthographic accents** (e.g., `eta` instead of `età`).
-
-Morph-it! has authoritative accented forms for nouns/adjectives (e.g., `città`, `più`, `età`). Therefore we:
-1. First try Morph-it! enrichment (authoritative source)
+For nouns and adjectives:
+1. First try form-of entry enrichment (provides written form from `word` field)
 2. Then apply Italian orthography rules as a fallback for remaining NULL written values
 
 ### Loanword Handling
@@ -224,24 +204,6 @@ Wiktextract Italian dictionary. See `FRENCH_LOANWORD_WHITELIST` in
   "tags": ["first-person", "form-of", "present", "singular"],
   "form_of": [{"word": "parlare"}]
 }]}
-```
-
-## Morph-it! (data/morphit/)
-
-**Source:** Morph-it! morphological lexicon for Italian
-**URL:** https://docs.sslmit.unibo.it/doku.php?id=resources:morph-it
-**Downloaded:** `morph-it.tgz` (version 0.48, February 2009)
-**License:** CC-BY-SA 2.0 + LGPL (dual-licensed, your choice)
-**Authors:** Marco Baroni and Eros Zanchetta
-**Citation:**
-> Baroni, M. and Zanchetta, E. (2005). morph-it! A free corpus-based
-> morphological resource for the Italian language.
-
-**Sample Data:** (TSV: form, lemma, POS+features)
-```
-parlo	parlare	VER:ind+pres+1+s
-parli	parlare	VER:ind+pres+2+s
-città	città	NOUN-F:s
 ```
 
 ## ItWaC Frequency Lists (data/itwac/)
@@ -366,3 +328,30 @@ However, IWN only provides `(written_form, pos)` for matching, creating two insu
 2. **Polysemy**: A single lemma may have multiple senses. "banco" maps to 9 synsets (bank, bench, counter, desk, etc.). Any category assignment would reflect ALL senses, not the one being studied - a card for "banco" (bank) could get tagged `category::furniture`.
 
 ~31% of matchable lemmas have multiple synsets, making semantic categories unreliable for vocabulary study.
+
+### Morph-it!
+
+**Source:** Morph-it! morphological lexicon for Italian
+**URL:** https://docs.sslmit.unibo.it/doku.php?id=resources:morph-it
+**Version:** 0.48, February 2009
+**License:** CC-BY-SA 2.0 + LGPL (dual-licensed)
+**Authors:** Marco Baroni and Eros Zanchetta
+**Evaluated:** January 2025
+**Decision:** Not used
+
+Morph-it! provides ~500k Italian word forms with morphological annotations. It was initially considered as the primary source for converting stressed forms (e.g., "pàrlo") to written forms (e.g., "parlo").
+
+**Investigation findings:**
+
+1. **Wiktextract form-of entries provide the same data**: Wiktextract's form-of entries have a `word` field containing the correct written form. Analysis showed 100% overlap with Morph-it! for nouns and adjectives, with the only 2 disagreements being Morph-it! errors (e.g., "prìncipi" instead of correct "principi").
+
+2. **Morph-it! has zero verb coverage**: All verb forms are stored without accents (e.g., "parlo" not "parlò"), making it useless for verbs which need orthographic accents on futures and passato remoto.
+
+3. **Known errors**: Contains typos like "toto" instead of "totò" for the Italian lottery game, and incorrect stress marks like "prìncipi" instead of "principi".
+
+**Sample Data:** (TSV: form, lemma, POS+features)
+```
+parlo	parlare	VER:ind+pres+1+s
+parli	parlare	VER:ind+pres+2+s
+città	città	NOUN-F:s
+```

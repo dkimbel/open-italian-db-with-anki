@@ -1,9 +1,11 @@
-"""Enrich forms with real Italian spelling from Morph-it!."""
+"""Fallback functions for enriching forms with written Italian spelling.
 
-import logging
-from collections.abc import Callable, Iterator
-from pathlib import Path
-from typing import Any
+Note: The import_morphit() function has been removed. Wiktextract form-of entries
+now provide all written forms that Morphit was providing, and the only disagreements
+found were Morphit errors. See DATA_SOURCES.md for details.
+"""
+
+from collections.abc import Callable
 
 from sqlalchemy import Connection, Table, select, update
 
@@ -14,19 +16,6 @@ from italian_db.db.schema import (
     verb_forms,
 )
 from italian_db.enums import POS
-from italian_db.normalize import (
-    FRENCH_LOANWORD_WHITELIST,
-    derive_written_from_stressed,
-)
-
-logger = logging.getLogger(__name__)
-
-# Mapping of our POS names to Morph-it! tag prefixes
-POS_TAG_PREFIXES: dict[POS, str] = {
-    POS.VERB: "VER:",
-    POS.NOUN: "NOUN-",
-    POS.ADJECTIVE: "ADJ:",
-}
 
 # Mapping of our POS names to their form tables
 POS_FORM_TABLES: dict[POS, Table] = {
@@ -34,204 +23,6 @@ POS_FORM_TABLES: dict[POS, Table] = {
     POS.NOUN: noun_forms,
     POS.ADJECTIVE: adjective_forms,
 }
-
-# Corrections for known Morphit errors in noun forms
-# Applied when enriching noun_forms.written from Morphit data
-NOUN_WRITTEN_CORRECTIONS: dict[str, str] = {
-    "toto": "totò",  # Morphit error: pluralia tantum game name needs final accent
-}
-
-
-def _parse_morphit(
-    morphit_path: Path,
-) -> Iterator[tuple[str, str, str]]:
-    """Parse Morph-it! file, yielding (form, lemma, tags) tuples.
-
-    Format: tab-separated, one entry per line
-    Example: abbacchia\tabbacchiare\tVER:impr+pres+2+s
-
-    Note: Morph-it! file is ISO-8859-1 encoded.
-    """
-    with morphit_path.open(encoding="iso-8859-1") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-
-            parts = line.split("\t")
-            if len(parts) != 3:
-                continue
-
-            form, lemma, tags = parts
-            yield form, lemma, tags
-
-
-def _matches_pos(tags: str, pos_filter: POS) -> bool:
-    """Check if a Morph-it! tag matches the given POS filter.
-
-    Tag formats:
-    - Verb: VER:{mood}+{tense}+... (e.g., VER:ind+pres+1+s)
-    - Noun: NOUN-{G}:{N} (e.g., NOUN-M:s, NOUN-F:p)
-    - Adjective: ADJ:{deg}+{g}+{n} (e.g., ADJ:pos+m+s)
-    """
-    prefix = POS_TAG_PREFIXES.get(pos_filter)
-    if prefix is None:
-        return False
-    return tags.startswith(prefix)
-
-
-def _build_form_lookup(
-    morphit_path: Path, pos_filter: POS = POS.VERB
-) -> tuple[dict[str, str], dict[str, str]]:
-    """Build lookup dicts for Morphit forms.
-
-    Returns two lookups:
-    1. exact_lookup: form (with accents) -> form (exact match)
-    2. normalized_lookup: normalized_form -> real_form (fallback)
-
-    The exact lookup is used first to preserve written accents (e.g., "parlò").
-    The normalized lookup is used as fallback for pronunciation-only stress marks
-    (e.g., "pàrlo" -> "parlo").
-
-    When multiple entries exist for the same normalized form in the fallback,
-    the first occurrence is kept.
-    """
-    exact_lookup: dict[str, str] = {}
-    normalized_lookup: dict[str, str] = {}
-
-    for form, _lemma, tags in _parse_morphit(morphit_path):
-        if not _matches_pos(tags, pos_filter):
-            continue
-
-        # Store exact form (with accents intact)
-        exact_lookup[form] = form
-
-        # Also store written form for fallback (preserves meaningful final accents)
-        # Use warn=False since Morphit contains French loanwords with multi-accents
-        written = derive_written_from_stressed(form, warn=False) or form
-        if written not in normalized_lookup:
-            normalized_lookup[written] = form
-
-    return exact_lookup, normalized_lookup
-
-
-def import_morphit(
-    conn: Connection,
-    morphit_path: Path,
-    *,
-    pos_filter: POS = POS.VERB,
-    batch_size: int = 1000,
-    progress_callback: Callable[[int, int], None] | None = None,
-) -> dict[str, int]:
-    """Update POS-specific form tables with real Italian spelling from Morph-it!.
-
-    This enrichment phase:
-    1. Parses Morph-it! to build normalized_form -> real_form lookup
-    2. Updates written (currently NULL) with real spelling in verb_forms/noun_forms/adjective_forms
-    3. Adds new entries to form_lookup for Morph-it! normalized forms
-
-    Note: For verbs, Morph-it! has no accented forms, so written values are derived
-    directly from stressed forms during enrich_lemma_written(). This function is
-    a no-op for verbs.
-
-    Args:
-        conn: SQLAlchemy connection
-        morphit_path: Path to morph-it.txt file
-        pos_filter: Part of speech to enrich (default: "verb")
-        batch_size: Number of updates per batch
-        progress_callback: Optional callback for progress reporting (current, total)
-
-    Returns:
-        Statistics dict with counts
-    """
-    stats = {"updated": 0, "not_found": 0, "exact_matched": 0}
-
-    # Get POS-specific form table
-    pos_form_table = POS_FORM_TABLES.get(pos_filter)
-    if pos_form_table is None:
-        msg = f"Unsupported POS: {pos_filter}"
-        raise ValueError(msg)
-
-    # Build the lookup dictionaries for the specified POS
-    # exact_lookup: preserves accents (e.g., "parlò" -> "parlò")
-    # normalized_lookup: fallback for pronunciation-only marks (e.g., "parlo" -> "parlo")
-    exact_lookup, normalized_lookup = _build_form_lookup(morphit_path, pos_filter)
-
-    # Get all forms that don't have real spelling yet from POS-specific table
-    result = conn.execute(
-        select(pos_form_table.c.id, pos_form_table.c.stressed)
-        .select_from(pos_form_table.join(lemmas, pos_form_table.c.lemma_id == lemmas.c.id))
-        .where(pos_form_table.c.written.is_(None))
-    )
-    all_forms = result.fetchall()
-    total_forms = len(all_forms)
-
-    # Batch updates
-    update_batch: list[dict[str, Any]] = []
-
-    def flush_batches() -> None:
-        nonlocal update_batch
-
-        if update_batch:
-            # Update written column in POS-specific table
-            for item in update_batch:
-                conn.execute(
-                    update(pos_form_table)
-                    .where(pos_form_table.c.id == item["id"])
-                    .values(written=item["written"], written_source=item["written_source"])
-                )
-            stats["updated"] += len(update_batch)
-            update_batch = []
-
-    for idx, row in enumerate(all_forms, 1):
-        if progress_callback and idx % 10000 == 0:
-            progress_callback(idx, total_forms)
-
-        form_id = row.id
-        stressed_form = row.stressed
-
-        # Try exact match first (preserves written accents like "parlò")
-        real_form = exact_lookup.get(stressed_form)
-        if real_form:
-            stats["exact_matched"] += 1
-        else:
-            # Only use written-form fallback if the form has accent marks to strip.
-            # Unaccented forms (e.g., "eta") should not acquire accents via fallback,
-            # as this conflates homographs (Greek letter eta vs Italian età).
-            # Use warn=False since French loanwords may have multiple accents.
-            if _has_accents(stressed_form):
-                written = derive_written_from_stressed(stressed_form, warn=False) or stressed_form
-                real_form = normalized_lookup.get(written)
-
-        if real_form:
-            # Check if this is a French loanword that should preserve its accent
-            # Morph-it! may have stripped the accent (e.g., "defaillance" not "défaillance")
-            if stressed_form in FRENCH_LOANWORD_WHITELIST:
-                real_form = FRENCH_LOANWORD_WHITELIST[stressed_form]
-                written_source = "hardcoded:loanword"
-            # Check if this is a known Morphit error for nouns
-            elif pos_filter == POS.NOUN and real_form in NOUN_WRITTEN_CORRECTIONS:
-                real_form = NOUN_WRITTEN_CORRECTIONS[real_form]
-                written_source = "hardcoded:correction"
-            else:
-                written_source = "morphit"
-            update_batch.append(
-                {"id": form_id, "written": real_form, "written_source": written_source}
-            )
-        else:
-            stats["not_found"] += 1
-
-        if len(update_batch) >= batch_size:
-            flush_batches()
-
-    # Final flush
-    flush_batches()
-
-    # Final progress callback
-    if progress_callback:
-        progress_callback(total_forms, total_forms)
-
-    return stats
 
 
 # Accented characters in Italian

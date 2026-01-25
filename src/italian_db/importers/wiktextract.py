@@ -453,7 +453,7 @@ HARDCODED_DEGREE_RELATIONSHIPS: dict[str, tuple[str, str]] = {
 # These are stored as forms under their parent lemma, not as separate lemmas
 # Format: (form, parent_lemma, gender, number, label)
 HARDCODED_ALLOMORPH_FORMS: list[tuple[str, str, str, str, str | None]] = [
-    # san is apocopic (before consonants) - not in Morphit as adjective
+    # san is apocopic (before consonants)
     ("san", "santo", "m", "singular", "apocopic"),  # San Pietro, San Marco
     # grandi plurals for grande - no wiktextract entry exists, lemma created via alt_of form processing
     # NOTE: grande has inflection_class='2-form' in adjective_metadata, so grandi is consistent
@@ -2510,7 +2510,6 @@ def _build_adjective_form_row(
             - 'inferred:two_form': Generated both genders for 2-form adjective
             - 'inferred:base_form': From lemma word field
             - 'inferred:invariable': Generated all 4 forms for invariable adjective
-            - 'morphit': From Morphit fallback
         is_citation_form: Whether this is the canonical dictionary form (masculine singular)
     """
     if should_filter_form(tags):
@@ -4763,7 +4762,7 @@ def import_adjective_allomorphs(
     if progress_callback:
         progress_callback(total_lines, total_lines)
 
-    # Import hardcoded allomorph forms (not in Wiktextract or Morphit adjective data)
+    # Import hardcoded allomorph forms (not in Wiktextract adjective data)
     for form, parent_lemma, gender, number, label in HARDCODED_ALLOMORPH_FORMS:
         # Look up parent by written form
         parent_written = derive_written_from_stressed(parent_lemma)

@@ -74,11 +74,6 @@ tasks:
     cmds:
       - uv run italian-db enrich-formof {{if .POS}}--pos {{.POS}}{{end}}
 
-  import-morphit:
-    desc: Enrich forms with real Italian spelling from Morph-it!
-    cmds:
-      - uv run italian-db import-morphit {{if .POS}}--pos {{.POS}}{{end}}
-
   import-itwac:
     desc: Import frequency data from ItWaC corpus
     cmds:
@@ -118,11 +113,6 @@ tasks:
     desc: Download Wiktextract Italian dictionary
     cmds:
       - uv run italian-db download-wiktextract {{if .FORCE}}--force{{end}}
-
-  download-morphit:
-    desc: Download Morph-it! morphological lexicon
-    cmds:
-      - uv run italian-db download-morphit {{if .FORCE}}--force{{end}}
 
   download-itwac:
     desc: Download ItWaC frequency lists
@@ -164,11 +154,6 @@ tasks:
     desc: Interactive DuckDB session for querying raw Tatoeba data
     cmds:
       - uv run python -i scripts/tatoeba_query.py
-
-  morphit-query:
-    desc: Interactive DuckDB session for querying raw MorphIt data
-    cmds:
-      - uv run python -i scripts/morphit_query.py
 
   itwac-query:
     desc: Interactive DuckDB session for querying raw ItWaC frequency data

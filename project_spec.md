@@ -104,7 +104,7 @@ Example: `Mangiare` → `mangiare`, `reiterare` from both LeFFI and Wiktextract 
 
 ## ETL Pipeline
 
-Data flows through a pipeline: Wiktextract provides lemmas, forms, and definitions → Morph-it! enriches forms with real Italian spelling (form_source="morphit") → Form-of fallback fills remaining gaps from Wiktionary (form_source="wiktionary") → ItWaC adds frequency data → Tatoeba links example sentences. Each step is idempotent and can be run with `task import-*` commands. Run `task stats` to see current database state.
+Data flows through a pipeline: Wiktextract provides lemmas, forms, and definitions → Form-of entries provide written forms (written_source="wiktionary") → Orthography rules derive remaining written forms → ItWaC adds frequency data → Tatoeba links example sentences. Each step is idempotent and can be run with `task import-*` commands. Run `task stats` to see current database state.
 
 ---
 

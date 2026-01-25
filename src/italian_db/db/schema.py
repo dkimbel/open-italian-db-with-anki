@@ -102,8 +102,8 @@ verb_forms = Table(
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False),
-    Column("written", Text),  # actual written form from Morphit (e.g., "parlò"), NULL if unknown
-    Column("written_source", Text),  # "morphit", NULL if not found
+    Column("written", Text),  # actual written form (e.g., "parlò"), NULL if unknown
+    Column("written_source", Text),  # "wiktionary", "derived:orthography_rule", etc.
     Column("stressed", Text, nullable=False),  # with stress marks (e.g., "parlò", "pàrlo")
     # Grammatical features
     Column(
@@ -142,8 +142,8 @@ noun_forms = Table(
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False),
-    Column("written", Text),  # actual written form from Morphit (e.g., "città"), NULL if unknown
-    Column("written_source", Text),  # "morphit", NULL if not found
+    Column("written", Text),  # actual written form (e.g., "città"), NULL if unknown
+    Column("written_source", Text),  # "wiktionary", "derived:orthography_rule", etc.
     Column("stressed", Text, nullable=False),  # with stress marks (e.g., "città", "càsa")
     Column("gender", Text, nullable=False),  # 'm' or 'f' (per-form, for nouns like paio/paia)
     Column("number", Text, nullable=False),  # singular, plural
@@ -187,15 +187,14 @@ noun_forms = Table(
 # - 'inferred:two_form': Generated both genders for 2-form adjective (e.g., facile)
 # - 'inferred:base_form': From lemma word field when forms array empty
 # - 'inferred:invariable': Generated all 4 forms for inv:1 flagged adjectives
-# - 'morphit': Fallback from Morphit for adjectives with missing forms
 #
 adjective_forms = Table(
     "adjective_forms",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("lemma_id", Integer, ForeignKey("lemmas.id"), nullable=False),
-    Column("written", Text),  # actual written form from Morphit (e.g., "bella"), NULL if unknown
-    Column("written_source", Text),  # "morphit", NULL if not found
+    Column("written", Text),  # actual written form (e.g., "bella"), NULL if unknown
+    Column("written_source", Text),  # "wiktionary", "derived:orthography_rule", etc.
     Column("stressed", Text, nullable=False),  # with stress marks (e.g., "bèlla")
     Column("gender", Text, nullable=False),  # 'm', 'f'
     Column("number", Text, nullable=False),  # singular, plural

@@ -62,19 +62,6 @@ conn.execute("""
 """)
 
 # =============================================================================
-# MORPHIT
-# =============================================================================
-conn.execute("""
-    CREATE VIEW morphit AS
-    SELECT * FROM read_csv_auto('data/morphit/morph-it.txt',
-        delim='\t',
-        header=false,
-        encoding='latin-1',
-        columns={'surface_form': 'VARCHAR', 'lemma': 'VARCHAR', 'pos_tag': 'VARCHAR'},
-        ignore_errors=true)
-""")
-
-# =============================================================================
 # ITWAC
 # =============================================================================
 conn.execute("""
@@ -154,9 +141,6 @@ print("  tatoeba_links   - Translation links (ita_id, eng_id)")
 print("  tatoeba_audio   - Sentences with audio (sentence_id, audio_id, ...)")
 print("  translations    - Pre-joined Italian-English pairs")
 print()
-print("MORPHIT:")
-print("  morphit         - Surface forms (surface_form, lemma, pos_tag)")
-print()
 print("ITWAC:")
 print("  itwac_verbs     - Verb frequencies")
 print("  itwac_nouns     - Noun frequencies")
@@ -168,11 +152,6 @@ print("  partut_ita_tokens - Italian tokens with morphological features")
 print("  partut_verbs      - Italian verbs (form, lemma, mood, tense, person, number)")
 print()
 print("Cross-source query examples:")
-print("  # Find Tatoeba sentences for a MorphIt lemma")
-print(
-    "  conn.sql(\"SELECT DISTINCT m.surface_form, t.italian FROM morphit m JOIN translations t ON t.italian LIKE '%' || m.surface_form || '%' WHERE m.lemma = 'parlare' LIMIT 10\")"
-)
-print()
 print("  # Check if a Wiktextract word has ItWaC frequency")
 print(
     "  conn.sql(\"SELECT w.word, i.Freq, i.Zipf FROM wikt w LEFT JOIN itwac i ON w.word = i.lemma WHERE w.word = 'casa'\")"

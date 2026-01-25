@@ -2,8 +2,6 @@
 
 import bz2
 import sys
-import tarfile
-from io import BytesIO
 from pathlib import Path
 
 import requests
@@ -11,14 +9,12 @@ import requests
 # Data directory paths
 DATA_DIR = Path("data")
 WIKTEXTRACT_DIR = DATA_DIR / "wiktextract"
-MORPHIT_DIR = DATA_DIR / "morphit"
 ITWAC_DIR = DATA_DIR / "itwac"
 TATOEBA_DIR = DATA_DIR / "tatoeba"
 PARTUT_DIR = DATA_DIR / "partut"
 
 # Download URLs
 WIKTEXTRACT_URL = "https://kaikki.org/dictionary/Italian/kaikki.org-dictionary-Italian.jsonl"
-MORPHIT_URL = "https://docs.sslmit.unibo.it/lib/exe/fetch.php?media=resources:morph-it.tgz"
 
 ITWAC_BASE_URL = "https://raw.githubusercontent.com/franfranz/Word_Frequency_Lists_ITA/main"
 ITWAC_FILES = [
@@ -130,40 +126,6 @@ def download_wiktextract(force: bool = False) -> dict[str, int]:
 
     _download_to_file(WIKTEXTRACT_URL, dest, "Wiktextract Italian dictionary")
     return {"downloaded": 1, "skipped": 0}
-
-
-def download_morphit(force: bool = False) -> dict[str, int]:
-    """Download and extract Morph-it! morphological lexicon.
-
-    Returns stats dict with 'downloaded' and 'skipped' counts.
-    """
-    dest = MORPHIT_DIR / "morph-it.txt"
-
-    if not force and _file_exists_and_nonempty(dest):
-        print(f"Skipping Morph-it! (already exists): {dest}")
-        return {"downloaded": 0, "skipped": 1}
-
-    # Download the tgz archive
-    content = _download_with_progress(MORPHIT_URL, "Morph-it! archive")
-
-    # Extract morph-it.txt from the archive
-    print("  Extracting morph-it.txt from archive...")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
-    with tarfile.open(fileobj=BytesIO(content), mode="r:gz") as tar:
-        # Find the morph-it data file (versioned like morph-it_048.txt, not readme)
-        for member in tar.getmembers():
-            basename = member.name.split("/")[-1]
-            if basename.startswith("morph-it_") and basename.endswith(".txt"):
-                # Extract the file content
-                extracted = tar.extractfile(member)
-                if extracted is None:
-                    raise ValueError("Failed to extract morph-it data from archive")
-                dest.write_bytes(extracted.read())
-                print(f"  Extracted: {dest} ({dest.stat().st_size / (1024 * 1024):.1f} MB)")
-                return {"downloaded": 1, "skipped": 0}
-
-    raise ValueError("morph-it data file not found in archive")
 
 
 def download_itwac(force: bool = False) -> dict[str, int]:
@@ -279,12 +241,6 @@ def download_all(force: bool = False) -> dict[str, dict[str, int]]:
     print("Downloading Wiktextract")
     print("=" * 60)
     results["wiktextract"] = download_wiktextract(force)
-    print()
-
-    print("=" * 60)
-    print("Downloading Morph-it!")
-    print("=" * 60)
-    results["morphit"] = download_morphit(force)
     print()
 
     print("=" * 60)
