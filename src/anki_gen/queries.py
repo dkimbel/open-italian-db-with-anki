@@ -5,8 +5,10 @@ All functions take a SQLAlchemy Connection and return dataclasses.
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import Connection, select, text
+from sqlalchemy.engine import Row
 
 from italian_db.db import (
     frequencies,
@@ -14,6 +16,36 @@ from italian_db.db import (
     verb_forms,
 )
 from italian_db.enums import POS
+
+# ============================================================================
+# Tatoeba Tag Constants
+# ============================================================================
+
+# Tags that indicate problematic sentences to exclude from example selection
+PROBLEMATIC_TAGS = frozenset(
+    {
+        "@change",
+        "@needs native check",
+        "@delete",
+        "@check",
+        "@check translation",
+    }
+)
+
+# Mapping from internal (mood, tense) to Tatoeba tag names
+# Used to require matching tense tags in example sentences
+TENSE_TO_TATOEBA_TAG: dict[tuple[str, str], str] = {
+    ("indicative", "present"): "presente",
+    ("indicative", "imperfect"): "imperfetto",
+    ("indicative", "remote"): "passato remoto",
+    ("indicative", "future"): "futuro semplice",
+    ("subjunctive", "present"): "congiuntivo presente",
+    ("subjunctive", "imperfect"): "congiuntivo imperfetto",
+    ("conditional", "present"): "condizionale presente",
+    ("imperative", "present"): "imperativo presente",
+    # Compound tenses use their own tags
+    ("indicative", "present_perfect"): "passato prossimo",
+}
 
 
 @dataclass(frozen=True)
@@ -254,6 +286,11 @@ def get_example_sentence_with_fallback(
     matching (mood/tense) from ParTUT. If no suitable sentence is found,
     it falls back to FTS search across all sentences (Tatoeba + ParTUT).
 
+    The FTS fallback now uses Tatoeba tense tags when available:
+    - Prefers sentences with matching tense tag (presente, imperfetto, etc.)
+    - Prefers proverbs
+    - Excludes sentences with problematic tags (@change, @needs native check, etc.)
+
     Args:
         conn: Database connection
         verb_written: The verb infinitive (e.g., "parlare")
@@ -282,11 +319,13 @@ def get_example_sentence_with_fallback(
         if result:
             return result
 
-    # Fall back to existing FTS search
+    # Fall back to FTS search with tag-aware filtering
     return get_example_sentence(
         conn,
         verb_written,
         conjugated_forms=conjugated_forms,
+        mood=mood,
+        tense=tense,
         max_length=max_length,
         min_words=min_words,
         fallback_min_words=fallback_min_words,
@@ -298,6 +337,8 @@ def get_example_sentence(
     verb_written: str,
     *,
     conjugated_forms: list[str] | None = None,
+    mood: str | None = None,
+    tense: str | None = None,
     max_length: int = 120,
     min_words: int = 7,
     fallback_min_words: int = 3,
@@ -308,18 +349,27 @@ def get_example_sentence(
     If conjugated_forms are provided, searches for those specific forms.
     Otherwise falls back to stem matching.
 
-    Strongly prefers sentences with English translations available.
+    Ranking (most to least preferred):
+        1. Proverbs (always preferred)
+        2. Sentences with English translation
+        3. Shorter sentences
+
+    Filtering:
+        - Excludes sentences with problematic tags (@change, @needs native check, etc.)
+        - If mood/tense provided, requires matching tense tag (with fallback)
 
     Fallback chain:
-        1. 7+ words with translation
-        2. 7+ words without translation
-        3. 3+ words with translation
-        4. 3+ words without translation
+        1. With tense tag, 7+ words
+        2. Without tense tag, 7+ words
+        3. With tense tag, 3+ words
+        4. Without tense tag, 3+ words
 
     Args:
         conn: Database connection
         verb_written: The verb infinitive (e.g., "parlare")
         conjugated_forms: Optional list of specific forms to search for
+        mood: Optional mood for tense tag matching (indicative, subjunctive, etc.)
+        tense: Optional tense for tense tag matching (present, imperfect, etc.)
         max_length: Maximum sentence length in characters
         min_words: Preferred minimum number of words in sentence
         fallback_min_words: Fallback minimum if no sentence with min_words found
@@ -342,11 +392,28 @@ def get_example_sentence(
                 break
         fts_query = f"{stem}*"
 
-    # Query that joins with translations and returns both Italian and English
-    # Orders by: translation availability first (sentences WITH translations come first),
-    # then by sentence length (shortest first)
-    # sentences_fts.id and translations.*_sentence_id reference sentences.id (surrogate)
-    stmt = text("""
+    # Determine tense tag to require (if mood/tense provided)
+    tense_tag: str | None = None
+    if mood and tense:
+        tense_tag = TENSE_TO_TATOEBA_TAG.get((mood, tense))
+
+    # Build the query with tag filtering
+    # - Exclude sentences with problematic tags
+    # - Optionally require tense tag (when tense_tag is set and require_tense is True)
+    # - Prefer proverbs (always)
+    # - Prefer sentences with English translation
+    # - Prefer shorter sentences
+    def _build_query(require_tense: bool) -> str:
+        tense_filter = ""
+        if tense_tag and require_tense:
+            tense_filter = """
+          AND EXISTS (
+              SELECT 1 FROM sentence_tags st2
+              WHERE st2.sentence_id = s.id AND st2.tag = :tense_tag
+          )"""
+
+        # _problematic_tags_sql() generates literals from a hardcoded frozenset (safe)
+        return f"""
         SELECT s.id, s.text, eng.text as english
         FROM sentences_fts fts
         JOIN sentences s ON fts.id = s.id
@@ -356,30 +423,60 @@ def get_example_sentence(
           AND s.lang = 'ita'
           AND length(s.text) <= :max_length
           AND (length(s.text) - length(replace(s.text, ' ', '')) + 1) >= :min_words
+          AND NOT EXISTS (
+              SELECT 1 FROM sentence_tags st
+              WHERE st.sentence_id = s.id AND st.tag IN ({_problematic_tags_sql()})
+          ){tense_filter}
         ORDER BY
+          CASE WHEN EXISTS (
+              SELECT 1 FROM sentence_tags st3 WHERE st3.sentence_id = s.id AND st3.tag = 'proverb'
+          ) THEN 0 ELSE 1 END,
           CASE WHEN eng.text IS NOT NULL THEN 0 ELSE 1 END,
           length(s.text)
         LIMIT 1
-    """)
+    """  # noqa: S608
 
-    # Try with preferred min_words first
-    row = conn.execute(
-        stmt, {"query": fts_query, "max_length": max_length, "min_words": min_words}
-    ).fetchone()
+    def _execute_query(require_tense: bool, min_word_count: int) -> Row[Any] | None:
+        stmt = text(_build_query(require_tense))
+        params: dict[str, str | int] = {
+            "query": fts_query,
+            "max_length": max_length,
+            "min_words": min_word_count,
+        }
+        if tense_tag and require_tense:
+            params["tense_tag"] = tense_tag
+        return conn.execute(stmt, params).fetchone()
 
-    # Fall back to shorter sentences if needed
+    # Fallback chain:
+    # 1. With tense tag (if specified), preferred min_words
+    # 2. Without tense tag, preferred min_words
+    # 3. With tense tag (if specified), fallback min_words
+    # 4. Without tense tag, fallback min_words
+    row: Row[Any] | None = None
+
+    if tense_tag:
+        row = _execute_query(require_tense=True, min_word_count=min_words)
+        if row is None and fallback_min_words < min_words:
+            row = _execute_query(require_tense=True, min_word_count=fallback_min_words)
+
+    if row is None:
+        row = _execute_query(require_tense=False, min_word_count=min_words)
+
     if row is None and fallback_min_words < min_words:
-        row = conn.execute(
-            stmt, {"query": fts_query, "max_length": max_length, "min_words": fallback_min_words}
-        ).fetchone()
+        row = _execute_query(require_tense=False, min_word_count=fallback_min_words)
 
     if row is None:
         return None
 
-    italian_text = row[1]
-    english_text = row[2]  # May be None
+    italian_text: str = row[1]
+    english_text: str | None = row[2]  # May be None
 
     return ExampleSentence(italian=italian_text, english=english_text)
+
+
+def _problematic_tags_sql() -> str:
+    """Return SQL-safe list of problematic tags for IN clause."""
+    return ", ".join(f"'{tag}'" for tag in sorted(PROBLEMATIC_TAGS))
 
 
 def get_verb_frequency(conn: Connection, lemma_id: int) -> float | None:

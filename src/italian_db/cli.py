@@ -57,6 +57,8 @@ DEFAULT_OPENSUBTITLES_PATH = Path("data/opensubtitles/it_full.txt")
 DEFAULT_ITA_SENTENCES_PATH = Path("data/tatoeba/ita_sentences.tsv")
 DEFAULT_ENG_SENTENCES_PATH = Path("data/tatoeba/eng_sentences.tsv")
 DEFAULT_LINKS_PATH = Path("data/tatoeba/ita_eng_links.tsv")
+DEFAULT_TAGS_PATH = Path("data/tatoeba/tags.csv")
+DEFAULT_SENTENCES_IN_LISTS_PATH = Path("data/tatoeba/sentences_in_lists.csv")
 DEFAULT_DB_PATH = Path("italian.db")
 
 
@@ -191,6 +193,8 @@ def cmd_import_tatoeba(args: argparse.Namespace) -> int:
     ita_path = Path(args.ita_sentences)
     eng_path = Path(args.eng_sentences)
     links_path = Path(args.links)
+    tags_path = Path(args.tags) if args.tags else None
+    sentences_in_lists_path = Path(args.sentences_in_lists) if args.sentences_in_lists else None
     db_path = Path(args.database)
 
     for path, name in [
@@ -211,10 +215,21 @@ def cmd_import_tatoeba(args: argparse.Namespace) -> int:
     print(f"  Italian sentences: {ita_path}")
     print(f"  English sentences: {eng_path}")
     print(f"  Links: {links_path}")
+    if tags_path and tags_path.exists():
+        print(f"  Tags: {tags_path}")
+    if sentences_in_lists_path and sentences_in_lists_path.exists():
+        print(f"  CK whitelist: {sentences_in_lists_path}")
     print()
 
     with get_connection(db_path) as conn:
-        _run_tatoeba_import(conn, ita_path, eng_path, links_path)
+        _run_tatoeba_import(
+            conn,
+            ita_path,
+            eng_path,
+            links_path,
+            tags_path=tags_path,
+            sentences_in_lists_path=sentences_in_lists_path,
+        )
 
     print()
     print("Import complete!")
@@ -368,9 +383,15 @@ def cmd_stats(args: argparse.Namespace) -> int:
         ).scalar()
 
         # Token counts (ParTUT only)
-        from italian_db.db.schema import sentence_tokens
+        from italian_db.db.schema import sentence_tags, sentence_tokens
 
         token_count = conn.execute(select(func.count()).select_from(sentence_tokens)).scalar()
+
+        # Sentence tags count (Tatoeba)
+        tag_count = conn.execute(select(func.count()).select_from(sentence_tags)).scalar() or 0
+        unique_tags = (
+            conn.execute(select(func.count(func.distinct(sentence_tags.c.tag)))).scalar() or 0
+        )
 
         # IPA statistics
         verb_with_ipa = (
@@ -421,6 +442,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print("Sentences (Tatoeba):")
     print(f"  Italian:     {tatoeba_ita:,}")
     print(f"  English:     {tatoeba_eng:,}")
+    if tag_count > 0:
+        print(f"  Tags:        {tag_count:,} ({unique_tags:,} unique)")
     print()
     print("Sentences (ParTUT):")
     print(f"  Italian:     {partut_ita:,}")
@@ -698,18 +721,35 @@ def _run_opensubtitles_import(
 
 
 def _run_tatoeba_import(
-    conn: Connection, ita_path: Path, eng_path: Path, links_path: Path, indent: str = "  "
+    conn: Connection,
+    ita_path: Path,
+    eng_path: Path,
+    links_path: Path,
+    *,
+    tags_path: Path | None = None,
+    sentences_in_lists_path: Path | None = None,
+    indent: str = "  ",
 ) -> dict[str, Any]:
     """Run Tatoeba import and print stats."""
     stats = import_tatoeba(
-        conn, ita_path, eng_path, links_path, progress_callback=_make_progress_callback()
+        conn,
+        ita_path,
+        eng_path,
+        links_path,
+        tags_path=tags_path,
+        sentences_in_lists_path=sentences_in_lists_path,
+        progress_callback=_make_progress_callback(),
     )
     print()
     if stats["cleared"] > 0:
-        print(f"{indent}Cleared:          {stats['cleared']:,} existing sentences")
+        print(f"{indent}Cleared:           {stats['cleared']:,} existing sentences")
+    if stats.get("ck_whitelist_size", 0) > 0:
+        print(f"{indent}CK whitelist:      {stats['ck_whitelist_size']:,} English sentences")
     print(f"{indent}Italian sentences: {stats['ita_sentences']:,}")
     print(f"{indent}English sentences: {stats['eng_sentences']:,}")
     print(f"{indent}Translations:      {stats['translations']:,}")
+    if stats.get("tags", 0) > 0:
+        print(f"{indent}Tags:              {stats['tags']:,}")
     return stats
 
 
@@ -975,10 +1015,29 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     print("Importing Tatoeba sentences (Step 5 of 6)")
     print("=" * 80)
     print()
+
+    # Check for optional files
+    tags_path = DEFAULT_TAGS_PATH if DEFAULT_TAGS_PATH.exists() else None
+    sentences_in_lists_path = (
+        DEFAULT_SENTENCES_IN_LISTS_PATH if DEFAULT_SENTENCES_IN_LISTS_PATH.exists() else None
+    )
+
+    if sentences_in_lists_path:
+        print("Using CK whitelist filtering (List 907)")
+    if tags_path:
+        print("Importing sentence tags for tense matching")
     print("Importing sentences...")
 
     with get_connection(db_path) as conn:
-        _run_tatoeba_import(conn, ita_path, eng_path, links_path, indent="  ")
+        _run_tatoeba_import(
+            conn,
+            ita_path,
+            eng_path,
+            links_path,
+            tags_path=tags_path,
+            sentences_in_lists_path=sentences_in_lists_path,
+            indent="  ",
+        )
     print()
 
     # ParTUT sentences with morphological annotations
@@ -1117,6 +1176,18 @@ def main() -> int:
         type=str,
         default=str(DEFAULT_LINKS_PATH),
         help=f"Path to Italian-English links TSV (default: {DEFAULT_LINKS_PATH})",
+    )
+    tatoeba_parser.add_argument(
+        "--tags",
+        type=str,
+        default=str(DEFAULT_TAGS_PATH),
+        help=f"Path to tags CSV (default: {DEFAULT_TAGS_PATH})",
+    )
+    tatoeba_parser.add_argument(
+        "--sentences-in-lists",
+        type=str,
+        default=str(DEFAULT_SENTENCES_IN_LISTS_PATH),
+        help=f"Path to sentences_in_lists CSV for CK whitelist (default: {DEFAULT_SENTENCES_IN_LISTS_PATH})",
     )
     tatoeba_parser.add_argument(
         "-d",

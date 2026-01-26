@@ -332,6 +332,28 @@ translations = Table(
     sqlite_with_rowid=False,
 )
 
+# Sentence tags (from Tatoeba)
+#
+# Normalized storage for Tatoeba sentence tags. Each sentence can have multiple tags.
+# Used for:
+# - Quality filtering: exclude sentences with problematic tags (@change, @needs native check, etc.)
+# - Tense matching: find sentences with specific tense tags (presente, imperfetto, etc.)
+# - Content preference: prefer proverbs in example sentence ranking
+#
+# WITHOUT ROWID: Composite PK covers all columns, no need for hidden rowid
+sentence_tags = Table(
+    "sentence_tags",
+    metadata,
+    Column(
+        "sentence_id",
+        Integer,
+        ForeignKey("sentences.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("tag", Text, primary_key=True),
+    sqlite_with_rowid=False,
+)
+
 # Verb-specific metadata (auxiliary, transitivity, and pronominal verb classification)
 #
 # Pronominal verbs (ending in -si/-rsi like lavarsi, pentirsi) are classified by type:
@@ -539,6 +561,8 @@ Index("idx_sentences_lang", sentences.c.lang)
 Index("idx_sentences_source", sentences.c.source)
 Index("idx_sentences_sentence_id", sentences.c.sentence_id)  # For lookups by native ID
 Index("idx_translations_ita", translations.c.ita_sentence_id)
+# sentence_tags indexes for tag-based filtering
+Index("idx_sentence_tags_tag", sentence_tags.c.tag)
 # sentence_tokens indexes for morphological sentence lookup
 Index("idx_sentence_tokens_sentence", sentence_tokens.c.sentence_id)
 Index("idx_sentence_tokens_lemma", sentence_tokens.c.lemma)

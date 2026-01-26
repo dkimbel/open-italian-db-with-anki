@@ -1,7 +1,9 @@
 """Download data sources for the Italian Anki deck generator."""
 
 import bz2
+import io
 import sys
+import tarfile
 from pathlib import Path
 
 import requests
@@ -21,6 +23,9 @@ TATOEBA_FILES = {
     "eng_sentences.tsv": f"{TATOEBA_BASE_URL}/per_language/eng/eng_sentences.tsv.bz2",
     "ita_eng_links.tsv": f"{TATOEBA_BASE_URL}/per_language/ita/ita-eng_links.tsv.bz2",
     "sentences_with_audio.csv": f"{TATOEBA_BASE_URL}/sentences_with_audio.csv",
+    # Additional files for quality filtering and tense tags
+    "tags.csv": f"{TATOEBA_BASE_URL}/tags.tar.bz2",
+    "sentences_in_lists.csv": f"{TATOEBA_BASE_URL}/sentences_in_lists.tar.bz2",
 }
 
 # ParTUT: Universal Dependencies Italian corpus with parallel English translations
@@ -156,8 +161,34 @@ def download_tatoeba(force: bool = False) -> dict[str, int]:
             skipped += 1
             continue
 
-        if url.endswith(".bz2"):
-            # Download and decompress bz2 file
+        if url.endswith(".tar.bz2"):
+            # Download and extract tar.bz2 archive
+            content = _download_with_progress(url, f"Tatoeba {dest_name}")
+            print("  Extracting tar.bz2 archive...")
+            # Extract the file matching dest_name from the archive
+            with tarfile.open(fileobj=io.BytesIO(content), mode="r:bz2") as tar:
+                # Find the member that matches our target name (without path)
+                target_member = None
+                for member in tar.getmembers():
+                    if member.name.endswith(dest_name):
+                        target_member = member
+                        break
+                if target_member is None:
+                    # Fallback: look for any CSV file in the archive
+                    for member in tar.getmembers():
+                        if member.isfile():
+                            target_member = member
+                            break
+                if target_member is None:
+                    raise ValueError(f"Could not find {dest_name} in tar archive")
+                # Extract and save
+                extracted = tar.extractfile(target_member)
+                if extracted is None:
+                    raise ValueError(f"Could not extract {target_member.name}")
+                dest.write_bytes(extracted.read())
+            print(f"  Saved: {dest} ({dest.stat().st_size / (1024 * 1024):.1f} MB)")
+        elif url.endswith(".bz2"):
+            # Download and decompress plain bz2 file
             content = _download_with_progress(url, f"Tatoeba {dest_name}")
             print("  Decompressing bz2...")
             decompressed = bz2.decompress(content)
