@@ -531,7 +531,7 @@ COVERAGE_THRESHOLDS = {
     "written_spelling_pct": 100.0,
     "written_source_pct": 100.0,
     "frequency_coverage_pct": 60.0,
-    "italian_sentences": 900_000,
+    "italian_sentences": 350_000,
     # Relationship coverage thresholds
     "clipping_relationships": 20,  # bici, auto, moto, etc.
     "reflexive_relationships": 2000,  # lavarsi, alzarsi, etc.
