@@ -12,7 +12,6 @@ import requests
 DATA_DIR = Path("data")
 WIKTEXTRACT_DIR = DATA_DIR / "wiktextract"
 TATOEBA_DIR = DATA_DIR / "tatoeba"
-PARTUT_DIR = DATA_DIR / "partut"
 
 # Download URLs
 WIKTEXTRACT_URL = "https://kaikki.org/dictionary/Italian/kaikki.org-dictionary-Italian.jsonl"
@@ -27,23 +26,6 @@ TATOEBA_FILES = {
     "tags.csv": f"{TATOEBA_BASE_URL}/tags.tar.bz2",
     "sentences_in_lists.csv": f"{TATOEBA_BASE_URL}/sentences_in_lists.tar.bz2",
 }
-
-# ParTUT: Universal Dependencies Italian corpus with parallel English translations
-# License: CC-BY-NC-SA 4.0 (NonCommercial)
-PARTUT_BASE_URL = "https://raw.githubusercontent.com/UniversalDependencies/UD_Italian-ParTUT/master"
-PARTUT_ENG_BASE_URL = (
-    "https://raw.githubusercontent.com/UniversalDependencies/UD_English-ParTUT/master"
-)
-PARTUT_ITA_FILES = [
-    "it_partut-ud-train.conllu",
-    "it_partut-ud-dev.conllu",
-    "it_partut-ud-test.conllu",
-]
-PARTUT_ENG_FILES = [
-    "en_partut-ud-train.conllu",
-    "en_partut-ud-dev.conllu",
-    "en_partut-ud-test.conllu",
-]
 
 # OpenSubtitles Frequency (hermitdave/FrequencyWords) - CC-BY-SA 4.0
 # Derived from OpenSubtitles2018 corpus (conversational/dialogue text)
@@ -203,49 +185,6 @@ def download_tatoeba(force: bool = False) -> dict[str, int]:
     return {"downloaded": downloaded, "skipped": skipped}
 
 
-def download_partut(force: bool = False) -> dict[str, int]:
-    """Download ParTUT Italian and English CoNLL-U files.
-
-    ParTUT is a parallel treebank with Italian, English, and French
-    translations. We download both Italian (for morphological analysis)
-    and English (for translations).
-
-    Returns stats dict with 'downloaded' and 'skipped' counts.
-    """
-    downloaded = 0
-    skipped = 0
-
-    PARTUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Download Italian files
-    for filename in PARTUT_ITA_FILES:
-        dest = PARTUT_DIR / filename
-        url = f"{PARTUT_BASE_URL}/{filename}"
-
-        if not force and _file_exists_and_nonempty(dest):
-            print(f"Skipping ParTUT Italian file (already exists): {dest}")
-            skipped += 1
-            continue
-
-        _download_to_file(url, dest, f"ParTUT Italian {filename}")
-        downloaded += 1
-
-    # Download English files
-    for filename in PARTUT_ENG_FILES:
-        dest = PARTUT_DIR / filename
-        url = f"{PARTUT_ENG_BASE_URL}/{filename}"
-
-        if not force and _file_exists_and_nonempty(dest):
-            print(f"Skipping ParTUT English file (already exists): {dest}")
-            skipped += 1
-            continue
-
-        _download_to_file(url, dest, f"ParTUT English {filename}")
-        downloaded += 1
-
-    return {"downloaded": downloaded, "skipped": skipped}
-
-
 def download_opensubtitles(force: bool = False) -> dict[str, int]:
     """Download OpenSubtitles frequency lists from hermitdave/FrequencyWords.
 
@@ -344,12 +283,6 @@ def download_all(force: bool = False) -> dict[str, dict[str, int]]:
     print("Downloading Tatoeba")
     print("=" * 60)
     results["tatoeba"] = download_tatoeba(force)
-    print()
-
-    print("=" * 60)
-    print("Downloading ParTUT")
-    print("=" * 60)
-    results["partut"] = download_partut(force)
     print()
 
     # Summary

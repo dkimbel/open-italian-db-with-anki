@@ -84,11 +84,6 @@ tasks:
     cmds:
       - uv run italian-db import-tatoeba
 
-  import-partut:
-    desc: Import ParTUT corpus with morphological annotations
-    cmds:
-      - uv run italian-db import-partut
-
   import-verb-irregularity:
     desc: Import verb irregularity pattern classifications
     cmds:
@@ -118,11 +113,6 @@ tasks:
     desc: Download Tatoeba sentences and links
     cmds:
       - uv run italian-db download-tatoeba {{if .FORCE}}--force{{end}}
-
-  download-partut:
-    desc: Download ParTUT CoNLL-U files (Italian + English)
-    cmds:
-      - uv run italian-db download-partut {{if .FORCE}}--force{{end}}
 
   download-all:
     desc: Download all data sources
@@ -159,11 +149,6 @@ tasks:
     desc: Interactive DuckDB session for querying raw Tatoeba data
     cmds:
       - uv run python -i scripts/tatoeba_query.py
-
-  partut-query:
-    desc: Interactive DuckDB session for querying raw ParTUT CoNLL-U data
-    cmds:
-      - uv run python -i scripts/partut_query.py
 
   data-query:
     desc: Interactive DuckDB session with ALL source data loaded

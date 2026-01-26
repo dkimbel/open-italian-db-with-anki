@@ -158,7 +158,6 @@ projects. See `data-licenses/` for full license texts.
 | [PAISA](https://clarin.eurac.edu/repository/xmlui/handle/20.500.12124/3) | CC-BY-NC-SA 4.0 | Verb frequency data |
 | [OpenSubtitles](https://github.com/hermitdave/FrequencyWords) | CC-BY-SA 4.0 | Noun/adjective frequency data |
 | [Tatoeba](https://tatoeba.org) | CC-BY 2.0 FR | Example sentences |
-| [ParTUT](https://universaldependencies.org) | CC-BY-NC-SA 4.0 | Morphologically-tagged sentences |
 
 ## What's In The Database
 
@@ -227,10 +226,10 @@ Where the correct Italian spelling came from:
 
 **Database and Anki decks**: The generated database incorporates content from
 multiple copyleft sources. The combined work is subject to **CC-BY-NC-SA 4.0**
-due to the inclusion of ParTUT data (which has a NonCommercial restriction).
+due to the inclusion of PAISA frequency data (which has a NonCommercial restriction).
 
 If you redistribute the database or Anki decks derived from it:
-1. **Attribution required**: Credit Wiktionary/Wiktextract, Morph-it!, Tatoeba, PAISA, OpenSubtitles, and ParTUT
+1. **Attribution required**: Credit Wiktionary/Wiktextract, Tatoeba, PAISA, and OpenSubtitles
 2. **NonCommercial**: You may not use the material for commercial purposes
 3. **Share-alike required**: Distribute under CC-BY-NC-SA 4.0 or a compatible license
 

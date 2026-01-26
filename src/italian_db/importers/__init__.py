@@ -3,7 +3,6 @@
 from italian_db.importers.frequency_ranking import compute_pos_frequency_ranks
 from italian_db.importers.opensubtitles import import_opensubtitles
 from italian_db.importers.paisa import import_paisa
-from italian_db.importers.partut import import_partut
 from italian_db.importers.tatoeba import import_tatoeba
 from italian_db.importers.verb_irregularity import import_verb_irregularity
 from italian_db.importers.wiktextract import (
@@ -18,7 +17,6 @@ __all__ = [
     "generate_gendered_participles",
     "import_opensubtitles",
     "import_paisa",
-    "import_partut",
     "import_tatoeba",
     "import_verb_irregularity",
     "import_wiktextract",

@@ -186,10 +186,10 @@ def generate_verb_card(
     # Build conjugation table HTML
     table_html = build_conjugation_table_html(forms_dict)
 
-    # Extract mood/tense for morphological sentence matching
+    # Extract mood/tense for tag-based sentence matching
     mood, tense = TENSE_ID_TO_MOOD_TENSE.get(tense_id, (None, None))
 
-    # Get example sentence: try morphological match from ParTUT first, then FTS fallback
+    # Get example sentence using FTS search with tag-aware filtering
     example = get_example_sentence_with_fallback(
         conn,
         verb.written,

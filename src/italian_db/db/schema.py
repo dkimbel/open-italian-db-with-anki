@@ -256,59 +256,21 @@ definitions = Table(
     ),  # DerivationType enum value: diminutive, augmentative, pejorative, endearing
 )
 
-# Sentences (Tatoeba + ParTUT)
+# Sentences (Tatoeba)
 #
 # Uses a surrogate primary key (id) with a composite unique constraint on
 # (source, sentence_id). This allows each source to use its native IDs without
-# collision (e.g., Tatoeba sentence #12345 and ParTUT sentence #12345 can coexist).
+# collision.
 #
 sentences = Table(
     "sentences",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),  # Surrogate key for FKs
-    Column("sentence_id", Integer, nullable=False),  # Native ID from source (Tatoeba/ParTUT)
+    Column("sentence_id", Integer, nullable=False),  # Native ID from source (Tatoeba)
     Column("lang", String(3), nullable=False),  # 'ita' or 'eng'
     Column("text", Text, nullable=False),
-    Column("source", Text, nullable=False),  # 'tatoeba' or 'partut'
+    Column("source", Text, nullable=False),  # 'tatoeba'
     UniqueConstraint("source", "sentence_id", name="uq_sentences_source_id"),
-)
-
-# Token-level morphological annotations (from ParTUT)
-#
-# This table stores Universal Dependencies-style morphological analysis for
-# sentences from the ParTUT corpus. Each token in a sentence has its own row
-# with lemma, POS, and grammatical features.
-#
-# Key features:
-# - Enables precise example sentence matching by grammatical features
-#   (e.g., find a sentence where "essere" appears in subjunctive present)
-# - token_index is 1-indexed following CoNLL-U convention
-# - Grammatical features use Universal Dependencies values:
-#   - mood: Ind, Sub, Cnd, Imp (indicative, subjunctive, conditional, imperative)
-#   - tense: Pres, Past, Fut, Imp (present, past/remote, future, imperfect)
-#   - verb_form: Fin, Inf, Part, Ger (finite, infinitive, participle, gerund)
-#
-sentence_tokens = Table(
-    "sentence_tokens",
-    metadata,
-    Column("id", Integer, primary_key=True, autoincrement=True),
-    Column(
-        "sentence_id",
-        Integer,
-        ForeignKey("sentences.id", ondelete="CASCADE"),
-        nullable=False,
-    ),
-    Column("token_index", Integer, nullable=False),  # 1-indexed position in sentence
-    Column("form", Text, nullable=False),  # Surface form (actual text)
-    Column("lemma", Text, nullable=False),  # Dictionary form
-    Column("upos", Text, nullable=False),  # Universal POS: VERB, NOUN, ADJ, etc.
-    Column("mood", Text),  # Ind, Sub, Cnd, Imp
-    Column("tense", Text),  # Pres, Past, Fut, Imp
-    Column("person", Integer),  # 1, 2, 3
-    Column("number", Text),  # Sing, Plur
-    Column("gender", Text),  # Masc, Fem
-    Column("verb_form", Text),  # Fin, Inf, Part, Ger
-    UniqueConstraint("sentence_id", "token_index", name="uq_sentence_token_position"),
 )
 
 # Translation links
@@ -563,17 +525,6 @@ Index("idx_sentences_sentence_id", sentences.c.sentence_id)  # For lookups by na
 Index("idx_translations_ita", translations.c.ita_sentence_id)
 # sentence_tags indexes for tag-based filtering
 Index("idx_sentence_tags_tag", sentence_tags.c.tag)
-# sentence_tokens indexes for morphological sentence lookup
-Index("idx_sentence_tokens_sentence", sentence_tokens.c.sentence_id)
-Index("idx_sentence_tokens_lemma", sentence_tokens.c.lemma)
-Index("idx_sentence_tokens_form", sentence_tokens.c.form)
-Index("idx_sentence_tokens_upos", sentence_tokens.c.upos)
-Index(
-    "idx_sentence_tokens_morph",
-    sentence_tokens.c.lemma,
-    sentence_tokens.c.mood,
-    sentence_tokens.c.tense,
-)
 
 
 def init_db(engine: Engine) -> None:

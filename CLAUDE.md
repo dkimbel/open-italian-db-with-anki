@@ -15,7 +15,7 @@ Generate Anki flashcard decks for learning Italian using linguistic databases.
 
 ### Data Exploration
 
-DuckDB sessions for exploring raw source data: `task wikt-query`, `task tatoeba-query`, `task partut-query`, `task opensub-query`, `task paisa-query`, `task data-query` (all sources).
+DuckDB sessions for exploring raw source data: `task wikt-query`, `task tatoeba-query`, `task opensub-query`, `task paisa-query`, `task data-query` (all sources).
 
 ## Engineering Principles
 

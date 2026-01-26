@@ -84,43 +84,6 @@ conn.execute("""
 """)
 
 # =============================================================================
-# PARTUT (Universal Dependencies Italian treebank)
-# =============================================================================
-conn.execute("""
-    CREATE VIEW partut_ita_tokens AS
-    SELECT
-        column0 as id,
-        column1 as form,
-        column2 as lemma,
-        column3 as upos,
-        column5 as feats,
-        regexp_extract(column5, 'Mood=(\\w+)', 1) as mood,
-        regexp_extract(column5, 'Tense=(\\w+)', 1) as tense,
-        regexp_extract(column5, 'Person=(\\d)', 1)::INTEGER as person,
-        regexp_extract(column5, 'Number=(\\w+)', 1) as number,
-        regexp_extract(column5, 'VerbForm=(\\w+)', 1) as verb_form,
-        filename
-    FROM read_csv(
-        'data/partut/it_partut-ud-*.conllu',
-        delim='\t',
-        header=false,
-        quote='',
-        escape='',
-        comment='#',
-        ignore_errors=true,
-        filename=true
-    )
-    WHERE column0 NOT LIKE '%-%'
-""")
-
-conn.execute("""
-    CREATE VIEW partut_verbs AS
-    SELECT form, lemma, mood, tense, person, number, verb_form
-    FROM partut_ita_tokens
-    WHERE upos = 'VERB'
-""")
-
-# =============================================================================
 print("DuckDB session ready with ALL source data.")
 print()
 print("WIKTEXTRACT:")
@@ -136,10 +99,6 @@ print()
 print("FREQUENCY DATA:")
 print("  paisa           - PAISA lemma frequencies (lemma, freq) - used for verbs")
 print("  opensub         - OpenSubtitles frequencies (word, freq, rank) - used for nouns/adj")
-print()
-print("PARTUT:")
-print("  partut_ita_tokens - Italian tokens with morphological features")
-print("  partut_verbs      - Italian verbs (form, lemma, mood, tense, person, number)")
 print()
 print("Cross-source query examples:")
 print("  # Check if a Wiktextract word has OpenSubtitles frequency")
