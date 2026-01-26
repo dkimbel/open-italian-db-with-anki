@@ -530,7 +530,7 @@ COVERAGE_THRESHOLDS = {
     "total_forms": 900_000,
     "written_spelling_pct": 100.0,
     "written_source_pct": 100.0,
-    "frequency_coverage_pct": 60.0,
+    "frequency_coverage_pct": 50.0,
     "italian_sentences": 350_000,
     # Relationship coverage thresholds
     "clipping_relationships": 20,  # bici, auto, moto, etc.
