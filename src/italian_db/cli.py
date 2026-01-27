@@ -30,6 +30,7 @@ from italian_db.importers import (
     compute_pos_frequency_ranks,
     import_opensubtitles,
     import_paisa,
+    import_sentence_tokens,
     import_tatoeba,
     import_verb_irregularity,
     import_wiktextract,
@@ -57,6 +58,7 @@ DEFAULT_ENG_SENTENCES_PATH = Path("data/tatoeba/eng_sentences.tsv")
 DEFAULT_LINKS_PATH = Path("data/tatoeba/ita_eng_links.tsv")
 DEFAULT_TAGS_PATH = Path("data/tatoeba/tags.csv")
 DEFAULT_SENTENCES_IN_LISTS_PATH = Path("data/tatoeba/sentences_in_lists.csv")
+DEFAULT_SENTENCE_TOKENS_PATH = Path("data/tatoeba/ita_sentences_pos.jsonl")
 DEFAULT_DB_PATH = Path("italian.db")
 
 
@@ -267,6 +269,44 @@ def cmd_import_verb_irregularity(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import_sentence_tokens(args: argparse.Namespace) -> int:
+    """Run the sentence tokens import command."""
+    db_path = Path(args.database)
+    jsonl_path = Path(args.jsonl)
+
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        print("Run 'import-wiktextract' first to create the database.", file=sys.stderr)
+        return 1
+
+    if not jsonl_path.exists():
+        print(f"Error: JSONL file not found: {jsonl_path}", file=sys.stderr)
+        print("Run 'task stanza-pos-tag' first to generate POS-tagged tokens.", file=sys.stderr)
+        return 1
+
+    # Ensure sentence_tokens table exists
+    engine = get_engine(db_path)
+    init_db(engine)
+
+    print(f"Importing sentence tokens to: {db_path}")
+    print(f"  From: {jsonl_path}")
+    print()
+
+    with get_connection(db_path) as conn:
+        stats = import_sentence_tokens(
+            conn, jsonl_path, progress_callback=_make_progress_callback()
+        )
+        print()
+        print(f"  Sentences processed:  {stats.sentences_processed:,}")
+        print(f"  Tokens inserted:      {stats.tokens_inserted:,}")
+        if stats.sentences_not_found > 0:
+            print(f"  Sentences not found:  {stats.sentences_not_found:,}")
+
+    print()
+    print("Import complete!")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     """Print database statistics."""
     from sqlalchemy import func, select
@@ -340,11 +380,20 @@ def cmd_stats(args: argparse.Namespace) -> int:
         ).scalar()
 
         # Sentence tags count (Tatoeba)
-        from italian_db.db.schema import sentence_tags
+        from italian_db.db.schema import sentence_tags, sentence_tokens
 
         tag_count = conn.execute(select(func.count()).select_from(sentence_tags)).scalar() or 0
         unique_tags = (
             conn.execute(select(func.count(func.distinct(sentence_tags.c.tag)))).scalar() or 0
+        )
+
+        # Sentence tokens count (Stanza POS tagging)
+        token_count = conn.execute(select(func.count()).select_from(sentence_tokens)).scalar() or 0
+        sentences_with_tokens = (
+            conn.execute(
+                select(func.count(func.distinct(sentence_tokens.c.sentence_id)))
+            ).scalar()
+            or 0
         )
 
         # IPA statistics
@@ -398,6 +447,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print(f"  English:     {tatoeba_eng:,}")
     if tag_count > 0:
         print(f"  Tags:        {tag_count:,} ({unique_tags:,} unique)")
+    if token_count > 0:
+        print(f"  Tokens:      {token_count:,} ({sentences_with_tokens:,} sentences)")
 
     return 0
 
@@ -724,6 +775,23 @@ def _run_ipa_import(
     return stats
 
 
+def _run_sentence_tokens_import(
+    conn: Connection, jsonl_path: Path, indent: str = "  "
+) -> dict[str, Any]:
+    """Run sentence tokens import and print stats."""
+    stats = import_sentence_tokens(conn, jsonl_path, progress_callback=_make_progress_callback())
+    print()
+    print(f"{indent}Sentences processed:  {stats.sentences_processed:,}")
+    print(f"{indent}Tokens inserted:      {stats.tokens_inserted:,}")
+    if stats.sentences_not_found > 0:
+        print(f"{indent}Sentences not found:  {stats.sentences_not_found:,}")
+    return {
+        "sentences_processed": stats.sentences_processed,
+        "tokens_inserted": stats.tokens_inserted,
+        "sentences_not_found": stats.sentences_not_found,
+    }
+
+
 def cmd_import_all(args: argparse.Namespace) -> int:
     """Run the full import pipeline for all parts of speech."""
     db_path = Path(args.database)
@@ -751,7 +819,9 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     print()
 
     pos_list = list(POS)
-    total_phases = 5  # 3 POS + post-processing + Tatoeba
+    # Determine total phases: 3 POS + post-processing + Tatoeba + (optional) sentence tokens
+    has_sentence_tokens_jsonl = DEFAULT_SENTENCE_TOKENS_PATH.exists()
+    total_phases = 6 if has_sentence_tokens_jsonl else 5
     indent = "    "
 
     # Import each POS
@@ -953,8 +1023,9 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     print()
 
     # Tatoeba sentences
+    tatoeba_step = 5
     print("=" * 80)
-    print("Importing Tatoeba sentences (Step 5 of 5)")
+    print(f"Importing Tatoeba sentences (Step {tatoeba_step} of {total_phases})")
     print("=" * 80)
     print()
 
@@ -981,6 +1052,19 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             indent="  ",
         )
     print()
+
+    # Sentence tokens (optional - only if JSONL exists)
+    if has_sentence_tokens_jsonl:
+        tokens_step = 6
+        print("=" * 80)
+        print(f"Importing sentence token annotations (Step {tokens_step} of {total_phases})")
+        print("=" * 80)
+        print()
+        print(f"Importing POS-tagged tokens from {DEFAULT_SENTENCE_TOKENS_PATH}...")
+
+        with get_connection(db_path) as conn:
+            _run_sentence_tokens_import(conn, DEFAULT_SENTENCE_TOKENS_PATH, indent="  ")
+        print()
 
     print("=" * 80)
     print("Import pipeline complete!")
@@ -1136,6 +1220,26 @@ def main() -> int:
         help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
     )
     irreg_parser.set_defaults(func=cmd_import_verb_irregularity)
+
+    # import-sentence-tokens subcommand
+    tokens_parser = subparsers.add_parser(
+        "import-sentence-tokens",
+        help="Import POS-tagged sentence tokens from Stanza JSONL",
+    )
+    tokens_parser.add_argument(
+        "--jsonl",
+        type=str,
+        default=str(DEFAULT_SENTENCE_TOKENS_PATH),
+        help=f"Path to POS-tagged JSONL file (default: {DEFAULT_SENTENCE_TOKENS_PATH})",
+    )
+    tokens_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    tokens_parser.set_defaults(func=cmd_import_sentence_tokens)
 
     # import-all subcommand
     import_all_parser = subparsers.add_parser(

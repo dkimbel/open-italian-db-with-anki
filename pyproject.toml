@@ -21,6 +21,7 @@ dev = [
     "pre-commit>=3.6",
     "ruff==0.14.10",  # pinned to match pre-commit config
     "pyright>=1.1",
+    "stanza==1.11.0",  # POS tagging for Tatoeba sentences (pinned for reproducibility)
 ]
 
 [project.scripts]

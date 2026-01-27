@@ -164,3 +164,13 @@ tasks:
     desc: Interactive DuckDB session for querying PAISA frequency data (NC license)
     cmds:
       - uv run python -i scripts/paisa_query.py
+
+  stanza-download:
+    desc: Download Stanza Italian model for POS tagging
+    cmds:
+      - uv run python -c "import stanza; stanza.download('it')"
+
+  stanza-pos-tag:
+    desc: Run Stanza POS tagging on Tatoeba sentences (one-off preprocessing)
+    cmds:
+      - uv run python scripts/stanza_pos_tagging.py {{if .CK_ONLY}}--ck-only{{end}}

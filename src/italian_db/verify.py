@@ -248,6 +248,32 @@ def check_orphaned_definition_derivations(conn: Connection) -> CheckResult:
         )
 
 
+def check_orphaned_sentence_tokens(conn: Connection) -> CheckResult:
+    """Check that all sentence_tokens reference existing sentences."""
+    query = text("""
+        SELECT st.sentence_id, st.token_index, st.text
+        FROM sentence_tokens st
+        LEFT JOIN sentences s ON st.sentence_id = s.id
+        WHERE s.id IS NULL
+    """)
+    result = conn.execute(query).fetchall()
+
+    if not result:
+        return CheckResult(
+            name="orphaned_sentence_tokens",
+            passed=True,
+            message="No orphaned sentence tokens",
+        )
+    else:
+        details = [f"sentence_id={row[0]} token={row[2]}" for row in result[:10]]
+        return CheckResult(
+            name="orphaned_sentence_tokens",
+            passed=False,
+            message=f"Orphaned sentence tokens: {len(result)} records without sentences",
+            details=details,
+        )
+
+
 # =============================================================================
 # Consistency Checks
 # =============================================================================
@@ -537,6 +563,8 @@ COVERAGE_THRESHOLDS = {
     "reflexive_relationships": 2000,  # lavarsi, alzarsi, etc.
     "gender_counterpart_relationships": 150,  # professore↔professoressa
     "definition_derivations": 1500,  # diminutives, augmentatives, etc.
+    # Sentence token coverage (only checked if tokens exist)
+    "sentence_token_coverage_pct": 95.0,  # % of Italian sentences with tokens
 }
 
 
@@ -737,6 +765,31 @@ def check_coverage_thresholds(conn: Connection) -> list[CheckResult]:
             message=f"Definition derivations: {count:,} (min: {threshold:,})",
         )
     )
+
+    # Sentence token coverage (only if tokens have been imported)
+    # Check if any tokens exist
+    tokens_query = text("SELECT COUNT(*) FROM sentence_tokens LIMIT 1")
+    has_tokens = (conn.execute(tokens_query).scalar() or 0) > 0
+
+    if has_tokens:
+        # Check what % of Italian sentences have tokens
+        query = text("""
+            SELECT
+                CAST(COUNT(DISTINCT st.sentence_id) AS FLOAT) * 100 /
+                NULLIF((SELECT COUNT(*) FROM sentences WHERE lang = 'ita'), 0)
+            FROM sentence_tokens st
+            JOIN sentences s ON st.sentence_id = s.id
+            WHERE s.lang = 'ita'
+        """)
+        pct = conn.execute(query).scalar() or 0.0
+        threshold = COVERAGE_THRESHOLDS["sentence_token_coverage_pct"]
+        results.append(
+            CheckResult(
+                name="sentence_token_coverage",
+                passed=pct >= threshold,
+                message=f"Sentence token coverage: {pct:.1f}% (min: {threshold:.1f}%)",
+            )
+        )
 
     return results
 
@@ -976,6 +1029,7 @@ def verify_database(conn: Connection, *, verbose: bool = False) -> VerificationR
         check_orphaned_translations(conn),
         check_orphaned_lemma_relationships(conn),
         check_orphaned_definition_derivations(conn),
+        check_orphaned_sentence_tokens(conn),
     ]
 
     # Consistency checks

@@ -9,6 +9,7 @@ from sqlalchemy import (
     Index,
     Integer,
     MetaData,
+    PrimaryKeyConstraint,
     String,
     Table,
     Text,
@@ -316,6 +317,49 @@ sentence_tags = Table(
     sqlite_with_rowid=False,
 )
 
+# Sentence tokens (from Stanza POS tagging)
+#
+# Token-level annotations from Stanza NLP pipeline. Each sentence has multiple tokens
+# with POS tags, morphological features, and dependency parse information.
+#
+# Used for:
+# - Filtering example sentences by grammatical features (noun vs adjective uses of "giovane")
+# - Finding sentences with specific verb tense/mood/person for conjugation examples
+# - Lemma-based sentence search (find sentences containing a specific lemma)
+#
+# Key morphological features are stored as individual columns for efficient querying.
+# Less common features (Degree, PronType, Polarity, etc.) are stored in feats_extra JSON.
+#
+# WITHOUT ROWID: Composite PK is the clustering key for efficient range scans by sentence.
+sentence_tokens = Table(
+    "sentence_tokens",
+    metadata,
+    Column(
+        "sentence_id",
+        Integer,
+        ForeignKey("sentences.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("token_index", Integer, nullable=False),  # 0-indexed position in sentence
+    Column("text", Text, nullable=False),  # Surface form
+    Column("lemma", Text, nullable=False),  # Stanza lemma
+    Column("upos", String(10), nullable=False),  # Universal POS (VERB, NOUN, ADJ, etc.)
+    # Key morphological features as individual columns (NULL if not applicable)
+    Column("verbform", String(10)),  # Fin, Inf, Part, Ger
+    Column("mood", String(10)),  # Ind, Sub, Cnd, Imp (only for VerbForm=Fin)
+    Column("tense", String(10)),  # Pres, Past, Imp, Fut
+    Column("person", Integer),  # 1, 2, 3
+    Column("number", String(10)),  # Sing, Plur
+    Column("gender", String(10)),  # Masc, Fem (participles, nouns, adjectives)
+    # Extra features as JSON for less common attributes
+    Column("feats_extra", Text),  # JSON object for Degree, PronType, etc.
+    # Dependency info
+    Column("head", Integer),  # Dependency head index (0 = root)
+    Column("deprel", String(20)),  # Dependency relation
+    PrimaryKeyConstraint("sentence_id", "token_index"),
+    sqlite_with_rowid=False,
+)
+
 # Verb-specific metadata (auxiliary, transitivity, and pronominal verb classification)
 #
 # Pronominal verbs (ending in -si/-rsi like lavarsi, pentirsi) are classified by type:
@@ -525,6 +569,19 @@ Index("idx_sentences_sentence_id", sentences.c.sentence_id)  # For lookups by na
 Index("idx_translations_ita", translations.c.ita_sentence_id)
 # sentence_tags indexes for tag-based filtering
 Index("idx_sentence_tags_tag", sentence_tags.c.tag)
+# sentence_tokens indexes for common queries
+Index("idx_sentence_tokens_lemma", sentence_tokens.c.lemma)
+Index("idx_sentence_tokens_upos", sentence_tokens.c.upos)
+Index("idx_sentence_tokens_lemma_upos", sentence_tokens.c.lemma, sentence_tokens.c.upos)
+# Composite index for verb form lookups
+Index(
+    "idx_sentence_tokens_verb_forms",
+    sentence_tokens.c.lemma,
+    sentence_tokens.c.mood,
+    sentence_tokens.c.tense,
+    sentence_tokens.c.person,
+    sentence_tokens.c.number,
+)
 
 
 def init_db(engine: Engine) -> None:
