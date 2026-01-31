@@ -13,10 +13,13 @@ from sqlalchemy import Connection
 
 from anki_gen.generator import build_verb_tags
 from anki_gen.queries import (
+    COMPOUND_TENSE_AUX_FEATURES,
+    DB_TO_STANZA_MOOD,
+    DB_TO_STANZA_TENSE,
     TENSE_ID_TO_MOOD_TENSE,
     generate_english_prompt,
     get_english_infinitive,
-    get_example_sentence_with_fallback,
+    get_example_sentence,
     get_present_indicative_forms,
     get_verb_by_lemma,
 )
@@ -97,27 +100,37 @@ def generate_preview_html(
     # Get forms
     forms = get_present_indicative_forms(conn, verb.lemma_id)
     forms_dict: dict[tuple[int, str], str] = {}
-    conjugated_forms: list[str] = []
     for form in forms:
         # Use CSS-based dot (non-copyable) for stress marking
         display = format_conjugation_with_stress(form.written, form.stressed, use_css=True)
         forms_dict[(form.person, form.number)] = display
-        if form.written:
-            conjugated_forms.append(form.written)
 
     table_html = build_conjugation_table_html(forms_dict)
 
-    # Extract mood/tense for tag-based sentence matching
-    mood, tense = TENSE_ID_TO_MOOD_TENSE.get(tense_id, (None, None))
+    # Extract mood/tense and convert to Stanza values for morphological matching
+    db_mood, db_tense = TENSE_ID_TO_MOOD_TENSE.get(tense_id, (None, None))
+    compound = COMPOUND_TENSE_AUX_FEATURES.get(db_tense) if db_tense else None
 
-    # Get example using FTS search with tag-aware filtering
-    example = get_example_sentence_with_fallback(
-        conn,
-        verb.written,
-        mood=mood,
-        tense=tense,
-        conjugated_forms=conjugated_forms,
-    )
+    # Get example using morphological matching via sentence_tokens
+    if compound:
+        compound_mood, compound_tense = compound
+        example = get_example_sentence(
+            conn,
+            lemma=verb.written,
+            pos="VERB",
+            compound_mood=compound_mood,
+            compound_tense=compound_tense,
+        )
+    else:
+        stanza_mood = DB_TO_STANZA_MOOD.get(db_mood) if db_mood else None
+        stanza_tense = DB_TO_STANZA_TENSE.get(db_tense) if db_tense else None
+        example = get_example_sentence(
+            conn,
+            lemma=verb.written,
+            pos="VERB",
+            mood=stanza_mood,
+            tense=stanza_tense,
+        )
     # Get tags
     tags = build_verb_tags(conn, verb, tense_id)
 

@@ -390,9 +390,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
         # Sentence tokens count (Stanza POS tagging)
         token_count = conn.execute(select(func.count()).select_from(sentence_tokens)).scalar() or 0
         sentences_with_tokens = (
-            conn.execute(
-                select(func.count(func.distinct(sentence_tokens.c.sentence_id)))
-            ).scalar()
+            conn.execute(select(func.count(func.distinct(sentence_tokens.c.sentence_id)))).scalar()
             or 0
         )
 

@@ -5,10 +5,8 @@ All functions take a SQLAlchemy Connection and return dataclasses.
 """
 
 from dataclasses import dataclass
-from typing import Any
 
 from sqlalchemy import Connection, select, text
-from sqlalchemy.engine import Row
 
 from italian_db.db import (
     frequencies,
@@ -32,19 +30,43 @@ PROBLEMATIC_TAGS = frozenset(
     }
 )
 
-# Mapping from internal (mood, tense) to Tatoeba tag names
-# Used to require matching tense tags in example sentences
-TENSE_TO_TATOEBA_TAG: dict[tuple[str, str], str] = {
-    ("indicative", "present"): "presente",
-    ("indicative", "imperfect"): "imperfetto",
-    ("indicative", "remote"): "passato remoto",
-    ("indicative", "future"): "futuro semplice",
-    ("subjunctive", "present"): "congiuntivo presente",
-    ("subjunctive", "imperfect"): "congiuntivo imperfetto",
-    ("conditional", "present"): "condizionale presente",
-    ("imperative", "present"): "imperativo presente",
-    # Compound tenses use their own tags
-    ("indicative", "present_perfect"): "passato prossimo",
+# ============================================================================
+# Stanza Morphological Feature Mappings
+# ============================================================================
+
+# Mapping from DB mood values to Stanza Mood feature values
+DB_TO_STANZA_MOOD: dict[str, str] = {
+    "indicative": "Ind",
+    "subjunctive": "Sub",
+    "conditional": "Cnd",
+    "imperative": "Imp",
+}
+
+# Mapping from DB tense values to Stanza Tense feature values
+DB_TO_STANZA_TENSE: dict[str, str] = {
+    "present": "Pres",
+    "imperfect": "Imp",
+    "remote": "Past",
+    "future": "Fut",
+}
+
+# Mapping from DB POS values to Stanza UPOS values
+DB_TO_STANZA_POS: dict[str, str] = {
+    "verb": "VERB",
+    "noun": "NOUN",
+    "adjective": "ADJ",
+}
+
+# Mapping from DB compound tense names to (compound_mood, compound_tense) Stanza feature pairs.
+# These correspond to the AUX token's Mood and Tense in compound constructions.
+COMPOUND_TENSE_AUX_FEATURES: dict[str, tuple[str, str]] = {
+    "present_perfect": ("Ind", "Pres"),  # passato prossimo
+    "past_perfect": ("Ind", "Imp"),  # trapassato prossimo
+    "remote_perfect": ("Ind", "Past"),  # trapassato remoto
+    "future_perfect": ("Ind", "Fut"),  # futuro anteriore
+    "conditional_perfect": ("Cnd", "Pres"),  # condizionale passato
+    "subjunctive_perfect": ("Sub", "Pres"),  # congiuntivo passato
+    "subjunctive_pluperfect": ("Sub", "Imp"),  # congiuntivo trapassato
 }
 
 
@@ -173,188 +195,153 @@ TENSE_ID_TO_MOOD_TENSE: dict[str, tuple[str, str]] = {
 }
 
 
-def get_example_sentence_with_fallback(
-    conn: Connection,
-    verb_written: str,
-    *,
-    mood: str | None = None,
-    tense: str | None = None,
-    conjugated_forms: list[str] | None = None,
-    max_length: int = 120,
-    min_words: int = 7,
-    fallback_min_words: int = 3,
-) -> ExampleSentence | None:
-    """Find an example sentence using FTS search with tag-aware filtering.
-
-    Uses Tatoeba tense tags when available:
-    - Prefers sentences with matching tense tag (presente, imperfetto, etc.)
-    - Prefers proverbs
-    - Excludes sentences with problematic tags (@change, @needs native check, etc.)
-
-    Args:
-        conn: Database connection
-        verb_written: The verb infinitive (e.g., "parlare")
-        mood: Optional mood filter for tense tag matching
-        tense: Optional tense filter for tense tag matching
-        conjugated_forms: Optional list of specific forms to search for in FTS
-        max_length: Maximum sentence length in characters
-        min_words: Preferred minimum number of words in sentence
-        fallback_min_words: Fallback minimum if no sentence with min_words found
-
-    Returns:
-        ExampleSentence with Italian text and optional English translation,
-        or None if no suitable sentence found
-    """
-    return get_example_sentence(
-        conn,
-        verb_written,
-        conjugated_forms=conjugated_forms,
-        mood=mood,
-        tense=tense,
-        max_length=max_length,
-        min_words=min_words,
-        fallback_min_words=fallback_min_words,
-    )
-
-
 def get_example_sentence(
     conn: Connection,
-    verb_written: str,
+    lemma: str,
+    pos: str,
     *,
-    conjugated_forms: list[str] | None = None,
     mood: str | None = None,
     tense: str | None = None,
-    max_length: int = 120,
-    min_words: int = 7,
-    fallback_min_words: int = 3,
+    compound_mood: str | None = None,
+    compound_tense: str | None = None,
+    min_tokens: int = 4,
+    max_tokens: int = 25,
+    ideal_tokens: int = 7,
+    prefer_proverbs: bool = True,
 ) -> ExampleSentence | None:
-    """Find an example sentence containing the verb.
+    """Find an example sentence using morphological matching via sentence_tokens.
 
-    Uses FTS5 full-text search to find Italian sentences containing the verb.
-    If conjugated_forms are provided, searches for those specific forms.
-    Otherwise falls back to stem matching.
+    Uses Stanza POS annotations to find sentences containing the lemma with
+    matching grammatical features. English translation is REQUIRED.
 
-    Ranking (most to least preferred):
-        1. Proverbs (always preferred)
-        2. Sentences with English translation
-        3. Shorter sentences
+    Ranking:
+        1. Proverbs (if prefer_proverbs=True)
+        2. Sentences closest to ideal_tokens length
 
     Filtering:
+        - Requires English translation (via translations table)
         - Excludes sentences with problematic tags (@change, @needs native check, etc.)
-        - If mood/tense provided, requires matching tense tag (with fallback)
-
-    Fallback chain:
-        1. With tense tag, 7+ words
-        2. Without tense tag, 7+ words
-        3. With tense tag, 3+ words
-        4. Without tense tag, 3+ words
+        - For verbs: matches lemma + mood + tense (any person/number)
+        - For compound tenses: matches lemma + compound_mood + compound_tense on
+          past participle tokens (VerbForm=Part)
+        - For nouns/adjectives: matches lemma + UPOS (any inflected form)
 
     Args:
         conn: Database connection
-        verb_written: The verb infinitive (e.g., "parlare")
-        conjugated_forms: Optional list of specific forms to search for
-        mood: Optional mood for tense tag matching (indicative, subjunctive, etc.)
-        tense: Optional tense for tense tag matching (present, imperfect, etc.)
-        max_length: Maximum sentence length in characters
-        min_words: Preferred minimum number of words in sentence
-        fallback_min_words: Fallback minimum if no sentence with min_words found
+        lemma: The lemma to search for (e.g., "parlare", "casa", "giovane")
+        pos: Part of speech - "VERB", "NOUN", or "ADJ" (Stanza UPOS values)
+        mood: For simple tenses: Stanza mood value ("Ind", "Sub", "Cnd", "Imp")
+        tense: For simple tenses: Stanza tense value ("Pres", "Imp", "Past", "Fut")
+        compound_mood: For compound tenses: AUX mood value ("Ind", "Sub", "Cnd")
+        compound_tense: For compound tenses: AUX tense value ("Pres", "Imp", "Past", "Fut")
+        min_tokens: Minimum number of tokens in sentence
+        max_tokens: Maximum number of tokens in sentence
+        ideal_tokens: Preferred number of tokens (for ranking)
+        prefer_proverbs: Whether to prefer sentences tagged as proverbs
 
     Returns:
-        ExampleSentence with Italian text and optional English translation,
+        ExampleSentence with Italian text and English translation,
         or None if no suitable sentence found
     """
-    # Build search query
-    if conjugated_forms:
-        # Search for any of the conjugated forms
-        # Use FTS5 OR operator to match any form
-        fts_query = " OR ".join(f'"{form}"' for form in conjugated_forms if form)
+    # Build query based on POS
+    if pos in ("VERB", "AUX"):
+        if compound_mood is not None and compound_tense is not None:
+            # Compound tense: match past participle with resolved AUX features
+            morph_filter = """
+                st.lemma = :lemma
+                AND st.upos = 'VERB'
+                AND st.verbform = 'Part'
+                AND st.compound_mood = :compound_mood
+                AND st.compound_tense = :compound_tense
+            """
+        elif mood is not None and tense is not None:
+            # Simple tense: match lemma + mood + tense
+            morph_filter = """
+                st.lemma = :lemma
+                AND st.upos IN ('VERB', 'AUX')
+                AND st.mood = :mood
+                AND st.tense = :tense
+            """
+        else:
+            # Without mood/tense, just match by lemma
+            morph_filter = """
+                st.lemma = :lemma
+                AND st.upos IN ('VERB', 'AUX')
+            """
     else:
-        # Fallback: search for verb stem with prefix matching
-        stem = verb_written
-        for suffix in ("are", "ere", "ire", "rre", "rsi"):
-            if verb_written.endswith(suffix):
-                stem = verb_written[: -len(suffix)]
-                break
-        fts_query = f"{stem}*"
+        # For nouns/adjectives, match lemma + UPOS (any inflected form)
+        morph_filter = """
+            st.lemma = :lemma
+            AND st.upos = :upos
+        """
 
-    # Determine tense tag to require (if mood/tense provided)
-    tense_tag: str | None = None
-    if mood and tense:
-        tense_tag = TENSE_TO_TATOEBA_TAG.get((mood, tense))
+    # Proverb preference in ORDER BY
+    proverb_order = (
+        """
+        CASE WHEN EXISTS (
+            SELECT 1 FROM sentence_tags stg
+            WHERE stg.sentence_id = s.id AND stg.tag = 'proverb'
+        ) THEN 0 ELSE 1 END,
+    """
+        if prefer_proverbs
+        else ""
+    )
 
-    # Build the query with tag filtering
-    # - Exclude sentences with problematic tags
-    # - Optionally require tense tag (when tense_tag is set and require_tense is True)
-    # - Prefer proverbs (always)
-    # - Prefer sentences with English translation
-    # - Prefer shorter sentences
-    def _build_query(require_tense: bool) -> str:
-        tense_filter = ""
-        if tense_tag and require_tense:
-            tense_filter = """
-          AND EXISTS (
-              SELECT 1 FROM sentence_tags st2
-              WHERE st2.sentence_id = s.id AND st2.tag = :tense_tag
-          )"""
-
-        # _problematic_tags_sql() generates literals from a hardcoded frozenset (safe)
-        return f"""
-        SELECT s.id, s.text, eng.text as english
-        FROM sentences_fts fts
-        JOIN sentences s ON fts.id = s.id
-        LEFT JOIN translations t ON t.ita_sentence_id = s.id
-        LEFT JOIN sentences eng ON t.eng_sentence_id = eng.id
-        WHERE fts.text MATCH :query
-          AND s.lang = 'ita'
-          AND length(s.text) <= :max_length
-          AND (length(s.text) - length(replace(s.text, ' ', '')) + 1) >= :min_words
+    # _problematic_tags_sql() generates literals from a hardcoded frozenset (safe)
+    query = f"""
+        WITH matching AS (
+            SELECT DISTINCT st.sentence_id
+            FROM sentence_tokens st
+            WHERE {morph_filter}
+        ),
+        token_counts AS (
+            SELECT sentence_id, COUNT(*) AS token_count
+            FROM sentence_tokens
+            WHERE sentence_id IN (SELECT sentence_id FROM matching)
+            GROUP BY sentence_id
+        )
+        SELECT s.id, s.text, eng.text AS english
+        FROM matching m
+        JOIN sentences s ON m.sentence_id = s.id
+        JOIN translations t ON t.ita_sentence_id = s.id
+        JOIN sentences eng ON t.eng_sentence_id = eng.id
+        JOIN token_counts tc ON tc.sentence_id = m.sentence_id
+        WHERE tc.token_count BETWEEN :min_tokens AND :max_tokens
           AND NOT EXISTS (
-              SELECT 1 FROM sentence_tags st
-              WHERE st.sentence_id = s.id AND st.tag IN ({_problematic_tags_sql()})
-          ){tense_filter}
+              SELECT 1 FROM sentence_tags stg
+              WHERE stg.sentence_id = s.id AND stg.tag IN ({_problematic_tags_sql()})
+          )
         ORDER BY
-          CASE WHEN EXISTS (
-              SELECT 1 FROM sentence_tags st3 WHERE st3.sentence_id = s.id AND st3.tag = 'proverb'
-          ) THEN 0 ELSE 1 END,
-          CASE WHEN eng.text IS NOT NULL THEN 0 ELSE 1 END,
-          length(s.text)
+            {proverb_order}
+            ABS(tc.token_count - :ideal_tokens)
         LIMIT 1
     """  # noqa: S608
 
-    def _execute_query(require_tense: bool, min_word_count: int) -> Row[Any] | None:
-        stmt = text(_build_query(require_tense))
-        params: dict[str, str | int] = {
-            "query": fts_query,
-            "max_length": max_length,
-            "min_words": min_word_count,
-        }
-        if tense_tag and require_tense:
-            params["tense_tag"] = tense_tag
-        return conn.execute(stmt, params).fetchone()
+    # Build parameters
+    params: dict[str, str | int] = {
+        "lemma": lemma,
+        "min_tokens": min_tokens,
+        "max_tokens": max_tokens,
+        "ideal_tokens": ideal_tokens,
+    }
 
-    # Fallback chain:
-    # 1. With tense tag (if specified), preferred min_words
-    # 2. Without tense tag, preferred min_words
-    # 3. With tense tag (if specified), fallback min_words
-    # 4. Without tense tag, fallback min_words
-    row: Row[Any] | None = None
+    if pos in ("VERB", "AUX"):
+        if compound_mood is not None and compound_tense is not None:
+            params["compound_mood"] = compound_mood
+            params["compound_tense"] = compound_tense
+        elif mood is not None and tense is not None:
+            params["mood"] = mood
+            params["tense"] = tense
+    else:
+        params["upos"] = pos
 
-    if tense_tag:
-        row = _execute_query(require_tense=True, min_word_count=min_words)
-        if row is None and fallback_min_words < min_words:
-            row = _execute_query(require_tense=True, min_word_count=fallback_min_words)
-
-    if row is None:
-        row = _execute_query(require_tense=False, min_word_count=min_words)
-
-    if row is None and fallback_min_words < min_words:
-        row = _execute_query(require_tense=False, min_word_count=fallback_min_words)
+    row = conn.execute(text(query), params).fetchone()
 
     if row is None:
         return None
 
     italian_text: str = row[1]
-    english_text: str | None = row[2]  # May be None
+    english_text: str = row[2]
 
     return ExampleSentence(italian=italian_text, english=english_text)
 

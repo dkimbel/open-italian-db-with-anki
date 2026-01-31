@@ -174,3 +174,8 @@ tasks:
     desc: Run Stanza POS tagging on Tatoeba sentences (one-off preprocessing)
     cmds:
       - uv run python scripts/stanza_pos_tagging.py {{if .CK_ONLY}}--ck-only{{end}}
+
+  sentence-coverage:
+    desc: Analyze sentence coverage for morphological matching
+    cmds:
+      - uv run python scripts/sentence_coverage_analysis.py

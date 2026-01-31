@@ -86,10 +86,79 @@ def _extract_token_row(
         "person": person,
         "number": number,
         "gender": gender,
+        "compound_mood": None,
+        "compound_tense": None,
         "feats_extra": feats_extra,
         "head": token.get("head"),
         "deprel": token.get("deprel"),
+        # Stanza's 1-indexed token id within each sub-sentence (resets at sentence
+        # boundaries in multi-sentence records). Used by _resolve_compound_tenses()
+        # to correctly resolve head references, then stripped before DB insertion.
+        "_stanza_id": token.get("id"),
     }
+
+
+def _resolve_compound_tenses(token_rows: list[dict[str, Any]]) -> None:
+    """Resolve compound tense features from AUX dependents onto VERB past participles.
+
+    In compound tenses (passato prossimo, trapassato, etc.), Stanza tags:
+    - AUX (avere/essere): VerbForm=Fin, Mood=X, Tense=Y, deprel=aux
+    - VERB (past participle): VerbForm=Part, Tense=Past, but no Mood
+
+    This function copies the AUX's mood/tense onto the VERB row as compound_mood
+    and compound_tense, enabling direct compound tense matching in queries.
+
+    Handles multi-sentence records where Stanza's token id resets at each
+    sub-sentence boundary (e.g., "Come stai? Hai fatto un buon viaggio?"
+    has two sub-sentences with independent id sequences). Head references
+    are resolved within each sub-sentence using _stanza_id.
+
+    Mutates token_rows in place.
+    """
+    if not token_rows:
+        return
+
+    # Segment into sub-sentences by detecting when _stanza_id resets
+    sub_sentences: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = [token_rows[0]]
+    prev_id: int = token_rows[0].get("_stanza_id") or 0
+
+    for row in token_rows[1:]:
+        cur_id: int = row.get("_stanza_id") or 0
+        if cur_id <= prev_id:
+            # id reset — new sub-sentence
+            sub_sentences.append(current)
+            current = []
+        current.append(row)
+        prev_id = cur_id
+
+    sub_sentences.append(current)
+
+    # Resolve within each sub-sentence
+    for sub in sub_sentences:
+        # Build index from Stanza id -> row within this sub-sentence
+        by_stanza_id: dict[int, dict[str, Any]] = {}
+        for row in sub:
+            stanza_id = row.get("_stanza_id")
+            if stanza_id is not None:
+                by_stanza_id[stanza_id] = row
+
+        for row in sub:
+            if (
+                row.get("deprel") == "aux"
+                and row.get("upos") == "AUX"
+                and row.get("verbform") == "Fin"
+                and row.get("mood") is not None
+            ):
+                head_row = by_stanza_id.get(row["head"])
+                if (
+                    head_row is not None
+                    and head_row.get("upos") == "VERB"
+                    and head_row.get("verbform") == "Part"
+                    and head_row.get("tense") == "Past"
+                ):
+                    head_row["compound_mood"] = row["mood"]
+                    head_row["compound_tense"] = row["tense"]
 
 
 def import_sentence_tokens(
@@ -146,15 +215,26 @@ def import_sentence_tokens(
 
         stats.sentences_processed += 1
 
-        # Extract tokens (0-indexed)
+        # Extract all tokens for this sentence
+        sentence_rows: list[dict[str, Any]] = []
         for token_index, token in enumerate(record["tokens"]):
             row = _extract_token_row(surrogate_id, token_index, token)
-            token_batch.append(row)
+            sentence_rows.append(row)
 
-            if len(token_batch) >= batch_size:
-                conn.execute(sentence_tokens.insert(), token_batch)
-                stats.tokens_inserted += len(token_batch)
-                token_batch = []
+        # Resolve compound tense features (AUX mood/tense → VERB past participle)
+        _resolve_compound_tenses(sentence_rows)
+
+        # Strip temporary _stanza_id before DB insertion
+        for row in sentence_rows:
+            del row["_stanza_id"]
+
+        # Add to batch
+        token_batch.extend(sentence_rows)
+
+        if len(token_batch) >= batch_size:
+            conn.execute(sentence_tokens.insert(), token_batch)
+            stats.tokens_inserted += len(token_batch)
+            token_batch = []
 
         # Progress reporting
         if progress_callback and idx % 1000 == 0:

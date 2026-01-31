@@ -343,7 +343,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.31" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.14.10" },
     { name = "sqlalchemy", specifier = ">=2.0" },
-    { name = "stanza", marker = "extra == 'dev'", specifier = ">=1.8" },
+    { name = "stanza", marker = "extra == 'dev'", specifier = "==1.11.0" },
 ]
 provides-extras = ["dev"]
 

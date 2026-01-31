@@ -351,6 +351,11 @@ sentence_tokens = Table(
     Column("person", Integer),  # 1, 2, 3
     Column("number", String(10)),  # Sing, Plur
     Column("gender", String(10)),  # Masc, Fem (participles, nouns, adjectives)
+    # Compound tense features (resolved from AUX dependent at import time)
+    # For VERB tokens with VerbForm=Part,Tense=Past that have an AUX dependent,
+    # these store the AUX's mood/tense to enable compound tense sentence matching.
+    Column("compound_mood", String(10)),  # AUX mood for compound tenses (Ind, Sub, Cnd)
+    Column("compound_tense", String(10)),  # AUX tense for compound tenses (Pres, Imp, Past, Fut)
     # Extra features as JSON for less common attributes
     Column("feats_extra", Text),  # JSON object for Degree, PronType, etc.
     # Dependency info
@@ -581,6 +586,13 @@ Index(
     sentence_tokens.c.tense,
     sentence_tokens.c.person,
     sentence_tokens.c.number,
+)
+# Composite index for compound tense lookups (passato prossimo, trapassato, etc.)
+Index(
+    "idx_sentence_tokens_compound_verb",
+    sentence_tokens.c.lemma,
+    sentence_tokens.c.compound_mood,
+    sentence_tokens.c.compound_tense,
 )
 
 
