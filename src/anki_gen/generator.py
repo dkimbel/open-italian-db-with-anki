@@ -32,9 +32,11 @@ from anki_gen.queries import (
     ExampleSentence,
     Verb,
     generate_english_prompt,
+    get_cefr_level,
     get_english_infinitive,
     get_example_sentence,
     get_frequency_bands,
+    get_nvdb_tier,
     get_present_indicative_forms,
     get_verb_by_lemma,
     validate_verb_list,
@@ -116,7 +118,9 @@ def build_verb_tags(
     Tags include:
         - pos::verb
         - tense::{english-tense-name} (kebab-case)
-        - freq::{band} (top-100, top-500, top-2000, top-5000, other)
+        - freq-{pos}::{band} (top-100, top-500, top-1000, top-2000, other)
+        - cefr::{level} (A1, A2, B1, B2) if classified
+        - nvdb::{tier} (FO, AU, AD) if classified
         - infinitive::{lemma}
 
     Args:
@@ -135,12 +139,22 @@ def build_verb_tags(
     # Get frequency bands (POS-specific only)
     freq_bands = get_frequency_bands(conn, verb.lemma_id)
 
-    return [
+    # Get CEFR and NVdB classifications
+    cefr = get_cefr_level(conn, verb.lemma_id)
+    nvdb = get_nvdb_tier(conn, verb.lemma_id)
+
+    tags = [
         "pos::verb",
         tense_tag,
         *freq_bands,
-        f"infinitive::{verb.written}",
     ]
+    if cefr is not None:
+        tags.append(f"cefr::{cefr}")
+    if nvdb is not None:
+        tags.append(f"nvdb::{nvdb}")
+    tags.append(f"infinitive::{verb.written}")
+
+    return tags
 
 
 def generate_verb_card(

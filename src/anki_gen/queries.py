@@ -9,8 +9,10 @@ from dataclasses import dataclass
 from sqlalchemy import Connection, select, text
 
 from italian_db.db import (
+    cefr_levels,
     frequencies,
     lemmas,
+    nvdb_tiers,
     verb_forms,
 )
 from italian_db.enums import POS
@@ -384,6 +386,20 @@ def get_frequency_rank_in_pos(conn: Connection, lemma_id: int) -> int | None:
         Rank as integer (1-based), or None if lemma has no frequency data
     """
     stmt = select(frequencies.c.freq_rank_in_pos).where(frequencies.c.lemma_id == lemma_id)
+    row = conn.execute(stmt).fetchone()
+    return row[0] if row else None
+
+
+def get_cefr_level(conn: Connection, lemma_id: int) -> str | None:
+    """Return CEFR level ('A1', 'A2', 'B1', 'B2') or None."""
+    stmt = select(cefr_levels.c.level).where(cefr_levels.c.lemma_id == lemma_id)
+    row = conn.execute(stmt).fetchone()
+    return row[0] if row else None
+
+
+def get_nvdb_tier(conn: Connection, lemma_id: int) -> str | None:
+    """Return NVdB tier ('FO', 'AU', 'AD') or None."""
+    stmt = select(nvdb_tiers.c.tier).where(nvdb_tiers.c.lemma_id == lemma_id)
     row = conn.execute(stmt).fetchone()
     return row[0] if row else None
 
