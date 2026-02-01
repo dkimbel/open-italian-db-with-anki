@@ -75,7 +75,7 @@ tasks:
       - uv run italian-db enrich-formof {{if .POS}}--pos {{.POS}}{{end}}
 
   import-frequencies:
-    desc: Import frequency data from PAISA (verbs) and OpenSubtitles (nouns/adjectives)
+    desc: Compute frequency data from Stanza sentence tokens
     cmds:
       - uv run italian-db import-frequencies
 
@@ -84,10 +84,20 @@ tasks:
     cmds:
       - uv run italian-db import-tatoeba
 
+  import-opensubtitles-sentences:
+    desc: Import OpenSubtitles sentences
+    cmds:
+      - uv run italian-db import-opensubtitles-sentences
+
   import-verb-irregularity:
     desc: Import verb irregularity pattern classifications
     cmds:
       - uv run italian-db import-verb-irregularity
+
+  import-sentence-tokens:
+    desc: Import POS-tagged sentence tokens from Stanza JSONL
+    cmds:
+      - uv run italian-db import-sentence-tokens {{if .SOURCE}}--source {{.SOURCE}}{{end}}
 
   import-all:
     desc: Run full import pipeline
@@ -114,20 +124,15 @@ tasks:
     cmds:
       - uv run italian-db download-tatoeba {{if .FORCE}}--force{{end}}
 
+  download-opensubtitles:
+    desc: Download OpenSubtitles parallel sentences from OPUS
+    cmds:
+      - uv run italian-db download-opensubtitles {{if .FORCE}}--force{{end}}
+
   download-all:
     desc: Download all data sources
     cmds:
       - uv run italian-db download-all {{if .FORCE}}--force{{end}}
-
-  download-opensubtitles:
-    desc: Download OpenSubtitles frequency lists (for evaluation)
-    cmds:
-      - uv run italian-db download-opensubtitles {{if .FORCE}}--force{{end}}
-
-  download-paisa:
-    desc: Download PAISA lemma frequencies (NC license, evaluation only)
-    cmds:
-      - uv run italian-db download-paisa {{if .FORCE}}--force{{end}}
 
   generate-deck:
     desc: Generate Anki deck from database
@@ -155,25 +160,20 @@ tasks:
     cmds:
       - uv run python -i scripts/data_query.py
 
-  opensub-query:
-    desc: Interactive DuckDB session for querying OpenSubtitles frequency data
-    cmds:
-      - uv run python -i scripts/opensub_query.py
-
-  paisa-query:
-    desc: Interactive DuckDB session for querying PAISA frequency data (NC license)
-    cmds:
-      - uv run python -i scripts/paisa_query.py
-
   stanza-download:
     desc: Download Stanza Italian model for POS tagging
     cmds:
       - uv run python -c "import stanza; stanza.download('it')"
 
   stanza-pos-tag:
-    desc: Run Stanza POS tagging on Tatoeba sentences (one-off preprocessing)
+    desc: Run Stanza POS tagging on sentences (one-off preprocessing)
     cmds:
-      - uv run python scripts/stanza_pos_tagging.py {{if .CK_ONLY}}--ck-only{{end}}
+      - uv run python scripts/stanza_pos_tagging.py {{if .SOURCE}}--source {{.SOURCE}}{{end}} {{if .CK_ONLY}}--ck-only{{end}}
+
+  stanza-pos-tag-opensubtitles:
+    desc: Run Stanza POS tagging on OpenSubtitles sentences
+    cmds:
+      - uv run python scripts/stanza_pos_tagging.py --source opensubtitles
 
   sentence-coverage:
     desc: Analyze sentence coverage for morphological matching

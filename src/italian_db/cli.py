@@ -21,15 +21,12 @@ from italian_db.db import (
 from italian_db.download import (
     download_all,
     download_opensubtitles,
-    download_paisa,
     download_tatoeba,
     download_wiktextract,
 )
 from italian_db.enums import POS
 from italian_db.importers import (
     compute_pos_frequency_ranks,
-    import_opensubtitles,
-    import_paisa,
     import_sentence_tokens,
     import_tatoeba,
     import_verb_irregularity,
@@ -51,14 +48,16 @@ from italian_db.importers.wiktextract import (
 from italian_db.verify import verify_database
 
 DEFAULT_WIKTEXTRACT_PATH = Path("data/wiktextract/kaikki.org-dictionary-Italian.jsonl")
-DEFAULT_PAISA_PATH = Path("data/paisa/lemma-frequencies-paisa.txt")
-DEFAULT_OPENSUBTITLES_PATH = Path("data/opensubtitles/it_full.txt")
 DEFAULT_ITA_SENTENCES_PATH = Path("data/tatoeba/ita_sentences.tsv")
 DEFAULT_ENG_SENTENCES_PATH = Path("data/tatoeba/eng_sentences.tsv")
 DEFAULT_LINKS_PATH = Path("data/tatoeba/ita_eng_links.tsv")
 DEFAULT_TAGS_PATH = Path("data/tatoeba/tags.csv")
 DEFAULT_SENTENCES_IN_LISTS_PATH = Path("data/tatoeba/sentences_in_lists.csv")
-DEFAULT_SENTENCE_TOKENS_PATH = Path("data/tatoeba/ita_sentences_pos.jsonl")
+DEFAULT_TATOEBA_SENTENCE_TOKENS_PATH = Path("data/tatoeba/ita_sentences_pos.jsonl")
+DEFAULT_OPENSUBTITLES_SENTENCE_TOKENS_PATH = Path("data/opensubtitles/it_sentences_pos.jsonl")
+DEFAULT_OPENSUBTITLES_ITA_PATH = Path("data/opensubtitles/it_sentences.tsv")
+DEFAULT_OPENSUBTITLES_ENG_PATH = Path("data/opensubtitles/en_sentences.tsv")
+DEFAULT_OPENSUBTITLES_LINKS_PATH = Path("data/opensubtitles/links.tsv")
 DEFAULT_DB_PATH = Path("italian.db")
 
 
@@ -115,73 +114,32 @@ def cmd_enrich_formof(args: argparse.Namespace) -> int:
 
 
 def cmd_import_frequencies(args: argparse.Namespace) -> int:
-    """Import frequency data from PAISA (verbs) and OpenSubtitles (nouns/adjectives)."""
+    """Compute frequency data from Stanza sentence tokens."""
     db_path = Path(args.database)
-    paisa_path = Path(args.paisa) if args.paisa else DEFAULT_PAISA_PATH
-    opensubtitles_path = (
-        Path(args.opensubtitles) if args.opensubtitles else DEFAULT_OPENSUBTITLES_PATH
-    )
 
     if not db_path.exists():
         print(f"Error: Database not found: {db_path}", file=sys.stderr)
         print("Run 'import-wiktextract' first to create the database.", file=sys.stderr)
         return 1
 
-    print(f"Importing frequencies to: {db_path}")
+    print(f"Computing frequencies from sentence tokens: {db_path}")
     print()
 
+    from italian_db.importers.frequency_from_tokens import compute_frequencies_from_tokens
+
     with get_connection(db_path) as conn:
-        # Import PAISA for verbs
-        if paisa_path.exists():
-            print("=" * 60)
-            print("Importing PAISA frequencies (verbs)")
-            print("=" * 60)
-            print(f"Using: {paisa_path}")
-            _run_paisa_import(conn, paisa_path, POS.VERB)
-            print()
-        else:
-            print(f"Skipping PAISA: file not found at {paisa_path}")
-            print()
-
-        # Import OpenSubtitles for nouns
-        if opensubtitles_path.exists():
-            print("=" * 60)
-            print("Importing OpenSubtitles frequencies (nouns)")
-            print("=" * 60)
-            print(f"Using: {opensubtitles_path}")
-            _run_opensubtitles_import(conn, opensubtitles_path, POS.NOUN)
-            print()
-
-            # Import OpenSubtitles for adjectives
-            print("=" * 60)
-            print("Importing OpenSubtitles frequencies (adjectives)")
-            print("=" * 60)
-            print(f"Using: {opensubtitles_path}")
-            _run_opensubtitles_import(conn, opensubtitles_path, POS.ADJECTIVE)
-            print()
-        else:
-            print(f"Skipping OpenSubtitles: file not found at {opensubtitles_path}")
-            print()
-
-        # Compute per-POS rankings
-        print("=" * 60)
-        print("Computing per-POS frequency rankings")
-        print("=" * 60)
+        stats = compute_frequencies_from_tokens(conn, progress_callback=_make_progress_callback())
+        print()
+        print(f"  Total tokens counted:   {stats['total_tokens']:,}")
+        print(f"  Lemmas matched:         {stats['matched']:,}")
+        print(f"  Lemmas not in DB:       {stats['not_found']:,}")
         print()
 
-        # Rank PAISA (verbs)
-        if paisa_path.exists():
-            print("Ranking verbs (PAISA)...")
-            paisa_stats = compute_pos_frequency_ranks(conn, "paisa")
-            for pos_name, count in sorted(paisa_stats.items()):
-                print(f"  {pos_name.capitalize()}: {count:,} ranked")
-
-        # Rank OpenSubtitles (nouns, adjectives)
-        if opensubtitles_path.exists():
-            print("Ranking nouns/adjectives (OpenSubtitles)...")
-            opensub_stats = compute_pos_frequency_ranks(conn, "opensubtitles")
-            for pos_name, count in sorted(opensub_stats.items()):
-                print(f"  {pos_name.capitalize()}: {count:,} ranked")
+        # Compute per-POS rankings
+        print("Computing per-POS frequency rankings...")
+        rank_stats = compute_pos_frequency_ranks(conn, "stanza")
+        for pos_name, count in sorted(rank_stats.items()):
+            print(f"  {pos_name.capitalize()}: {count:,} ranked")
 
     print()
     print("Import complete!")
@@ -236,6 +194,55 @@ def cmd_import_tatoeba(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import_opensubtitles_sentences(args: argparse.Namespace) -> int:
+    """Run the OpenSubtitles sentences import command."""
+    ita_path = Path(args.ita_sentences)
+    eng_path = Path(args.eng_sentences)
+    links_path = Path(args.links)
+    db_path = Path(args.database)
+
+    for path, name in [
+        (ita_path, "Italian sentences"),
+        (eng_path, "English sentences"),
+        (links_path, "links"),
+    ]:
+        if not path.exists():
+            print(f"Error: {name} file not found: {path}", file=sys.stderr)
+            return 1
+
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        print("Run 'import-wiktextract' first to create the database.", file=sys.stderr)
+        return 1
+
+    print(f"Importing OpenSubtitles sentences to: {db_path}")
+    print(f"  Italian sentences: {ita_path}")
+    print(f"  English sentences: {eng_path}")
+    print(f"  Links: {links_path}")
+    print()
+
+    from italian_db.importers.opensubtitles_sentences import import_opensubtitles_sentences
+
+    with get_connection(db_path) as conn:
+        stats = import_opensubtitles_sentences(
+            conn,
+            ita_path,
+            eng_path,
+            links_path,
+            progress_callback=_make_progress_callback(),
+        )
+        print()
+        if stats["cleared"] > 0:
+            print(f"  Cleared:           {stats['cleared']:,} existing sentences")
+        print(f"  Italian sentences: {stats['ita_sentences']:,}")
+        print(f"  English sentences: {stats['eng_sentences']:,}")
+        print(f"  Translations:      {stats['translations']:,}")
+
+    print()
+    print("Import complete!")
+    return 0
+
+
 def cmd_import_verb_irregularity(args: argparse.Namespace) -> int:
     """Run the verb irregularity pattern import command."""
     db_path = Path(args.database)
@@ -272,7 +279,15 @@ def cmd_import_verb_irregularity(args: argparse.Namespace) -> int:
 def cmd_import_sentence_tokens(args: argparse.Namespace) -> int:
     """Run the sentence tokens import command."""
     db_path = Path(args.database)
-    jsonl_path = Path(args.jsonl)
+    source = args.source
+
+    # Determine JSONL path based on source
+    if args.jsonl:
+        jsonl_path = Path(args.jsonl)
+    elif source == "opensubtitles":
+        jsonl_path = DEFAULT_OPENSUBTITLES_SENTENCE_TOKENS_PATH
+    else:
+        jsonl_path = DEFAULT_TATOEBA_SENTENCE_TOKENS_PATH
 
     if not db_path.exists():
         print(f"Error: Database not found: {db_path}", file=sys.stderr)
@@ -290,11 +305,12 @@ def cmd_import_sentence_tokens(args: argparse.Namespace) -> int:
 
     print(f"Importing sentence tokens to: {db_path}")
     print(f"  From: {jsonl_path}")
+    print(f"  Source: {source}")
     print()
 
     with get_connection(db_path) as conn:
         stats = import_sentence_tokens(
-            conn, jsonl_path, progress_callback=_make_progress_callback()
+            conn, jsonl_path, source=source, progress_callback=_make_progress_callback()
         )
         print()
         print(f"  Sentences processed:  {stats.sentences_processed:,}")
@@ -379,6 +395,18 @@ def cmd_stats(args: argparse.Namespace) -> int:
             .where(sentences.c.lang == "eng", sentences.c.source == "tatoeba")
         ).scalar()
 
+        # OpenSubtitles sentences
+        opensub_ita = conn.execute(
+            select(func.count())
+            .select_from(sentences)
+            .where(sentences.c.lang == "ita", sentences.c.source == "opensubtitles")
+        ).scalar()
+        opensub_eng = conn.execute(
+            select(func.count())
+            .select_from(sentences)
+            .where(sentences.c.lang == "eng", sentences.c.source == "opensubtitles")
+        ).scalar()
+
         # Sentence tags count (Tatoeba)
         from italian_db.db.schema import sentence_tags, sentence_tokens
 
@@ -445,7 +473,14 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print(f"  English:     {tatoeba_eng:,}")
     if tag_count > 0:
         print(f"  Tags:        {tag_count:,} ({unique_tags:,} unique)")
+    if opensub_ita:
+        print()
+        print("Sentences (OpenSubtitles):")
+        print(f"  Italian:     {opensub_ita:,}")
+        print(f"  English:     {opensub_eng:,}")
     if token_count > 0:
+        print()
+        print("Sentence Tokens (Stanza):")
         print(f"  Tokens:      {token_count:,} ({sentences_with_tokens:,} sentences)")
 
     return 0
@@ -485,18 +520,8 @@ def cmd_download_tatoeba(args: argparse.Namespace) -> int:
 
 
 def cmd_download_opensubtitles(args: argparse.Namespace) -> int:
-    """Download OpenSubtitles frequency lists (for evaluation)."""
+    """Download OpenSubtitles parallel sentences from OPUS."""
     stats = download_opensubtitles(force=args.force)
-    print(f"Downloaded: {stats['downloaded']} files, Skipped: {stats['skipped']} files")
-    return 0
-
-
-def cmd_download_paisa(args: argparse.Namespace) -> int:
-    """Download PAISA lemma frequencies (for evaluation, NC license)."""
-    print("NOTE: PAISA has a CC-BY-NC-SA license (NonCommercial).")
-    print("      Use for evaluation/comparison only, not as primary data source.")
-    print()
-    stats = download_paisa(force=args.force)
     if stats["downloaded"] > 0:
         print("Download complete!")
     return 0
@@ -571,15 +596,7 @@ def _run_wiktextract_import(
 
 
 def _print_relationship_stats(stats: dict[str, Any], pos: POS, indent: str = "  ") -> None:
-    """Print relationship statistics from wiktextract import.
-
-    These stats come from post-processing steps that link lemmas:
-    - Pronominal verbs: lavarsi → lavare (reflexive_of)
-    - Noun counterparts: professore ↔ professoressa (gender_counterpart)
-    - Noun derivations: cagnolino → cane (definitions.derived_from_lemma_id)
-    - Adjective degrees: migliore → buono (comparative_of, superlative_of)
-    - Definition derivations: senses with form_of that were linked to base lemmas
-    """
+    """Print relationship statistics from wiktextract import."""
     has_any = False
 
     # Verb: pronominal linking (reflexive verbs)
@@ -668,49 +685,6 @@ def _run_formof_combined_enrichment(
     return stats
 
 
-def _run_paisa_import(
-    conn: Connection, csv_path: Path, pos: POS, indent: str = "  "
-) -> dict[str, Any] | None:
-    """Run PAISA frequency import and print stats. Returns None if file doesn't exist."""
-    if not csv_path.exists():
-        return None
-    stats = import_paisa(
-        conn, csv_path, pos_filter=pos, progress_callback=_make_progress_callback()
-    )
-    print()
-    # Calculate frequency-weighted match percentage
-    total_freq = stats.get("total_corpus_freq", 0)
-    matched_freq = stats.get("matched_freq", 0)
-    freq_pct = (matched_freq / total_freq * 100) if total_freq > 0 else 0
-    print(f"{indent}Lemmas matched:     {stats['matched']:,} ({freq_pct:.0f}% of corpus frequency)")
-    print(f"{indent}Lemmas not found:   {stats['not_found']:,}")
-    return stats
-
-
-def _run_opensubtitles_import(
-    conn: Connection, file_path: Path, pos: POS, indent: str = "  "
-) -> dict[str, Any] | None:
-    """Run OpenSubtitles frequency import and print stats. Returns None if file doesn't exist."""
-    if not file_path.exists():
-        return None
-    stats = import_opensubtitles(
-        conn, file_path, pos_filter=pos, progress_callback=_make_progress_callback()
-    )
-    print()
-    # Calculate match percentage
-    total_freq = stats.get("total_corpus_freq", 0)
-    matched_freq = stats.get("matched_freq", 0)
-    freq_pct = (matched_freq / total_freq * 100) if total_freq > 0 else 0
-    print(
-        f"{indent}Surface forms matched: {stats['matched']:,} ({freq_pct:.0f}% of corpus frequency)"
-    )
-    print(f"{indent}Lemmas updated:        {stats['lemmas_updated']:,}")
-    print(f"{indent}Forms not found:       {stats['not_found']:,}")
-    if stats.get("collisions", 0) > 0:
-        print(f"{indent}Form collisions:       {stats['collisions']:,}")
-    return stats
-
-
 def _run_tatoeba_import(
     conn: Connection,
     ita_path: Path,
@@ -774,10 +748,12 @@ def _run_ipa_import(
 
 
 def _run_sentence_tokens_import(
-    conn: Connection, jsonl_path: Path, indent: str = "  "
+    conn: Connection, jsonl_path: Path, *, source: str, indent: str = "  "
 ) -> dict[str, Any]:
     """Run sentence tokens import and print stats."""
-    stats = import_sentence_tokens(conn, jsonl_path, progress_callback=_make_progress_callback())
+    stats = import_sentence_tokens(
+        conn, jsonl_path, source=source, progress_callback=_make_progress_callback()
+    )
     print()
     print(f"{indent}Sentences processed:  {stats.sentences_processed:,}")
     print(f"{indent}Tokens inserted:      {stats.tokens_inserted:,}")
@@ -817,33 +793,47 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     print()
 
     pos_list = list(POS)
-    # Determine total phases: 3 POS + post-processing + Tatoeba + (optional) sentence tokens
-    has_sentence_tokens_jsonl = DEFAULT_SENTENCE_TOKENS_PATH.exists()
-    total_phases = 6 if has_sentence_tokens_jsonl else 5
+    # Determine total phases:
+    # 3 POS + post-processing + Tatoeba + OpenSubtitles(optional) + sentence tokens + frequency
+    has_opensub = DEFAULT_OPENSUBTITLES_ITA_PATH.exists()
+    has_tatoeba_tokens = DEFAULT_TATOEBA_SENTENCE_TOKENS_PATH.exists()
+    has_opensub_tokens = DEFAULT_OPENSUBTITLES_SENTENCE_TOKENS_PATH.exists()
+    has_any_tokens = has_tatoeba_tokens or has_opensub_tokens
+
+    # Count phases: 3 POS + post-processing + Tatoeba + [OpenSubtitles] + [tokens] + [frequencies]
+    total_phases = 3 + 1 + 1  # POS + post-processing + Tatoeba
+    if has_opensub:
+        total_phases += 1
+    if has_any_tokens:
+        total_phases += 1
+    if has_any_tokens:
+        total_phases += 1  # frequency computation (needs tokens)
+
     indent = "    "
+    current_phase = 0
 
     # Import each POS
     for pos_idx, pos in enumerate(pos_list, 1):
+        current_phase = pos_idx
         pos_plural = pos.plural
         print("=" * 80)
-        print(f"Importing {pos_plural} (Step {pos_idx} of {total_phases})")
+        print(f"Importing {pos_plural} (Step {current_phase} of {total_phases})")
         print("=" * 80)
         print()
 
         # Determine step count:
-        # - adjectives: 8 steps (wiktextract, form-of, lemma-written, allomorphs,
-        #                        unstressed, orthography, frequencies, ipa)
-        # - nouns: 8 steps (wiktextract, form-of, lemma-written, allomorphs,
-        #                   unstressed, orthography, frequencies, ipa)
-        # - verbs: 7 steps (wiktextract, participles, lemma-written, form-of, frequencies,
+        # - adjectives: 7 steps (wiktextract, form-of, lemma-written, allomorphs,
+        #                        unstressed, orthography, ipa)
+        # - nouns: 7 steps (wiktextract, form-of, lemma-written, allomorphs,
+        #                   unstressed, orthography, ipa)
+        # - verbs: 5 steps (wiktextract, participles, lemma-written, form-of,
         #                   verb-irregularity, ipa)
-        # Note: For nouns/adj, form-of is primary source for written forms.
         if pos == POS.ADJECTIVE:
-            total_steps = 8
-        elif pos == POS.VERB:
             total_steps = 7
+        elif pos == POS.VERB:
+            total_steps = 6
         else:
-            total_steps = 8
+            total_steps = 7
 
         with get_connection(db_path) as conn:
             # Step 1: Wiktextract import
@@ -864,14 +854,13 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print()
 
             # Step 2 (noun/adjective only): Form-of enrichment (labels + spelling)
-            # For nouns/adjectives, form-of entries are the primary source for written forms.
             if pos != POS.VERB:
                 print(f"[2/{total_steps}] Enriching from form-of entries...")
                 _run_formof_combined_enrichment(conn, jsonl_path, pos, indent=indent)
                 print()
 
             # Step 3 (verb/noun/adjective): Lemma written enrichment (from citation forms)
-            step_lemma_written = 3  # Same for all POS
+            step_lemma_written = 3
             print(f"[{step_lemma_written}/{total_steps}] Enriching lemmas with written spelling...")
             stats = enrich_lemma_written(
                 conn, pos_filter=pos, progress_callback=_make_progress_callback()
@@ -916,14 +905,12 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print()
 
             # Form-of enrichment for verbs only at step 4
-            # (nouns/adjectives already ran this at step 2)
             if pos == POS.VERB:
                 print(f"[4/{total_steps}] Enriching from form-of entries...")
                 _run_formof_combined_enrichment(conn, jsonl_path, pos, indent=indent)
                 print()
 
             # Unstressed fallback (noun/adjective only)
-            # Verbs skip this - all written values derived during lemma enrichment
             if pos != POS.VERB:
                 step_unstressed = 5
                 print(f"[{step_unstressed}/{total_steps}] Applying unstressed form fallback...")
@@ -932,7 +919,6 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                 print()
 
             # Orthography-based written derivation (noun/adjective only)
-            # Verbs skip this - all written values derived during lemma enrichment
             if pos != POS.VERB:
                 step_ortho = 6
                 print(
@@ -945,46 +931,22 @@ def cmd_import_all(args: argparse.Namespace) -> int:
                     print(f"{indent}Failed:        {stats['failed']:,}")
                 print()
 
-            # Frequency import - verb: step 5 (PAISA), noun/adj: step 7 (OpenSubtitles)
+            # Step 5 (verb only): Import verb irregularity patterns
             if pos == POS.VERB:
-                step_freq = 5
-                print(f"[{step_freq}/{total_steps}] Importing PAISA frequencies...")
-                paisa_path = DEFAULT_PAISA_PATH
-                if paisa_path.exists():
-                    _run_paisa_import(conn, paisa_path, pos, indent=indent)
-                else:
-                    print(f"{indent}Skipped: PAISA file not found at {paisa_path}")
-            else:
-                step_freq = 7
-                print(f"[{step_freq}/{total_steps}] Importing OpenSubtitles frequencies...")
-                opensub_path = DEFAULT_OPENSUBTITLES_PATH
-                if opensub_path.exists():
-                    _run_opensubtitles_import(conn, opensub_path, pos, indent=indent)
-                else:
-                    print(f"{indent}Skipped: OpenSubtitles file not found at {opensub_path}")
-            print()
-
-            # Step 6 (verb only): Import verb irregularity patterns
-            if pos == POS.VERB:
-                print(f"[6/{total_steps}] Importing verb irregularity patterns...")
+                print(f"[5/{total_steps}] Importing verb irregularity patterns...")
                 _run_verb_irregularity_import(conn, indent=indent)
                 print()
 
             # IPA import (final step for each POS)
-            # verb: step 7, noun: step 8, adjective: step 8
-            if pos == POS.VERB:
-                step_ipa = 7
-            elif pos == POS.NOUN:
-                step_ipa = 8
-            else:
-                step_ipa = 8
+            step_ipa = 6 if pos == POS.VERB else 7
             print(f"[{step_ipa}/{total_steps}] Importing IPA pronunciations...")
             _run_ipa_import(conn, jsonl_path, pos, indent=indent)
             print()
 
     # Post-processing: Cross-POS enrichments
+    current_phase += 1
     print("=" * 80)
-    print("Post-processing enrichments (Step 4 of 5)")
+    print(f"Post-processing enrichments (Step {current_phase} of {total_phases})")
     print("=" * 80)
     print()
 
@@ -1000,30 +962,12 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print(f"  Skipped (blocklisted): {stats['skipped_blocklisted']:,}")
         print(f"  Skipped (multi-word):  {stats['skipped_multiword']:,}")
         print(f"  Skipped (typo):        {stats['skipped_typo']:,}")
-        print()
-
-        # Compute per-POS frequency rankings for both corpora
-        print("Computing per-POS frequency rankings...")
-
-        # Rank PAISA (verbs)
-        if DEFAULT_PAISA_PATH.exists():
-            print("  Ranking verbs (PAISA)...")
-            paisa_stats = compute_pos_frequency_ranks(conn, "paisa")
-            for pos_name, count in sorted(paisa_stats.items()):
-                print(f"    {pos_name.capitalize()}: {count:,} ranked")
-
-        # Rank OpenSubtitles (nouns, adjectives)
-        if DEFAULT_OPENSUBTITLES_PATH.exists():
-            print("  Ranking nouns/adjectives (OpenSubtitles)...")
-            opensub_stats = compute_pos_frequency_ranks(conn, "opensubtitles")
-            for pos_name, count in sorted(opensub_stats.items()):
-                print(f"    {pos_name.capitalize()}: {count:,} ranked")
     print()
 
     # Tatoeba sentences
-    tatoeba_step = 5
+    current_phase += 1
     print("=" * 80)
-    print(f"Importing Tatoeba sentences (Step {tatoeba_step} of {total_phases})")
+    print(f"Importing Tatoeba sentences (Step {current_phase} of {total_phases})")
     print("=" * 80)
     print()
 
@@ -1051,17 +995,89 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         )
     print()
 
-    # Sentence tokens (optional - only if JSONL exists)
-    if has_sentence_tokens_jsonl:
-        tokens_step = 6
+    # OpenSubtitles sentences (optional - only if download files exist)
+    if has_opensub:
+        current_phase += 1
         print("=" * 80)
-        print(f"Importing sentence token annotations (Step {tokens_step} of {total_phases})")
+        print(f"Importing OpenSubtitles sentences (Step {current_phase} of {total_phases})")
         print("=" * 80)
         print()
-        print(f"Importing POS-tagged tokens from {DEFAULT_SENTENCE_TOKENS_PATH}...")
+
+        from italian_db.importers.opensubtitles_sentences import import_opensubtitles_sentences
 
         with get_connection(db_path) as conn:
-            _run_sentence_tokens_import(conn, DEFAULT_SENTENCE_TOKENS_PATH, indent="  ")
+            stats = import_opensubtitles_sentences(
+                conn,
+                DEFAULT_OPENSUBTITLES_ITA_PATH,
+                DEFAULT_OPENSUBTITLES_ENG_PATH,
+                DEFAULT_OPENSUBTITLES_LINKS_PATH,
+                progress_callback=_make_progress_callback(),
+            )
+            print()
+            if stats["cleared"] > 0:
+                print(f"  Cleared:           {stats['cleared']:,} existing sentences")
+            print(f"  Italian sentences: {stats['ita_sentences']:,}")
+            print(f"  English sentences: {stats['eng_sentences']:,}")
+            print(f"  Translations:      {stats['translations']:,}")
+        print()
+
+    # Sentence tokens (optional - only if JSONL exists for either source)
+    if has_any_tokens:
+        current_phase += 1
+        print("=" * 80)
+        print(f"Importing sentence token annotations (Step {current_phase} of {total_phases})")
+        print("=" * 80)
+        print()
+
+        with get_connection(db_path) as conn:
+            if has_tatoeba_tokens:
+                print(f"Importing Tatoeba tokens from {DEFAULT_TATOEBA_SENTENCE_TOKENS_PATH}...")
+                _run_sentence_tokens_import(
+                    conn,
+                    DEFAULT_TATOEBA_SENTENCE_TOKENS_PATH,
+                    source="tatoeba",
+                    indent="  ",
+                )
+                print()
+
+            if has_opensub_tokens:
+                print(
+                    f"Importing OpenSubtitles tokens from "
+                    f"{DEFAULT_OPENSUBTITLES_SENTENCE_TOKENS_PATH}..."
+                )
+                _run_sentence_tokens_import(
+                    conn,
+                    DEFAULT_OPENSUBTITLES_SENTENCE_TOKENS_PATH,
+                    source="opensubtitles",
+                    indent="  ",
+                )
+                print()
+
+    # Frequency computation from sentence tokens
+    if has_any_tokens:
+        current_phase += 1
+        print("=" * 80)
+        print(f"Computing frequencies from tokens (Step {current_phase} of {total_phases})")
+        print("=" * 80)
+        print()
+
+        from italian_db.importers.frequency_from_tokens import compute_frequencies_from_tokens
+
+        with get_connection(db_path) as conn:
+            freq_stats = compute_frequencies_from_tokens(
+                conn, progress_callback=_make_progress_callback()
+            )
+            print()
+            print(f"  Total tokens counted:   {freq_stats['total_tokens']:,}")
+            print(f"  Lemmas matched:         {freq_stats['matched']:,}")
+            print(f"  Lemmas not in DB:       {freq_stats['not_found']:,}")
+            print()
+
+            # Compute per-POS rankings
+            print("  Computing per-POS frequency rankings...")
+            rank_stats = compute_pos_frequency_ranks(conn, "stanza")
+            for pos_name, count in sorted(rank_stats.items()):
+                print(f"    {pos_name.capitalize()}: {count:,} ranked")
         print()
 
     print("=" * 80)
@@ -1138,7 +1154,7 @@ def main() -> int:
     # import-frequencies subcommand
     freq_parser = subparsers.add_parser(
         "import-frequencies",
-        help="Import frequency data from PAISA (verbs) and OpenSubtitles (nouns/adjectives)",
+        help="Compute frequency data from Stanza sentence tokens",
     )
     freq_parser.add_argument(
         "-d",
@@ -1146,18 +1162,6 @@ def main() -> int:
         type=str,
         default=str(DEFAULT_DB_PATH),
         help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
-    )
-    freq_parser.add_argument(
-        "--paisa",
-        type=str,
-        default=None,
-        help=f"Path to PAISA frequency file (default: {DEFAULT_PAISA_PATH})",
-    )
-    freq_parser.add_argument(
-        "--opensubtitles",
-        type=str,
-        default=None,
-        help=f"Path to OpenSubtitles frequency file (default: {DEFAULT_OPENSUBTITLES_PATH})",
     )
     freq_parser.set_defaults(func=cmd_import_frequencies)
 
@@ -1205,6 +1209,38 @@ def main() -> int:
     )
     tatoeba_parser.set_defaults(func=cmd_import_tatoeba)
 
+    # import-opensubtitles-sentences subcommand
+    opensub_parser = subparsers.add_parser(
+        "import-opensubtitles-sentences",
+        help="Import OpenSubtitles parallel sentences",
+    )
+    opensub_parser.add_argument(
+        "--ita-sentences",
+        type=str,
+        default=str(DEFAULT_OPENSUBTITLES_ITA_PATH),
+        help=f"Path to Italian sentences TSV (default: {DEFAULT_OPENSUBTITLES_ITA_PATH})",
+    )
+    opensub_parser.add_argument(
+        "--eng-sentences",
+        type=str,
+        default=str(DEFAULT_OPENSUBTITLES_ENG_PATH),
+        help=f"Path to English sentences TSV (default: {DEFAULT_OPENSUBTITLES_ENG_PATH})",
+    )
+    opensub_parser.add_argument(
+        "--links",
+        type=str,
+        default=str(DEFAULT_OPENSUBTITLES_LINKS_PATH),
+        help=f"Path to links TSV (default: {DEFAULT_OPENSUBTITLES_LINKS_PATH})",
+    )
+    opensub_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    opensub_parser.set_defaults(func=cmd_import_opensubtitles_sentences)
+
     # import-verb-irregularity subcommand
     irreg_parser = subparsers.add_parser(
         "import-verb-irregularity",
@@ -1227,8 +1263,15 @@ def main() -> int:
     tokens_parser.add_argument(
         "--jsonl",
         type=str,
-        default=str(DEFAULT_SENTENCE_TOKENS_PATH),
-        help=f"Path to POS-tagged JSONL file (default: {DEFAULT_SENTENCE_TOKENS_PATH})",
+        default=None,
+        help="Path to POS-tagged JSONL file (auto-detected from --source if not set)",
+    )
+    tokens_parser.add_argument(
+        "--source",
+        type=str,
+        default="tatoeba",
+        choices=["tatoeba", "opensubtitles"],
+        help="Sentence source to import tokens for (default: tatoeba)",
     )
     tokens_parser.add_argument(
         "-d",
@@ -1311,10 +1354,10 @@ def main() -> int:
     )
     dl_tatoeba_parser.set_defaults(func=cmd_download_tatoeba)
 
-    # download-opensubtitles subcommand (evaluation)
+    # download-opensubtitles subcommand
     dl_opensub_parser = subparsers.add_parser(
         "download-opensubtitles",
-        help="Download OpenSubtitles frequency lists (for evaluation)",
+        help="Download OpenSubtitles parallel sentences from OPUS",
     )
     dl_opensub_parser.add_argument(
         "--force",
@@ -1322,18 +1365,6 @@ def main() -> int:
         help="Re-download even if files already exist",
     )
     dl_opensub_parser.set_defaults(func=cmd_download_opensubtitles)
-
-    # download-paisa subcommand (evaluation, NC license)
-    dl_paisa_parser = subparsers.add_parser(
-        "download-paisa",
-        help="Download PAISA lemma frequencies (for evaluation, NC license)",
-    )
-    dl_paisa_parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Re-download even if file already exists",
-    )
-    dl_paisa_parser.set_defaults(func=cmd_download_paisa)
 
     # download-all subcommand
     dl_all_parser = subparsers.add_parser(

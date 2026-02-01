@@ -62,28 +62,6 @@ conn.execute("""
 """)
 
 # =============================================================================
-# FREQUENCY DATA (PAISA + OpenSubtitles)
-# =============================================================================
-conn.execute("""
-    CREATE VIEW paisa AS
-    SELECT
-        column0 as lemma,
-        column1::INTEGER as freq
-    FROM read_csv_auto('data/paisa/lemma-frequencies-paisa.txt',
-        delim=',', header=false, skip=2)
-""")
-
-conn.execute("""
-    CREATE VIEW opensub AS
-    SELECT
-        column0 as word,
-        column1::INTEGER as freq,
-        ROW_NUMBER() OVER (ORDER BY column1::INTEGER DESC) as rank
-    FROM read_csv_auto('data/opensubtitles/it_full.txt',
-        delim=' ', header=false)
-""")
-
-# =============================================================================
 print("DuckDB session ready with ALL source data.")
 print()
 print("WIKTEXTRACT:")
@@ -96,12 +74,5 @@ print("  tatoeba_links   - Translation links (ita_id, eng_id)")
 print("  tatoeba_audio   - Sentences with audio (sentence_id, audio_id, ...)")
 print("  translations    - Pre-joined Italian-English pairs")
 print()
-print("FREQUENCY DATA:")
-print("  paisa           - PAISA lemma frequencies (lemma, freq) - used for verbs")
-print("  opensub         - OpenSubtitles frequencies (word, freq, rank) - used for nouns/adj")
-print()
 print("Cross-source query examples:")
-print("  # Check if a Wiktextract word has OpenSubtitles frequency")
-print(
-    "  conn.sql(\"SELECT w.word, o.freq, o.rank FROM wikt w LEFT JOIN opensub o ON w.word = o.word WHERE w.word = 'casa'\")"
-)
+print("  conn.sql(\"SELECT w.word, w.pos FROM wikt w WHERE w.word = 'casa'\")")

@@ -213,10 +213,12 @@ def get_example_sentence(
 
     Uses Stanza POS annotations to find sentences containing the lemma with
     matching grammatical features. English translation is REQUIRED.
+    Searches both Tatoeba and OpenSubtitles sentences.
 
     Ranking:
-        1. Proverbs (if prefer_proverbs=True)
-        2. Sentences closest to ideal_tokens length
+        1. Tatoeba sentences preferred over OpenSubtitles
+        2. Proverbs (if prefer_proverbs=True)
+        3. Sentences closest to ideal_tokens length
 
     Filtering:
         - Requires English translation (via translations table)
@@ -312,6 +314,7 @@ def get_example_sentence(
               WHERE stg.sentence_id = s.id AND stg.tag IN ({_problematic_tags_sql()})
           )
         ORDER BY
+            CASE WHEN s.source = 'tatoeba' THEN 0 ELSE 1 END,
             {proverb_order}
             ABS(tc.token_count - :ideal_tokens)
         LIMIT 1
@@ -422,10 +425,9 @@ def _rank_to_pos_band(rank: int | None, pos: str) -> str:
 def get_frequency_bands(conn: Connection, lemma_id: int) -> list[str]:
     """Get POS-specific frequency band tag for a lemma.
 
-    With the hybrid frequency approach (PAISA for verbs, OpenSubtitles for
-    nouns/adjectives), global frequency rankings are not meaningful since
-    different corpora are used for different POS. Only POS-specific rankings
-    are returned.
+    Frequency data is derived from Stanza-parsed sentence tokens (Tatoeba +
+    OpenSubtitles). All POS use the same unified corpus, but rankings are
+    still computed per-POS since absolute frequencies differ across POS.
 
     Args:
         conn: Database connection

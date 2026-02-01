@@ -11,14 +11,13 @@ Licenses for all the data described here can be found in `data-licenses`.
 All data can be downloaded programmatically using the provided tasks:
 
 ```bash
-# Download all data sources (~1.3 GB total)
+# Download all data sources (~2.5 GB total)
 task download-all
 
 # Or download individual sources:
 task download-wiktextract     # Italian dictionary (634 MB)
-task download-paisa           # PAISA lemma frequencies (verbs)
-task download-opensubtitles   # OpenSubtitles frequencies (nouns/adj)
 task download-tatoeba         # Sentences and links (660 MB)
+task download-opensubtitles   # OpenSubtitles v2024 parallel sentences (~1.8 GB zip)
 
 # Force re-download (even if files exist):
 task download-all FORCE=1
@@ -106,29 +105,56 @@ The import runs in stages for each part of speech (verb, noun, adjective):
                 │
                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ STEP 3: Import Frequency Data (PAISA + OpenSubtitles)                       │
+│ STEP 3: Import Sentences (Tatoeba + OpenSubtitles)                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│ Adds word frequency data for prioritizing vocabulary in Anki decks:         │
+│ Tatoeba: ~950,000 Italian sentences with English translations.              │
+│   - CK whitelist filtering for quality                                      │
+│   - Tag-based filtering for tense matching                                  │
+│   - Preferred source for example sentences                                  │
 │                                                                             │
-│ VERBS: PAISA corpus (~250M words)                                           │
-│   - Already lemmatized, avoiding verb form collision issues                 │
-│   - E.g., "parte" as verb vs noun would be confused in surface forms        │
+│ OpenSubtitles v2024: ~5M Italian sentences with English translations.       │
+│   - OPUS parallel corpus, Moses format                                      │
+│   - Preprocessed: deduped, cleaned, sampled during download                 │
+│   - Conversational vocabulary from movie subtitles                          │
 │                                                                             │
-│ NOUNS/ADJECTIVES: OpenSubtitles (~500M words)                               │
-│   - Surface forms aggregated to lemma level                                 │
-│   - Better conversational vocabulary than formal web corpora                │
-│   - E.g., "ciao" ranks #153 vs #289K in formal corpora                      │
+│ Both use FTS5 for full-text search.                                         │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
                 │
                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ STEP 4: Import Tatoeba Sentences                                            │
+│ STEP 4: Stanza POS Tagging → Sentence Tokens                                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│ Imports ~950,000 Italian sentences with English translations from Tatoeba.  │
-│ Uses FTS5 for full-text search and tag-based filtering for tense matching.  │
+│ Stanza NLP pipeline tags every sentence with token-level annotations:       │
+│   - Lemma, UPOS, morphological features (mood, tense, person, number)      │
+│   - Dependency parsing (head, deprel) for compound tense resolution         │
+│                                                                             │
+│ Enables:                                                                    │
+│   - Lemma-based sentence search for example sentences                       │
+│   - Grammatical feature filtering (find sentences with specific tenses)     │
+│   - Unified frequency computation across all POS                            │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                │
+                ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STEP 5: Compute Frequency Data (from Stanza tokens)                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ Derives word frequency from Stanza-parsed sentence tokens:                  │
+│                                                                             │
+│ 1. Count tokens by (lemma, UPOS) across all sentence_tokens                │
+│ 2. Map UPOS to POS: VERB/AUX → verb, NOUN → noun, ADJ → adjective         │
+│ 3. Match Stanza lemmas to our lemmas table                                  │
+│ 4. Compute Zipf scores: log10(freq_per_million) + 3                         │
+│ 5. Rank within each POS using DENSE_RANK                                    │
+│                                                                             │
+│ Advantages over pre-computed frequency lists:                               │
+│   - Accurate lemmatization for verbs (no surface form collisions)           │
+│   - Consistent frequency data across all POS from same corpora              │
+│   - Conversational vocabulary from OpenSubtitles                            │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -215,51 +241,33 @@ Wiktextract Italian dictionary. See `FRENCH_LOANWORD_WHITELIST` in
 }]}
 ```
 
-## PAISA Lemma Frequencies (data/paisa/)
+## OpenSubtitles v2024 Parallel Sentences (data/opensubtitles/)
 
-**Source:** PAISA corpus (Paisà - Piattaforma per l'Apprendimento dell'Italiano Su corpora Annotati)
-**URL:** https://clarin.eurac.edu/repository/xmlui/handle/20.500.12124/3
-**Corpus:** Large Italian web corpus (~250M words from .it domains, 2010)
-**License:** CC-BY-NC-SA 4.0 (NonCommercial)
-**Files:**
-- `lemma-frequencies-paisa.txt` - Pre-lemmatized frequency data
+**Source:** OPUS OpenSubtitles v2024 parallel corpus
+**URL:** https://opus.nlpl.eu/OpenSubtitles/v2024/en-it
+**Corpus:** Italian-English parallel sentences from movie/TV subtitles
+**License:** Attribution (cite the original source)
+**Citation:**
+> P. Lison and J. Tiedemann, 2016, OpenSubtitles2016: Extracting Large Parallel Corpora
+> from Movie and TV Subtitles. In Proceedings of LREC 2016.
 
-**Why PAISA for Verbs:**
-PAISA provides already-lemmatized frequency data, avoiding the verb surface form collision
-problem. For example, "parte" appears as both a verb form (from "partire") and a common
-noun, which would confuse surface-form frequency aggregation.
+**Files** (generated by `download_opensubtitles()`):
+- `it_sentences.tsv` - Italian sentences (Tatoeba-compatible format)
+- `en_sentences.tsv` - English sentences (Tatoeba-compatible format)
+- `links.tsv` - Translation links (1:1 line-aligned pairs)
 
-**Sample Data:** (CSV with 2 comment lines, lemma,frequency format)
-```csv
-# lemma frequencies for paisa corpus
-# source: ...
-essere,2500000
-avere,1800000
-fare,1200000
-```
+**Processing during download:**
+1. Download Moses-format zip (~1.8 GB) containing line-aligned en/it files
+2. Clean: strip HTML tags, remove bracketed/parenthesized annotations, normalize whitespace
+3. Filter: skip lines < 3 chars or > 500 chars
+4. Deduplicate by Italian text (MD5 hash, keep first occurrence)
+5. Sample ~5M pairs (deterministic seed=42)
+6. Output TSV in Tatoeba-compatible format (1-indexed line numbers as sentence IDs)
 
-## OpenSubtitles Frequency Data (data/opensubtitles/)
-
-**Source:** hermitdave/FrequencyWords (derived from OpenSubtitles2018 corpus)
-**URL:** https://github.com/hermitdave/FrequencyWords
-**Corpus:** OpenSubtitles2018 (~500M words of conversational Italian from movie subtitles)
-**License:** CC-BY-SA 4.0
-**Files:**
-- `it_50k.txt` - Top 50K words with frequencies
-- `it_full.txt` - Complete word list with frequencies
-
-**Why OpenSubtitles for Nouns/Adjectives:**
+**Why OpenSubtitles for frequency + example sentences:**
 OpenSubtitles represents conversational vocabulary much better than formal web corpora.
-Common words like "ciao" (hello) rank #153 in OpenSubtitles vs #289,038 in ItWaC.
-Surface form aggregation works well for nouns/adjectives since collisions are less
-problematic than for verbs.
-
-**Sample Data:** (space-separated word frequency pairs)
-```
-non 12500000
-che 11800000
-io 8200000
-```
+Combined with Tatoeba and Stanza POS tagging, it provides accurate lemmatized frequency
+data for all parts of speech, solving the surface form collision problem.
 
 ## Tatoeba (data/tatoeba/)
 
@@ -292,6 +300,33 @@ Each subdirectory contains a LICENSE file with the full license text.
 
 ## Evaluated but Not Used
 
+### PAISA Lemma Frequencies
+
+**Source:** PAISA corpus (Paisà - Piattaforma per l'Apprendimento dell'Italiano Su corpora Annotati)
+**URL:** https://clarin.eurac.edu/repository/xmlui/handle/20.500.12124/3
+**Corpus:** Large Italian web corpus (~250M words from .it domains, 2010)
+**License:** CC-BY-NC-SA 4.0 (NonCommercial)
+**Evaluated:** January 2025
+**Decision:** Replaced by Stanza-derived frequency from sentence tokens
+
+PAISA provided pre-lemmatized frequency data, which was originally used for verb
+frequency ranking to avoid surface form collision issues. Replaced by computing
+frequency directly from Stanza-tagged sentence tokens (Tatoeba + OpenSubtitles),
+which provides accurate lemmatization for all POS using a single unified approach.
+
+### hermitdave/FrequencyWords (OpenSubtitles2018)
+
+**Source:** hermitdave/FrequencyWords (derived from OpenSubtitles2018 corpus)
+**URL:** https://github.com/hermitdave/FrequencyWords
+**Corpus:** OpenSubtitles2018 (~500M words of conversational Italian)
+**License:** CC-BY-SA 4.0
+**Evaluated:** January 2025
+**Decision:** Replaced by Stanza-derived frequency from OPUS OpenSubtitles v2024 sentences
+
+Surface-form frequency lists required aggregation to lemma level, which worked
+for nouns/adjectives but not verbs. Replaced by importing actual OpenSubtitles v2024
+sentences from OPUS and computing lemmatized frequency via Stanza POS tagging.
+
 ### ParTUT (Universal Dependencies Italian Treebank)
 
 **Source:** Universal Dependencies Italian-ParTUT Treebank
@@ -318,7 +353,7 @@ conversational content.
 **Corpus:** itWaC (~1.5 billion words of web Italian)
 **License:** MIT
 **Evaluated:** January 2025
-**Decision:** Replaced by PAISA + OpenSubtitles hybrid approach
+**Decision:** Replaced by Stanza-derived frequency from Tatoeba + OpenSubtitles v2024
 
 ItWaC was the original frequency source but analysis revealed significant issues:
 
@@ -339,7 +374,7 @@ ItWaC was the original frequency source but analysis revealed significant issues
 | ciao | 289,038 | 153 | Missing conversational |
 | mamma | 1,725 | 191 | Underranked |
 
-**Replacement:** PAISA for verbs (lemmatized), OpenSubtitles for nouns/adjectives (conversational).
+**Replacement:** Stanza-derived frequency from Tatoeba + OpenSubtitles v2024 sentence tokens (lemmatized, all POS).
 
 ### KELLY Project Italian CEFR Vocabulary
 

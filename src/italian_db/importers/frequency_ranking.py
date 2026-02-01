@@ -1,7 +1,7 @@
 """Compute frequency rankings from imported frequency data.
 
 This module provides functions to compute per-POS frequency rankings
-after frequency data has been imported from any corpus (PAISA, OpenSubtitles, etc.).
+after frequency data has been imported (e.g., from Stanza-derived token counts).
 """
 
 from sqlalchemy import Connection, text
@@ -19,7 +19,7 @@ def compute_pos_frequency_ranks(
 
     Args:
         conn: SQLAlchemy connection
-        corpus: Corpus name to filter by (e.g., 'paisa', 'opensubtitles')
+        corpus: Corpus name to filter by (e.g., 'stanza')
 
     Returns:
         Stats dict mapping POS name to count of ranked lemmas:

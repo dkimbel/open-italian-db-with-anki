@@ -90,8 +90,8 @@ sapere   /saˈpe.re/   1514490     5.90
 ```sql
 SELECT ita.text AS italian, eng.text AS english
 FROM sentences ita
-JOIN translations t ON ita.sentence_id = t.ita_sentence_id
-JOIN sentences eng ON eng.sentence_id = t.eng_sentence_id
+JOIN translations t ON ita.id = t.ita_sentence_id
+JOIN sentences eng ON eng.id = t.eng_sentence_id
 WHERE ita.text LIKE '%mangiare%'
 LIMIT 3;
 ```
@@ -133,7 +133,7 @@ belle    f       plural
 # Install dependencies
 uv sync
 
-# Download source data (~1.3GB, skips existing)
+# Download source data (~2.5GB, skips existing)
 task download-all
 
 # Build database
@@ -154,17 +154,15 @@ projects. See `data-licenses/` for full license texts.
 | Source | License | Role |
 |--------|---------|------|
 | [Wiktextract](https://kaikki.org) | CC-BY-SA 3.0 + GFDL | Lemmas, conjugations, definitions |
-| [Morph-it!](https://docs.sslmit.unibo.it) | CC-BY-SA 2.0 + LGPL | Real Italian orthography |
-| [PAISA](https://clarin.eurac.edu/repository/xmlui/handle/20.500.12124/3) | CC-BY-NC-SA 4.0 | Verb frequency data |
-| [OpenSubtitles](https://github.com/hermitdave/FrequencyWords) | CC-BY-SA 4.0 | Noun/adjective frequency data |
-| [Tatoeba](https://tatoeba.org) | CC-BY 2.0 FR | Example sentences |
+| [OpenSubtitles v2024](https://opus.nlpl.eu/OpenSubtitles/v2024/en-it) | Attribution | Example sentences, frequency data |
+| [Tatoeba](https://tatoeba.org) | CC-BY 2.0 FR | Example sentences, frequency data |
 
 ## What's In The Database
 
 - **100k+ lemmas** (verbs, nouns, adjectives) with stress-marked forms to aid pronunciation
 - **945k+ inflected forms** like verb conjugations and gendered versions of nouns and adjectives
-- **Frequency data** from PAISA (verbs) and OpenSubtitles (nouns/adjectives)
-- **950k+ example sentences** with English translations (Tatoeba)
+- **Frequency data** derived from Stanza-parsed sentence tokens (all POS)
+- **6M+ example sentences** with English translations (Tatoeba + OpenSubtitles)
 - **Full data provenance**: every form tracks where it came from (`form_origin`, `written_source`)
 
 ## Repository Structure
@@ -179,17 +177,17 @@ open-italian-db-with-anki/
 │   ├── importers/          #   Data import modules
 │   │   ├── wiktextract.py  #     Lemmas, forms, definitions from Wiktionary
 │   │   ├── morphit.py      #     Fallback functions for written form derivation
-│   │   ├── paisa.py        #     PAISA frequency data (verbs)
-│   │   ├── opensubtitles.py#     OpenSubtitles frequency data (nouns/adj)
-│   │   └── tatoeba.py      #     Example sentences with translations
+│   │   ├── tatoeba.py      #     Tatoeba example sentences with translations
+│   │   ├── opensubtitles_sentences.py  # OpenSubtitles parallel sentences
+│   │   ├── sentence_tokens.py         # Stanza POS-tagged token import
+│   │   └── frequency_from_tokens.py   # Frequency computation from tokens
 │   ├── normalize.py        #   Text normalization (accents, unicode)
 │   ├── articles.py         #   Italian definite article rules
 │   └── cli.py              #   Command-line interface
-├── data/                   # Downloaded source data (~1.3GB, not committed)
+├── data/                   # Downloaded source data (~2.5GB, not committed)
 │   ├── wiktextract/        #   Kaikki.org dictionary extract
-│   ├── paisa/              #   PAISA lemma frequencies
-│   ├── opensubtitles/      #   OpenSubtitles word frequencies
-│   └── tatoeba/            #   Sentence corpus
+│   ├── tatoeba/            #   Tatoeba sentence corpus
+│   └── opensubtitles/      #   OpenSubtitles v2024 parallel sentences
 ├── data-licenses/          # Full license texts for each data source
 ├── tests/                  # Test suite
 ├── Taskfile.yml            # Task runner commands
@@ -225,13 +223,12 @@ Where the correct Italian spelling came from:
 **Code**: MIT
 
 **Database and Anki decks**: The generated database incorporates content from
-multiple copyleft sources. The combined work is subject to **CC-BY-NC-SA 4.0**
-due to the inclusion of PAISA frequency data (which has a NonCommercial restriction).
+multiple copyleft sources. The combined work is subject to **CC-BY-SA 3.0**
+(the most restrictive component license, from Wiktextract).
 
 If you redistribute the database or Anki decks derived from it:
-1. **Attribution required**: Credit Wiktionary/Wiktextract, Tatoeba, PAISA, and OpenSubtitles
-2. **NonCommercial**: You may not use the material for commercial purposes
-3. **Share-alike required**: Distribute under CC-BY-NC-SA 4.0 or a compatible license
+1. **Attribution required**: Credit Wiktionary/Wiktextract, Tatoeba, and OpenSubtitles
+2. **Share-alike required**: Distribute under CC-BY-SA 3.0 or a compatible license
 
 ## Development
 

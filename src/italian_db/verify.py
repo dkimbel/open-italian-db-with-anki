@@ -556,8 +556,8 @@ COVERAGE_THRESHOLDS = {
     "total_forms": 900_000,
     "written_spelling_pct": 100.0,
     "written_source_pct": 100.0,
-    "frequency_coverage_pct": 50.0,
-    "italian_sentences": 350_000,
+    "frequency_coverage_pct": 33.0,
+    "italian_sentences": 5_100_000,
     # Relationship coverage thresholds
     "clipping_relationships": 20,  # bici, auto, moto, etc.
     "reflexive_relationships": 2000,  # lavarsi, alzarsi, etc.
@@ -790,6 +790,23 @@ def check_coverage_thresholds(conn: Connection) -> list[CheckResult]:
                 message=f"Sentence token coverage: {pct:.1f}% (min: {threshold:.1f}%)",
             )
         )
+
+        # Check that both Tatoeba and OpenSubtitles sources have tokens
+        for source in ("tatoeba", "opensubtitles"):
+            source_query = text("""
+                SELECT COUNT(DISTINCT st.sentence_id)
+                FROM sentence_tokens st
+                JOIN sentences s ON st.sentence_id = s.id
+                WHERE s.lang = 'ita' AND s.source = :source
+            """)
+            source_count = conn.execute(source_query, {"source": source}).scalar() or 0
+            results.append(
+                CheckResult(
+                    name=f"sentence_tokens_{source}",
+                    passed=source_count > 0,
+                    message=f"Sentence tokens ({source}): {source_count:,} sentences with tokens",
+                )
+            )
 
     return results
 

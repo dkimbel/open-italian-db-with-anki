@@ -1,10 +1,14 @@
 """Download data sources for the Italian Anki deck generator."""
 
 import bz2
+import hashlib
 import io
+import re
 import sys
 import tarfile
+import zipfile
 from pathlib import Path
+from random import Random
 
 import requests
 
@@ -12,6 +16,7 @@ import requests
 DATA_DIR = Path("data")
 WIKTEXTRACT_DIR = DATA_DIR / "wiktextract"
 TATOEBA_DIR = DATA_DIR / "tatoeba"
+OPENSUBTITLES_DIR = DATA_DIR / "opensubtitles"
 
 # Download URLs
 WIKTEXTRACT_URL = "https://kaikki.org/dictionary/Italian/kaikki.org-dictionary-Italian.jsonl"
@@ -27,23 +32,9 @@ TATOEBA_FILES = {
     "sentences_in_lists.csv": f"{TATOEBA_BASE_URL}/sentences_in_lists.tar.bz2",
 }
 
-# OpenSubtitles Frequency (hermitdave/FrequencyWords) - CC-BY-SA 4.0
-# Derived from OpenSubtitles2018 corpus (conversational/dialogue text)
-OPENSUBTITLES_DIR = DATA_DIR / "opensubtitles"
-OPENSUBTITLES_50K_URL = (
-    "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/it/it_50k.txt"
-)
-OPENSUBTITLES_FULL_URL = (
-    "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/it/it_full.txt"
-)
-
-# PAISA Lemma Frequencies - CC-BY-NC-SA 4.0 (NonCommercial!)
-# Web corpus from .it domain (2010), evaluation only due to NC license
-PAISA_DIR = DATA_DIR / "paisa"
-PAISA_URL = (
-    "https://clarin.eurac.edu/repository/xmlui/bitstream/handle/20.500.12124/3/"
-    "lemma-frequencies-paisa.txt.gz"
-)
+# OPUS OpenSubtitles v2024 parallel sentences (en-it Moses format)
+OPENSUBTITLES_MOSES_URL = "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2024/moses/en-it.txt.zip"
+OPENSUBTITLES_SAMPLE_SIZE = 5_000_000
 
 
 def _file_exists_and_nonempty(path: Path) -> bool:
@@ -185,70 +176,134 @@ def download_tatoeba(force: bool = False) -> dict[str, int]:
     return {"downloaded": downloaded, "skipped": skipped}
 
 
+# Regex patterns for cleaning OpenSubtitles lines
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_BRACKET_RE = re.compile(r"\[[^\]]*\]")
+_PAREN_RE = re.compile(r"\([^)]*\)")
+_MULTI_SPACE_RE = re.compile(r"\s+")
+
+
+def _clean_line(line: str) -> str:
+    """Clean an OpenSubtitles line: strip HTML, brackets, parens, normalize whitespace."""
+    line = _HTML_TAG_RE.sub("", line)
+    line = _BRACKET_RE.sub("", line)
+    line = _PAREN_RE.sub("", line)
+    line = _MULTI_SPACE_RE.sub(" ", line)
+    return line.strip()
+
+
 def download_opensubtitles(force: bool = False) -> dict[str, int]:
-    """Download OpenSubtitles frequency lists from hermitdave/FrequencyWords.
+    """Download and preprocess OPUS OpenSubtitles v2024 parallel sentences.
 
-    License: CC-BY-SA 4.0
-    Format: Space-separated 'word count' pairs, no header.
+    Downloads en-it.txt.zip (~1.8GB), extracts the Italian and English files,
+    then preprocesses:
+    - Cleans HTML tags, bracketed/parenthesized annotations
+    - Filters by length (3-500 chars for Italian)
+    - Deduplicates by Italian text (keeps first occurrence)
+    - Samples ~5M pairs (deterministic seed=42)
 
-    Downloads:
-    - it_50k.txt: Top 50K words with frequencies
-    - it_full.txt: Complete word list with frequencies
+    Outputs TSV files matching Tatoeba's format for maximum code reuse:
+    - it_sentences.tsv: line_number<TAB>ita<TAB>text
+    - en_sentences.tsv: line_number<TAB>eng<TAB>text
+    - links.tsv: ita_line_number<TAB>eng_line_number
 
     Returns stats dict with 'downloaded' and 'skipped' counts.
     """
-    downloaded = 0
-    skipped = 0
-
     OPENSUBTITLES_DIR.mkdir(parents=True, exist_ok=True)
 
-    files = {
-        "it_50k.txt": OPENSUBTITLES_50K_URL,
-        "it_full.txt": OPENSUBTITLES_FULL_URL,
-    }
+    ita_out = OPENSUBTITLES_DIR / "it_sentences.tsv"
+    eng_out = OPENSUBTITLES_DIR / "en_sentences.tsv"
+    links_out = OPENSUBTITLES_DIR / "links.tsv"
 
-    for filename, url in files.items():
-        dest = OPENSUBTITLES_DIR / filename
-
-        if not force and _file_exists_and_nonempty(dest):
-            print(f"Skipping OpenSubtitles file (already exists): {dest}")
-            skipped += 1
-            continue
-
-        _download_to_file(url, dest, f"OpenSubtitles {filename}")
-        downloaded += 1
-
-    return {"downloaded": downloaded, "skipped": skipped}
-
-
-def download_paisa(force: bool = False) -> dict[str, int]:
-    """Download PAISA lemma frequencies.
-
-    License: CC-BY-NC-SA 4.0 (NonCommercial - evaluation only!)
-
-    PAISA is a large web corpus of Italian from the .it domain (2010).
-    Due to the NC license, this should only be used for evaluation/comparison,
-    not as a primary data source.
-
-    Returns stats dict with 'downloaded' and 'skipped' counts.
-    """
-    import gzip
-
-    dest = PAISA_DIR / "lemma-frequencies-paisa.txt"
-
-    if not force and _file_exists_and_nonempty(dest):
-        print(f"Skipping PAISA (already exists): {dest}")
+    if not force and all(_file_exists_and_nonempty(p) for p in [ita_out, eng_out, links_out]):
+        print(f"Skipping OpenSubtitles (already exists): {OPENSUBTITLES_DIR}")
         return {"downloaded": 0, "skipped": 1}
 
-    # Download the gzipped file
-    content = _download_with_progress(PAISA_URL, "PAISA lemma frequencies")
+    # Download the zip file
+    zip_path = OPENSUBTITLES_DIR / "en-it.txt.zip"
+    if not force and _file_exists_and_nonempty(zip_path):
+        print(f"Using cached zip: {zip_path}")
+    else:
+        _download_to_file(OPENSUBTITLES_MOSES_URL, zip_path, "OPUS OpenSubtitles v2024 (en-it)")
 
-    # Decompress and save
-    print("  Decompressing gzip...")
-    PAISA_DIR.mkdir(parents=True, exist_ok=True)
-    decompressed = gzip.decompress(content)
-    dest.write_bytes(decompressed)
-    print(f"  Saved: {dest} ({dest.stat().st_size / (1024 * 1024):.1f} MB)")
+    # Extract and preprocess
+    print("Extracting and preprocessing OpenSubtitles...")
+
+    # Find the Italian and English files in the zip
+    with zipfile.ZipFile(zip_path) as zf:
+        names = zf.namelist()
+        it_name = next((n for n in names if n.endswith(".it")), None)
+        en_name = next((n for n in names if n.endswith(".en")), None)
+        if it_name is None or en_name is None:
+            raise ValueError(f"Expected .it and .en files in zip, found: {names}")
+
+        print(f"  Italian: {it_name}")
+        print(f"  English: {en_name}")
+
+        # Split on \n only — .splitlines() also splits on \r, \x0b, \x0c, \x85,
+        # \u2028, \u2029 which appear inside subtitle text and break alignment.
+        it_lines = zf.read(it_name).decode("utf-8").split("\n")
+        en_lines = zf.read(en_name).decode("utf-8").split("\n")
+
+    # Strip trailing empty string from final newline
+    if it_lines and it_lines[-1] == "":
+        it_lines.pop()
+    if en_lines and en_lines[-1] == "":
+        en_lines.pop()
+
+    if len(it_lines) != len(en_lines):
+        raise ValueError(f"Line count mismatch: {len(it_lines)} Italian vs {len(en_lines)} English")
+
+    print(f"  Raw line pairs: {len(it_lines):,}")
+
+    # Clean, filter, deduplicate
+    seen_hashes: set[str] = set()
+    valid_indices: list[int] = []
+
+    for i in range(len(it_lines)):
+        it_clean = _clean_line(it_lines[i])
+        en_clean = _clean_line(en_lines[i])
+
+        # Filter: skip empty or too short/long Italian
+        if not it_clean or not en_clean:
+            continue
+        if len(it_clean) < 3 or len(it_clean) > 500:
+            continue
+
+        # Deduplicate by Italian text hash
+        it_hash = hashlib.md5(it_clean.encode("utf-8")).hexdigest()  # noqa: S324
+        if it_hash in seen_hashes:
+            continue
+        seen_hashes.add(it_hash)
+
+        # Store cleaned text back for later use
+        it_lines[i] = it_clean
+        en_lines[i] = en_clean
+        valid_indices.append(i)
+
+    print(f"  After cleaning/dedup: {len(valid_indices):,}")
+
+    # Sample if needed
+    if len(valid_indices) > OPENSUBTITLES_SAMPLE_SIZE:
+        rng = Random(42)  # noqa: S311
+        valid_indices = sorted(rng.sample(valid_indices, OPENSUBTITLES_SAMPLE_SIZE))
+        print(f"  After sampling: {len(valid_indices):,}")
+
+    # Write output TSVs (1-indexed line numbers as sentence IDs)
+    with (
+        ita_out.open("w", encoding="utf-8") as f_ita,
+        eng_out.open("w", encoding="utf-8") as f_eng,
+        links_out.open("w", encoding="utf-8") as f_links,
+    ):
+        for line_num, idx in enumerate(valid_indices, 1):
+            f_ita.write(f"{line_num}\tita\t{it_lines[idx]}\n")
+            f_eng.write(f"{line_num}\teng\t{en_lines[idx]}\n")
+            f_links.write(f"{line_num}\t{line_num}\n")
+
+    print(f"  Output: {len(valid_indices):,} sentence pairs")
+    print(f"  Italian: {ita_out}")
+    print(f"  English: {eng_out}")
+    print(f"  Links: {links_out}")
 
     return {"downloaded": 1, "skipped": 0}
 
@@ -267,22 +322,15 @@ def download_all(force: bool = False) -> dict[str, dict[str, int]]:
     print()
 
     print("=" * 60)
-    print("Downloading PAISA (verb frequencies)")
-    print("=" * 60)
-    print("NOTE: PAISA has a CC-BY-NC-SA license (NonCommercial).")
-    results["paisa"] = download_paisa(force)
-    print()
-
-    print("=" * 60)
-    print("Downloading OpenSubtitles (noun/adjective frequencies)")
-    print("=" * 60)
-    results["opensubtitles"] = download_opensubtitles(force)
-    print()
-
-    print("=" * 60)
     print("Downloading Tatoeba")
     print("=" * 60)
     results["tatoeba"] = download_tatoeba(force)
+    print()
+
+    print("=" * 60)
+    print("Downloading OpenSubtitles (OPUS v2024 parallel sentences)")
+    print("=" * 60)
+    results["opensubtitles"] = download_opensubtitles(force)
     print()
 
     # Summary

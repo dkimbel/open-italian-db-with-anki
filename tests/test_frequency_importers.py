@@ -1,11 +1,12 @@
-"""Tests for frequency importers (PAISA and OpenSubtitles)."""
+"""Tests for Stanza-derived frequency computation and ranking."""
 
 import json
+import math
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Connection, select, text
 
 from italian_db.db import (
     frequencies,
@@ -13,15 +14,18 @@ from italian_db.db import (
     get_engine,
     init_db,
     lemmas,
-    noun_forms,
+    sentence_tokens,
+    sentences,
 )
-from italian_db.enums import POS
+from italian_db.importers.frequency_from_tokens import (
+    CORPUS_NAME,
+    compute_frequencies_from_tokens,
+)
 from italian_db.importers.frequency_ranking import compute_pos_frequency_ranks
-from italian_db.importers.opensubtitles import import_opensubtitles
-from italian_db.importers.paisa import import_paisa
 from italian_db.importers.wiktextract import import_wiktextract
+from italian_db.normalize import normalize
 
-# Sample verb entry from Wiktextract
+# Sample verb entries from Wiktextract
 SAMPLE_VERB = {
     "pos": "verb",
     "word": "parlare",
@@ -64,6 +68,18 @@ SAMPLE_NOUN_2 = {
     "senses": [{"glosses": ["book"]}],
 }
 
+SAMPLE_ADJ = {
+    "pos": "adj",
+    "word": "bello",
+    "forms": [
+        {"form": "bello", "tags": ["canonical", "masculine", "singular"]},
+        {"form": "bella", "tags": ["feminine", "singular"]},
+        {"form": "belli", "tags": ["masculine", "plural"]},
+        {"form": "belle", "tags": ["feminine", "plural"]},
+    ],
+    "senses": [{"glosses": ["beautiful"]}],
+}
+
 
 def _create_test_jsonl(entries: list[dict[str, Any]]) -> Path:
     """Create a temporary JSONL file with test entries."""
@@ -75,96 +91,140 @@ def _create_test_jsonl(entries: list[dict[str, Any]]) -> Path:
         return Path(f.name)
 
 
-def _create_test_paisa(lines: list[str]) -> Path:
-    """Create a temporary PAISA CSV file with test entries."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8") as f:
-        # Two comment header lines
-        f.write("# lemma frequencies for paisa corpus\n")
-        f.write("# test data\n")
-        for line in lines:
-            f.write(line + "\n")
-        return Path(f.name)
+def _populate_written_from_stressed(conn: Connection) -> None:
+    """Set written = normalize(stressed) for all lemmas where written is NULL.
+
+    In the real pipeline, the enrichment step populates `written`. Tests skip
+    enrichment, so this helper fills it in so frequency lookup works.
+    """
+    rows = conn.execute(
+        text("SELECT id, stressed FROM lemmas WHERE written IS NULL AND stressed IS NOT NULL")
+    ).fetchall()
+    for row in rows:
+        conn.execute(
+            text("UPDATE lemmas SET written = :written WHERE id = :id"),
+            {"written": normalize(row[1]), "id": row[0]},
+        )
 
 
-def _create_test_opensubtitles(lines: list[str]) -> Path:
-    """Create a temporary OpenSubtitles frequency file with test entries."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
-        for line in lines:
-            f.write(line + "\n")
-        return Path(f.name)
+def _insert_test_sentences_and_tokens(
+    conn: Any,
+    token_data: list[tuple[str, str, str]],
+) -> None:
+    """Insert test sentences and tokens into the database.
+
+    Args:
+        conn: SQLAlchemy connection
+        token_data: List of (text, lemma, upos) tuples for tokens.
+            All tokens are placed in a single test sentence.
+    """
+    # Insert a test Italian sentence
+    conn.execute(
+        sentences.insert(),
+        {"sentence_id": 1, "lang": "ita", "text": "Test sentence.", "source": "tatoeba"},
+    )
+    # Get the surrogate ID
+    row = conn.execute(
+        text("SELECT id FROM sentences WHERE sentence_id = 1 AND source = 'tatoeba'")
+    ).fetchone()
+    sentence_surrogate_id = row[0]
+
+    # Insert tokens
+    for idx, (tok_text, lemma, upos) in enumerate(token_data):
+        conn.execute(
+            sentence_tokens.insert(),
+            {
+                "sentence_id": sentence_surrogate_id,
+                "token_index": idx,
+                "text": tok_text,
+                "lemma": lemma,
+                "upos": upos,
+            },
+        )
 
 
-class TestPaisaImporter:
-    """Tests for the PAISA importer."""
+def _compute_zipf_for_test(freq_raw: int, total_tokens: int) -> float:
+    """Compute Zipf score for test assertions. Mirrors the module-private function."""
+    if freq_raw <= 0 or total_tokens <= 0:
+        return 0.0
+    fpmw = freq_raw * 1e6 / total_tokens
+    return math.log10(fpmw) + 3
 
-    def test_imports_frequency_data(self) -> None:
+
+class TestComputeZipf:
+    """Tests for the Zipf score computation."""
+
+    def test_basic_zipf(self) -> None:
+        # 1000 occurrences in 1M tokens = freq_per_million = 1000
+        # zipf = log10(1000) + 3 = 3 + 3 = 6
+        result = _compute_zipf_for_test(1000, 1_000_000)
+        assert abs(result - 6.0) < 0.01
+
+    def test_zero_frequency(self) -> None:
+        assert _compute_zipf_for_test(0, 1_000_000) == 0.0
+
+    def test_zero_total(self) -> None:
+        assert _compute_zipf_for_test(100, 0) == 0.0
+
+
+class TestFrequencyFromTokens:
+    """Tests for computing frequency from sentence tokens."""
+
+    def test_computes_verb_frequency(self) -> None:
+        """Verbs in sentence_tokens should be matched to lemmas table."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
         jsonl_path = _create_test_jsonl([SAMPLE_VERB, SAMPLE_VERB_2])
-        paisa_path = _create_test_paisa(
-            [
-                "parlare,1000",
-                "essere,5000",
-            ]
-        )
 
         try:
             engine = get_engine(db_path)
             init_db(engine)
 
-            # First import Wiktextract data
+            # Import lemmas and populate written forms
             with get_connection(db_path) as conn:
                 import_wiktextract(conn, jsonl_path)
+                _populate_written_from_stressed(conn)
 
-            # Then import PAISA frequencies
+            # Insert sentence tokens
             with get_connection(db_path) as conn:
-                stats = import_paisa(conn, paisa_path)
+                _insert_test_sentences_and_tokens(
+                    conn,
+                    [
+                        ("Parlo", "parlare", "VERB"),
+                        ("italiano", "italiano", "NOUN"),
+                        (".", ".", "PUNCT"),
+                    ],
+                )
 
-            # Check stats
-            assert stats["matched"] == 2  # parlare and essere
-            assert stats["not_found"] == 0
+            # Compute frequencies
+            with get_connection(db_path) as conn:
+                stats = compute_frequencies_from_tokens(conn)
+
+            assert stats["matched"] >= 1  # At least parlare should match
+            assert stats["total_tokens"] > 0
 
             # Check frequency data was inserted
             with get_connection(db_path) as conn:
-                freq_rows = conn.execute(select(frequencies)).fetchall()
-                assert len(freq_rows) == 2
-
-                # Check parlare frequency
                 parlare_row = conn.execute(
                     select(frequencies)
                     .join(lemmas, frequencies.c.lemma_id == lemmas.c.id)
                     .where(lemmas.c.stressed == "parlàre")
                 ).fetchone()
                 assert parlare_row is not None
-                assert parlare_row.freq_raw == 1000
-                assert parlare_row.corpus == "paisa"
-
-                # Check essere frequency
-                essere_row = conn.execute(
-                    select(frequencies)
-                    .join(lemmas, frequencies.c.lemma_id == lemmas.c.id)
-                    .where(lemmas.c.stressed == "èssere")
-                ).fetchone()
-                assert essere_row is not None
-                assert essere_row.freq_raw == 5000
+                assert parlare_row.freq_raw == 1
+                assert parlare_row.corpus == CORPUS_NAME
 
         finally:
             db_path.unlink()
             jsonl_path.unlink()
-            paisa_path.unlink()
 
-    def test_handles_unmatched_lemmas(self) -> None:
+    def test_aggregates_verb_and_aux(self) -> None:
+        """VERB and AUX tokens for same lemma should be aggregated."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
-        jsonl_path = _create_test_jsonl([SAMPLE_VERB])  # Only parlare
-        paisa_path = _create_test_paisa(
-            [
-                "parlare,1000",
-                "mangiare,500",  # Not in DB
-            ]
-        )
+        jsonl_path = _create_test_jsonl([SAMPLE_VERB_2])
 
         try:
             engine = get_engine(db_path)
@@ -172,101 +232,191 @@ class TestPaisaImporter:
 
             with get_connection(db_path) as conn:
                 import_wiktextract(conn, jsonl_path)
+                _populate_written_from_stressed(conn)
+
+            # Insert tokens where "essere" appears as both VERB and AUX
+            with get_connection(db_path) as conn:
+                _insert_test_sentences_and_tokens(
+                    conn,
+                    [
+                        ("è", "essere", "AUX"),
+                        ("è", "essere", "VERB"),
+                        ("stato", "essere", "AUX"),
+                    ],
+                )
 
             with get_connection(db_path) as conn:
-                stats = import_paisa(conn, paisa_path)
+                compute_frequencies_from_tokens(conn)
 
-            # Only parlare should match
-            assert stats["matched"] == 1
-            # mangiare not in DB, so not found for matching
-            assert stats["not_found"] == 0  # not_found counts DB lemmas not in PAISA
+            # Check that essere's frequency is aggregated (AUX + VERB)
+            with get_connection(db_path) as conn:
+                essere_row = conn.execute(
+                    select(frequencies)
+                    .join(lemmas, frequencies.c.lemma_id == lemmas.c.id)
+                    .where(lemmas.c.stressed == "èssere")
+                ).fetchone()
+                assert essere_row is not None
+                assert essere_row.freq_raw == 3  # 2 AUX + 1 VERB
 
         finally:
             db_path.unlink()
             jsonl_path.unlink()
-            paisa_path.unlink()
 
+    def test_skips_punct_sym_x(self) -> None:
+        """PUNCT, SYM, and X tokens should be excluded from frequency."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
 
-class TestOpenSubtitlesImporter:
-    """Tests for the OpenSubtitles importer."""
+        jsonl_path = _create_test_jsonl([SAMPLE_VERB])
 
-    def test_imports_frequency_data(self) -> None:
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+                _populate_written_from_stressed(conn)
+
+            with get_connection(db_path) as conn:
+                _insert_test_sentences_and_tokens(
+                    conn,
+                    [
+                        ("Parlo", "parlare", "VERB"),
+                        (".", ".", "PUNCT"),
+                        ("$", "$", "SYM"),
+                        ("asdf", "asdf", "X"),
+                    ],
+                )
+
+            with get_connection(db_path) as conn:
+                stats = compute_frequencies_from_tokens(conn)
+
+            # Only the VERB token should be counted
+            assert stats["total_tokens"] == 1
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_unmatched_lemmas_counted(self) -> None:
+        """Tokens with lemmas not in our DB should be counted as not_found."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_VERB])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+                _populate_written_from_stressed(conn)
+
+            # Insert a token with a lemma not in our DB
+            with get_connection(db_path) as conn:
+                _insert_test_sentences_and_tokens(
+                    conn,
+                    [
+                        ("Parlo", "parlare", "VERB"),
+                        ("mangio", "mangiare", "VERB"),  # Not in DB
+                    ],
+                )
+
+            with get_connection(db_path) as conn:
+                stats = compute_frequencies_from_tokens(conn)
+
+            assert stats["matched"] == 1  # parlare
+            assert stats["not_found"] == 1  # mangiare
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_noun_frequency(self) -> None:
+        """Noun tokens should produce frequency entries."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
         jsonl_path = _create_test_jsonl([SAMPLE_NOUN, SAMPLE_NOUN_2])
-        opensub_path = _create_test_opensubtitles(
-            [
-                "casa 10000",
-                "case 5000",  # Plural form of casa
-                "libro 8000",
-            ]
-        )
 
         try:
             engine = get_engine(db_path)
             init_db(engine)
 
-            # First import Wiktextract data
             with get_connection(db_path) as conn:
+                from italian_db.enums import POS
+
                 import_wiktextract(conn, jsonl_path, pos_filter=POS.NOUN)
+                _populate_written_from_stressed(conn)
 
-            # Verify forms have written spellings
             with get_connection(db_path) as conn:
-                forms = conn.execute(select(noun_forms)).fetchall()
-                assert len(forms) > 0
+                _insert_test_sentences_and_tokens(
+                    conn,
+                    [
+                        ("la", "il", "DET"),
+                        ("casa", "casa", "NOUN"),
+                        ("e", "e", "CCONJ"),
+                        ("il", "il", "DET"),
+                        ("libro", "libro", "NOUN"),
+                    ],
+                )
 
-            # Then import OpenSubtitles frequencies
             with get_connection(db_path) as conn:
-                stats = import_opensubtitles(conn, opensub_path, pos_filter=POS.NOUN)
+                stats = compute_frequencies_from_tokens(conn)
 
-            # Check stats
-            assert stats["matched"] >= 2  # casa, case, libro
-            assert stats["lemmas_updated"] == 2  # casa and libro lemmas
+            assert stats["matched"] == 2  # casa and libro
 
-            # Check frequency data was inserted
             with get_connection(db_path) as conn:
                 freq_rows = conn.execute(select(frequencies)).fetchall()
                 assert len(freq_rows) == 2
 
-                # Check casa frequency (aggregated: 10000 + 5000 = 15000)
-                # Note: Query by stressed since written may not be set yet
-                casa_row = conn.execute(
-                    select(frequencies)
-                    .join(lemmas, frequencies.c.lemma_id == lemmas.c.id)
-                    .where(lemmas.c.stressed == "casa")
-                ).fetchone()
-                assert casa_row is not None
-                assert casa_row.freq_raw == 15000  # casa + case forms
-                assert casa_row.corpus == "opensubtitles"
-
         finally:
             db_path.unlink()
             jsonl_path.unlink()
-            opensub_path.unlink()
 
-    def test_rejects_verb_import(self) -> None:
-        """OpenSubtitles should raise error for verbs (use PAISA instead)."""
-        import pytest
-
+    def test_clears_existing_frequencies(self) -> None:
+        """Running compute_frequencies_from_tokens should clear old data first."""
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
             db_path = Path(db_file.name)
 
-        opensub_path = _create_test_opensubtitles(["test 100"])
+        jsonl_path = _create_test_jsonl([SAMPLE_VERB])
 
         try:
             engine = get_engine(db_path)
             init_db(engine)
 
-            with (
-                get_connection(db_path) as conn,
-                pytest.raises(ValueError, match="Cannot use OpenSubtitles for verbs"),
-            ):
-                import_opensubtitles(conn, opensub_path, pos_filter=POS.VERB)
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+                _populate_written_from_stressed(conn)
+
+            with get_connection(db_path) as conn:
+                _insert_test_sentences_and_tokens(
+                    conn,
+                    [
+                        ("Parlo", "parlare", "VERB"),
+                    ],
+                )
+
+            # Run twice
+            with get_connection(db_path) as conn:
+                compute_frequencies_from_tokens(conn)
+            with get_connection(db_path) as conn:
+                compute_frequencies_from_tokens(conn)
+
+            # Should not have duplicates
+            with get_connection(db_path) as conn:
+                # Should have at most 1 entry for parlare
+                parlare_rows = conn.execute(
+                    select(frequencies)
+                    .join(lemmas, frequencies.c.lemma_id == lemmas.c.id)
+                    .where(lemmas.c.stressed == "parlàre")
+                ).fetchall()
+                assert len(parlare_rows) == 1
 
         finally:
             db_path.unlink()
-            opensub_path.unlink()
+            jsonl_path.unlink()
 
 
 class TestFrequencyRanking:
@@ -277,12 +427,6 @@ class TestFrequencyRanking:
             db_path = Path(db_file.name)
 
         jsonl_path = _create_test_jsonl([SAMPLE_VERB, SAMPLE_VERB_2])
-        paisa_path = _create_test_paisa(
-            [
-                "parlare,1000",
-                "essere,5000",
-            ]
-        )
 
         try:
             engine = get_engine(db_path)
@@ -290,12 +434,27 @@ class TestFrequencyRanking:
 
             with get_connection(db_path) as conn:
                 import_wiktextract(conn, jsonl_path)
+                _populate_written_from_stressed(conn)
 
+            # Insert tokens with different frequencies
             with get_connection(db_path) as conn:
-                import_paisa(conn, paisa_path)
+                _insert_test_sentences_and_tokens(
+                    conn,
+                    [
+                        ("parlo", "parlare", "VERB"),
+                        ("sono", "essere", "VERB"),
+                        ("sono", "essere", "VERB"),
+                        ("sono", "essere", "VERB"),
+                    ],
+                )
 
+            # Compute frequencies
             with get_connection(db_path) as conn:
-                stats = compute_pos_frequency_ranks(conn, "paisa")
+                compute_frequencies_from_tokens(conn)
+
+            # Compute rankings
+            with get_connection(db_path) as conn:
+                stats = compute_pos_frequency_ranks(conn, CORPUS_NAME)
 
             # Should have ranked 2 verbs
             assert stats.get("verb", 0) == 2
@@ -323,4 +482,3 @@ class TestFrequencyRanking:
         finally:
             db_path.unlink()
             jsonl_path.unlink()
-            paisa_path.unlink()
