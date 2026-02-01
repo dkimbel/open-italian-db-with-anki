@@ -15,7 +15,8 @@ from sqlalchemy import Connection, text
 from italian_db.db.schema import frequencies
 
 CORPUS_NAME = "stanza"
-CORPUS_VERSION = "tatoeba+opensubtitles_v2024"
+CORPUS_VERSION = "tatoeba+opensubtitles_v2024_tat10x"
+TATOEBA_WEIGHT = 10
 
 # Map Stanza UPOS to our POS for frequency ranking
 # Only rank VERB, NOUN, ADJ (skip DET, PRON, ADP, etc.)
@@ -72,21 +73,26 @@ def compute_frequencies_from_tokens(
     # Step 1: Clear existing frequency data
     conn.execute(text("DELETE FROM frequencies"))
 
-    # Step 2: Count tokens by (lemma, upos)
+    # Step 2: Count tokens by (lemma, upos), weighted by source
+    # Tatoeba tokens count TATOEBA_WEIGHT times to reduce subtitle-corpus bias
     count_query = text("""
-        SELECT lemma, upos, COUNT(*) as cnt
-        FROM sentence_tokens
-        WHERE upos NOT IN ('PUNCT', 'SYM', 'X')
-        GROUP BY lemma, upos
+        SELECT st.lemma, st.upos,
+               SUM(CASE WHEN s.source = 'tatoeba' THEN :tat_weight ELSE 1 END) as cnt
+        FROM sentence_tokens st
+        JOIN sentences s ON s.id = st.sentence_id
+        WHERE st.upos NOT IN ('PUNCT', 'SYM', 'X')
+        GROUP BY st.lemma, st.upos
     """)
-    token_counts = conn.execute(count_query).fetchall()
+    token_counts = conn.execute(count_query, {"tat_weight": TATOEBA_WEIGHT}).fetchall()
 
-    # Step 3: Get total countable tokens
+    # Step 3: Get total countable tokens (weighted)
     total_query = text("""
-        SELECT COUNT(*) FROM sentence_tokens
-        WHERE upos NOT IN ('PUNCT', 'SYM', 'X')
+        SELECT SUM(CASE WHEN s.source = 'tatoeba' THEN :tat_weight ELSE 1 END)
+        FROM sentence_tokens st
+        JOIN sentences s ON s.id = st.sentence_id
+        WHERE st.upos NOT IN ('PUNCT', 'SYM', 'X')
     """)
-    total_tokens = conn.execute(total_query).scalar() or 0
+    total_tokens = conn.execute(total_query, {"tat_weight": TATOEBA_WEIGHT}).scalar() or 0
     stats["total_tokens"] = total_tokens
 
     # Step 4: Aggregate by (stanza_lemma, mapped_pos)

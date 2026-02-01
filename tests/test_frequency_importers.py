@@ -19,6 +19,7 @@ from italian_db.db import (
 )
 from italian_db.importers.frequency_from_tokens import (
     CORPUS_NAME,
+    TATOEBA_WEIGHT,
     compute_frequencies_from_tokens,
 )
 from italian_db.importers.frequency_ranking import compute_pos_frequency_ranks
@@ -212,7 +213,7 @@ class TestFrequencyFromTokens:
                     .where(lemmas.c.stressed == "parlàre")
                 ).fetchone()
                 assert parlare_row is not None
-                assert parlare_row.freq_raw == 1
+                assert parlare_row.freq_raw == 1 * TATOEBA_WEIGHT
                 assert parlare_row.corpus == CORPUS_NAME
 
         finally:
@@ -256,7 +257,7 @@ class TestFrequencyFromTokens:
                     .where(lemmas.c.stressed == "èssere")
                 ).fetchone()
                 assert essere_row is not None
-                assert essere_row.freq_raw == 3  # 2 AUX + 1 VERB
+                assert essere_row.freq_raw == 3 * TATOEBA_WEIGHT  # 2 AUX + 1 VERB
 
         finally:
             db_path.unlink()
@@ -291,8 +292,8 @@ class TestFrequencyFromTokens:
             with get_connection(db_path) as conn:
                 stats = compute_frequencies_from_tokens(conn)
 
-            # Only the VERB token should be counted
-            assert stats["total_tokens"] == 1
+            # Only the VERB token should be counted (weighted)
+            assert stats["total_tokens"] == 1 * TATOEBA_WEIGHT
 
         finally:
             db_path.unlink()
@@ -413,6 +414,101 @@ class TestFrequencyFromTokens:
                     .where(lemmas.c.stressed == "parlàre")
                 ).fetchall()
                 assert len(parlare_rows) == 1
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_tatoeba_weighted_higher_than_opensubtitles(self) -> None:
+        """Tatoeba tokens should be weighted TATOEBA_WEIGHT times higher than OpenSubtitles."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([SAMPLE_VERB, SAMPLE_VERB_2])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path)
+                _populate_written_from_stressed(conn)
+
+            # Insert two sentences from different sources, each with one verb occurrence
+            with get_connection(db_path) as conn:
+                conn.execute(
+                    sentences.insert(),
+                    {"sentence_id": 1, "lang": "ita", "text": "Parlo bene.", "source": "tatoeba"},
+                )
+                conn.execute(
+                    sentences.insert(),
+                    {
+                        "sentence_id": 2,
+                        "lang": "ita",
+                        "text": "Sono qui.",
+                        "source": "opensubtitles",
+                    },
+                )
+                tat_id = conn.execute(
+                    text("SELECT id FROM sentences WHERE sentence_id = 1 AND source = 'tatoeba'")
+                ).scalar()
+                osub_id = conn.execute(
+                    text(
+                        "SELECT id FROM sentences WHERE sentence_id = 2 AND source = 'opensubtitles'"
+                    )
+                ).scalar()
+
+                # One "parlare" token in tatoeba sentence
+                conn.execute(
+                    sentence_tokens.insert(),
+                    {
+                        "sentence_id": tat_id,
+                        "token_index": 0,
+                        "text": "Parlo",
+                        "lemma": "parlare",
+                        "upos": "VERB",
+                    },
+                )
+                # One "essere" token in opensubtitles sentence
+                conn.execute(
+                    sentence_tokens.insert(),
+                    {
+                        "sentence_id": osub_id,
+                        "token_index": 0,
+                        "text": "Sono",
+                        "lemma": "essere",
+                        "upos": "VERB",
+                    },
+                )
+
+            with get_connection(db_path) as conn:
+                stats = compute_frequencies_from_tokens(conn)
+
+            # Total weighted tokens: 1*TATOEBA_WEIGHT (tatoeba) + 1*1 (opensubtitles)
+            assert stats["total_tokens"] == TATOEBA_WEIGHT + 1
+
+            with get_connection(db_path) as conn:
+                parlare_row = conn.execute(
+                    select(frequencies)
+                    .join(lemmas, frequencies.c.lemma_id == lemmas.c.id)
+                    .where(lemmas.c.stressed == "parlàre")
+                ).fetchone()
+                essere_row = conn.execute(
+                    select(frequencies)
+                    .join(lemmas, frequencies.c.lemma_id == lemmas.c.id)
+                    .where(lemmas.c.stressed == "èssere")
+                ).fetchone()
+
+                assert parlare_row is not None
+                assert essere_row is not None
+
+                # Tatoeba verb gets weighted count
+                assert parlare_row.freq_raw == TATOEBA_WEIGHT
+                # OpenSubtitles verb gets unweighted count
+                assert essere_row.freq_raw == 1
+
+                # Tatoeba verb should have higher Zipf score (ranks higher)
+                assert parlare_row.freq_zipf > essere_row.freq_zipf
 
         finally:
             db_path.unlink()
