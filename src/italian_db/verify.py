@@ -248,6 +248,33 @@ def check_orphaned_definition_derivations(conn: Connection) -> CheckResult:
         )
 
 
+def check_orphaned_cefr_levels(conn: Connection) -> CheckResult:
+    """Check that all cefr_levels records reference existing lemmas."""
+    query = text("""
+        SELECT cl.lemma_id
+        FROM cefr_levels cl
+        LEFT JOIN lemmas l ON cl.lemma_id = l.id
+        WHERE l.id IS NULL
+    """)
+    result = conn.execute(query).fetchall()
+    count = len(result)
+
+    if count == 0:
+        return CheckResult(
+            name="orphaned_cefr_levels",
+            passed=True,
+            message="No orphaned CEFR levels",
+        )
+    else:
+        details = [f"lemma_id={row[0]}" for row in result[:10]]
+        return CheckResult(
+            name="orphaned_cefr_levels",
+            passed=False,
+            message=f"Orphaned CEFR levels: {count} records without lemmas",
+            details=details,
+        )
+
+
 def check_orphaned_sentence_tokens(conn: Connection) -> CheckResult:
     """Check that all sentence_tokens reference existing sentences."""
     query = text("""
@@ -565,6 +592,8 @@ COVERAGE_THRESHOLDS = {
     "definition_derivations": 1500,  # diminutives, augmentatives, etc.
     # Sentence token coverage (only checked if tokens exist)
     "sentence_token_coverage_pct": 95.0,  # % of Italian sentences with tokens
+    # CEFR level coverage (only checked if cefr_levels has data)
+    "cefr_tagged_lemmas": 1800,
 }
 
 
@@ -766,6 +795,20 @@ def check_coverage_thresholds(conn: Connection) -> list[CheckResult]:
         )
     )
 
+    # CEFR level coverage (only if data has been imported)
+    cefr_query = text("SELECT COUNT(*) FROM cefr_levels")
+    cefr_count = conn.execute(cefr_query).scalar() or 0
+
+    if cefr_count > 0:
+        threshold = COVERAGE_THRESHOLDS["cefr_tagged_lemmas"]
+        results.append(
+            CheckResult(
+                name="cefr_tagged_lemmas",
+                passed=cefr_count >= threshold,
+                message=f"CEFR-tagged lemmas: {cefr_count:,} (min: {threshold:,})",
+            )
+        )
+
     # Sentence token coverage (only if tokens have been imported)
     # Check if any tokens exist
     tokens_query = text("SELECT COUNT(*) FROM sentence_tokens LIMIT 1")
@@ -837,6 +880,9 @@ SPOT_CHECKS: list[tuple[str, str, dict[str, Any]]] = [
     ("moto", "noun", {"has_clipping_relationship": True, "clipping_target": "motocicletta"}),
     # Reflexive verbs (should have reflexive_of relationship)
     ("lavàrsi", "verb", {"has_reflexive_relationship": True, "reflexive_target": "lavare"}),
+    # CEFR levels (only checked if cefr_levels table has data)
+    ("gatto", "noun", {"cefr_level": "A1"}),
+    ("casa", "noun", {"cefr_level": "A1"}),
 ]
 
 
@@ -915,6 +961,21 @@ def run_spot_checks(conn: Connection) -> list[CheckResult]:
                 issues.append("clipping relationship: not found")
             elif target_written and row[0] != target_written:
                 issues.append(f"clipping target: {row[0]} != {target_written}")
+
+        # Check CEFR level (only if cefr_levels table has data)
+        if "cefr_level" in checks:
+            cefr_query = text("SELECT level FROM cefr_levels WHERE lemma_id = :id")
+            cefr_row = conn.execute(cefr_query, {"id": lemma_id}).fetchone()
+            if cefr_row:
+                if cefr_row[0] != checks["cefr_level"]:
+                    issues.append(f"cefr_level: {cefr_row[0]} != {checks['cefr_level']}")
+            else:
+                # Only flag as issue if cefr_levels table has data at all
+                has_cefr = (
+                    conn.execute(text("SELECT COUNT(*) FROM cefr_levels")).scalar() or 0
+                ) > 0
+                if has_cefr:
+                    issues.append("cefr_level: not found in cefr_levels table")
 
         # Check reflexive relationship (e.g., lavarsi → lavare)
         if checks.get("has_reflexive_relationship"):
@@ -1047,6 +1108,7 @@ def verify_database(conn: Connection, *, verbose: bool = False) -> VerificationR
         check_orphaned_lemma_relationships(conn),
         check_orphaned_definition_derivations(conn),
         check_orphaned_sentence_tokens(conn),
+        check_orphaned_cefr_levels(conn),
     ]
 
     # Consistency checks

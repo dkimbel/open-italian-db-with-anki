@@ -4,6 +4,7 @@ from italian_db.db.connection import get_connection, get_engine
 from italian_db.db.schema import (
     adjective_forms,
     adjective_metadata,
+    cefr_levels,
     definitions,
     frequencies,
     init_db,
@@ -27,6 +28,7 @@ __all__ = [
     "GenderClass",
     "adjective_forms",
     "adjective_metadata",
+    "cefr_levels",
     "definitions",
     "frequencies",
     "get_connection",

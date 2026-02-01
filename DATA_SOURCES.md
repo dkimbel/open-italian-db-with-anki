@@ -18,6 +18,7 @@ task download-all
 task download-wiktextract     # Italian dictionary (634 MB)
 task download-tatoeba         # Sentences and links (660 MB)
 task download-opensubtitles   # OpenSubtitles v2024 parallel sentences (~1.8 GB zip)
+task download-profilo         # Profilo CEFR word lists (4 small HTML files)
 
 # Force re-download (even if files exist):
 task download-all FORCE=1
@@ -100,6 +101,22 @@ The import runs in stages for each part of speech (verb, noun, adjective):
 │                                                                             │
 │ NOTE: VERBS derive spelling using Italian orthography rules during lemma    │
 │ enrichment (Step 3), since form-of matching for verbs is less reliable.     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                │
+                ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STEP 2.5: Import CEFR Levels (Profilo) [optional]                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ Profilo della lingua italiana (Spinelli & Parizzi, 2010):                  │
+│   - ~2,700 unique entries across A1-B2 CEFR levels                         │
+│   - Expert-curated levels (not corpus-frequency derived)                   │
+│   - Matches ~1,800+ lemmas in our database (verbs, nouns, adjectives)      │
+│   - Skips multiword expressions and non-matchable POS                      │
+│                                                                             │
+│ Cumulative lists are converted to per-level deltas: each word gets its     │
+│ lowest CEFR level (A1 word appearing in A2 list stays A1).                 │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
                 │
@@ -292,6 +309,27 @@ data for all parts of speech, solving the surface form collision problem.
 4369	1277
 ```
 
+## Profilo della lingua italiana (data/profilo/)
+
+**Source:** Profilo della lingua italiana - livelli di riferimento del QCER
+**URL:** https://www.unistrapg.it/profilo_lingua_italiana/
+**Authors:** Barbara Spinelli and Francesca Parizzi (2010)
+**Publisher:** La Nuova Italia / RCS Libri (ISBN 978-88-221-6579-1)
+**License:** No explicit open license (published book; word lists hosted publicly)
+**Files:** 4 HTML pages (A1, A2, B1, B2 cumulative word lists)
+
+Expert-curated CEFR level assignments for ~2,700 Italian words. Unlike
+corpus-frequency-derived approaches (like KELLY), these levels reflect
+pedagogical sequencing, producing appropriate assignments (e.g., "gatto" = A1,
+not B2).
+
+**Processing:**
+1. Parse numbered entries from HTML (`<a>` tags with POS in parentheses)
+2. Clean words: strip gender variants (`/a`), parentheticals, reflexive (`/si`)
+3. Map Profilo POS abbreviations to our system (verb/noun/adjective)
+4. Compute per-level deltas (cumulative lists → lowest level per word)
+5. Match against `lemmas` table (exact → case-insensitive → reflexive fallback)
+
 ---
 
 Each subdirectory contains a LICENSE file with the full license text.
@@ -394,7 +432,7 @@ The KELLY project provides ~5,300 Italian lemmas with CEFR levels (A1-C2). Howev
 | madre (mother) | A2 | A1 |
 | rendiconto (financial statement) | A1 | B2+ |
 
-The methodology prioritizes newspaper/business vocabulary frequency over learner needs, making it unsuitable for pedagogical CEFR tagging.
+The methodology prioritizes newspaper/business vocabulary frequency over learner needs, making it unsuitable for pedagogical CEFR tagging. The Profilo della lingua italiana (see above) provides expert-curated CEFR levels that correctly address these issues.
 
 ### Italian WordNet (IWN-OMW)
 

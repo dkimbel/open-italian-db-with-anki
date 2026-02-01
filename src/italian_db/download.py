@@ -17,6 +17,7 @@ DATA_DIR = Path("data")
 WIKTEXTRACT_DIR = DATA_DIR / "wiktextract"
 TATOEBA_DIR = DATA_DIR / "tatoeba"
 OPENSUBTITLES_DIR = DATA_DIR / "opensubtitles"
+PROFILO_DIR = DATA_DIR / "profilo"
 
 # Download URLs
 WIKTEXTRACT_URL = "https://kaikki.org/dictionary/Italian/kaikki.org-dictionary-Italian.jsonl"
@@ -35,6 +36,15 @@ TATOEBA_FILES = {
 # OPUS OpenSubtitles v2024 parallel sentences (en-it Moses format)
 OPENSUBTITLES_MOSES_URL = "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2024/moses/en-it.txt.zip"
 OPENSUBTITLES_SAMPLE_SIZE = 5_000_000
+
+# Profilo della lingua italiana CEFR word lists
+PROFILO_BASE_URL = "https://www.unistrapg.it/profilo_lingua_italiana/site"
+PROFILO_URLS = {
+    "A1": f"{PROFILO_BASE_URL}/liste_lessicali_a1.html",
+    "A2": f"{PROFILO_BASE_URL}/liste_lessicali_a2.html",
+    "B1": f"{PROFILO_BASE_URL}/liste_lessicali_b1.html",
+    "B2": f"{PROFILO_BASE_URL}/liste_lessicali_b2.html",
+}
 
 
 def _file_exists_and_nonempty(path: Path) -> bool:
@@ -308,6 +318,31 @@ def download_opensubtitles(force: bool = False) -> dict[str, int]:
     return {"downloaded": 1, "skipped": 0}
 
 
+def download_profilo(force: bool = False) -> dict[str, int]:
+    """Download Profilo della lingua italiana CEFR word list HTML pages.
+
+    Downloads 4 small HTML files (A1, A2, B1, B2) to data/profilo/.
+    Returns stats dict with 'downloaded' and 'skipped' counts.
+    """
+    downloaded = 0
+    skipped = 0
+
+    PROFILO_DIR.mkdir(parents=True, exist_ok=True)
+
+    for level, url in PROFILO_URLS.items():
+        dest = PROFILO_DIR / f"liste_lessicali_{level.lower()}.html"
+
+        if not force and _file_exists_and_nonempty(dest):
+            print(f"Skipping Profilo {level} (already exists): {dest}")
+            skipped += 1
+            continue
+
+        _download_to_file(url, dest, f"Profilo {level} word list")
+        downloaded += 1
+
+    return {"downloaded": downloaded, "skipped": skipped}
+
+
 def download_all(force: bool = False) -> dict[str, dict[str, int]]:
     """Download all data sources.
 
@@ -331,6 +366,12 @@ def download_all(force: bool = False) -> dict[str, dict[str, int]]:
     print("Downloading OpenSubtitles (OPUS v2024 parallel sentences)")
     print("=" * 60)
     results["opensubtitles"] = download_opensubtitles(force)
+    print()
+
+    print("=" * 60)
+    print("Downloading Profilo della lingua italiana (CEFR word lists)")
+    print("=" * 60)
+    results["profilo"] = download_profilo(force)
     print()
 
     # Summary

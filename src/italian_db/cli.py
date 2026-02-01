@@ -21,12 +21,14 @@ from italian_db.db import (
 from italian_db.download import (
     download_all,
     download_opensubtitles,
+    download_profilo,
     download_tatoeba,
     download_wiktextract,
 )
 from italian_db.enums import POS
 from italian_db.importers import (
     compute_pos_frequency_ranks,
+    import_profilo,
     import_sentence_tokens,
     import_tatoeba,
     import_verb_irregularity,
@@ -58,6 +60,7 @@ DEFAULT_OPENSUBTITLES_SENTENCE_TOKENS_PATH = Path("data/opensubtitles/it_sentenc
 DEFAULT_OPENSUBTITLES_ITA_PATH = Path("data/opensubtitles/it_sentences.tsv")
 DEFAULT_OPENSUBTITLES_ENG_PATH = Path("data/opensubtitles/en_sentences.tsv")
 DEFAULT_OPENSUBTITLES_LINKS_PATH = Path("data/opensubtitles/links.tsv")
+DEFAULT_PROFILO_DIR = Path("data/profilo")
 DEFAULT_DB_PATH = Path("italian.db")
 
 
@@ -323,6 +326,46 @@ def cmd_import_sentence_tokens(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import_profilo(args: argparse.Namespace) -> int:
+    """Import Profilo CEFR level data."""
+    profilo_dir = Path(args.profilo_dir)
+    db_path = Path(args.database)
+
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        print("Run 'import-wiktextract' first to create the database.", file=sys.stderr)
+        return 1
+
+    # Check that at least one HTML file exists
+    if not any(profilo_dir.glob("liste_lessicali_*.html")):
+        print(f"Error: No Profilo HTML files found in: {profilo_dir}", file=sys.stderr)
+        print("Run 'download-profilo' first to download the data.", file=sys.stderr)
+        return 1
+
+    # Ensure cefr_levels table exists
+    engine = get_engine(db_path)
+    init_db(engine)
+
+    print(f"Importing Profilo CEFR levels to: {db_path}")
+    print(f"  From: {profilo_dir}")
+    print()
+
+    with get_connection(db_path) as conn:
+        _run_profilo_import(conn, profilo_dir)
+
+    print()
+    print("Import complete!")
+    return 0
+
+
+def cmd_download_profilo(args: argparse.Namespace) -> int:
+    """Download Profilo della lingua italiana CEFR word lists."""
+    stats = download_profilo(force=args.force)
+    if stats["downloaded"] > 0:
+        print("Download complete!")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     """Print database statistics."""
     from sqlalchemy import func, select
@@ -444,6 +487,23 @@ def cmd_stats(args: argparse.Namespace) -> int:
             or 0
         )
 
+        # CEFR level statistics
+        from italian_db.db.schema import cefr_levels
+
+        cefr_total = conn.execute(select(func.count()).select_from(cefr_levels)).scalar() or 0
+        cefr_by_level: dict[str, int] = {}
+        if cefr_total > 0:
+            for level_val in ["A1", "A2", "B1", "B2"]:
+                cnt = (
+                    conn.execute(
+                        select(func.count())
+                        .select_from(cefr_levels)
+                        .where(cefr_levels.c.level == level_val)
+                    ).scalar()
+                    or 0
+                )
+                cefr_by_level[level_val] = cnt
+
     print(f"Database: {db_path}")
     print()
     print("Lemmas:")
@@ -482,6 +542,12 @@ def cmd_stats(args: argparse.Namespace) -> int:
         print()
         print("Sentence Tokens (Stanza):")
         print(f"  Tokens:      {token_count:,} ({sentences_with_tokens:,} sentences)")
+    if cefr_total > 0:
+        print()
+        print("CEFR Levels (Profilo):")
+        print(f"  Total:       {cefr_total:,}")
+        for level_val, cnt in cefr_by_level.items():
+            print(f"  {level_val}:          {cnt:,}")
 
     return 0
 
@@ -718,6 +784,24 @@ def _run_tatoeba_import(
     return stats
 
 
+def _run_profilo_import(conn: Connection, profilo_dir: Path, indent: str = "  ") -> dict[str, Any]:
+    """Run Profilo CEFR import and print stats."""
+    stats = import_profilo(conn, profilo_dir, progress_callback=_make_progress_callback())
+    print()
+    if stats["cleared"] > 0:
+        print(f"{indent}Cleared:            {stats['cleared']:,} existing CEFR rows")
+    print(f"{indent}Total entries:      {stats['total_entries']:,}")
+    print(f"{indent}Matched:            {stats['matched']:,}")
+    print(f"{indent}Unmatched:          {stats['unmatched']:,}")
+    print(f"{indent}Skipped (multiword):{stats['skipped_multiword']:,}")
+    print(f"{indent}Skipped (POS):      {stats['skipped_pos']:,}")
+    print(f"{indent}Per level:")
+    for level in ["A1", "A2", "B1", "B2"]:
+        count = stats[f"level_{level}"]
+        print(f"{indent}  {level}: {count:,}")
+    return stats
+
+
 def _run_verb_irregularity_import(conn: Connection, indent: str = "  ") -> dict[str, Any]:
     """Run verb irregularity import and print stats."""
     stats = import_verb_irregularity(conn, progress_callback=_make_progress_callback())
@@ -796,12 +880,15 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     # Determine total phases:
     # 3 POS + post-processing + Tatoeba + OpenSubtitles(optional) + sentence tokens + frequency
     has_opensub = DEFAULT_OPENSUBTITLES_ITA_PATH.exists()
+    has_profilo = any(DEFAULT_PROFILO_DIR.glob("liste_lessicali_*.html"))
     has_tatoeba_tokens = DEFAULT_TATOEBA_SENTENCE_TOKENS_PATH.exists()
     has_opensub_tokens = DEFAULT_OPENSUBTITLES_SENTENCE_TOKENS_PATH.exists()
     has_any_tokens = has_tatoeba_tokens or has_opensub_tokens
 
-    # Count phases: 3 POS + post-processing + Tatoeba + [OpenSubtitles] + [tokens] + [frequencies]
+    # Count phases: 3 POS + post-processing + [Profilo] + Tatoeba + [OpenSubtitles] + [tokens] + [frequencies]
     total_phases = 3 + 1 + 1  # POS + post-processing + Tatoeba
+    if has_profilo:
+        total_phases += 1
     if has_opensub:
         total_phases += 1
     if has_any_tokens:
@@ -963,6 +1050,18 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print(f"  Skipped (multi-word):  {stats['skipped_multiword']:,}")
         print(f"  Skipped (typo):        {stats['skipped_typo']:,}")
     print()
+
+    # Profilo CEFR levels (optional - only if HTML files exist)
+    if has_profilo:
+        current_phase += 1
+        print("=" * 80)
+        print(f"Importing Profilo CEFR levels (Step {current_phase} of {total_phases})")
+        print("=" * 80)
+        print()
+
+        with get_connection(db_path) as conn:
+            _run_profilo_import(conn, DEFAULT_PROFILO_DIR, indent="  ")
+        print()
 
     # Tatoeba sentences
     current_phase += 1
@@ -1282,6 +1381,26 @@ def main() -> int:
     )
     tokens_parser.set_defaults(func=cmd_import_sentence_tokens)
 
+    # import-profilo subcommand
+    profilo_parser = subparsers.add_parser(
+        "import-profilo",
+        help="Import Profilo CEFR level data",
+    )
+    profilo_parser.add_argument(
+        "--profilo-dir",
+        type=str,
+        default=str(DEFAULT_PROFILO_DIR),
+        help=f"Path to Profilo HTML directory (default: {DEFAULT_PROFILO_DIR})",
+    )
+    profilo_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    profilo_parser.set_defaults(func=cmd_import_profilo)
+
     # import-all subcommand
     import_all_parser = subparsers.add_parser(
         "import-all",
@@ -1365,6 +1484,18 @@ def main() -> int:
         help="Re-download even if files already exist",
     )
     dl_opensub_parser.set_defaults(func=cmd_download_opensubtitles)
+
+    # download-profilo subcommand
+    dl_profilo_parser = subparsers.add_parser(
+        "download-profilo",
+        help="Download Profilo CEFR word lists",
+    )
+    dl_profilo_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if files already exist",
+    )
+    dl_profilo_parser.set_defaults(func=cmd_download_profilo)
 
     # download-all subcommand
     dl_all_parser = subparsers.add_parser(

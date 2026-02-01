@@ -156,12 +156,16 @@ projects. See `data-licenses/` for full license texts.
 | [Wiktextract](https://kaikki.org) | CC-BY-SA 3.0 + GFDL | Lemmas, conjugations, definitions |
 | [OpenSubtitles v2024](https://opus.nlpl.eu/OpenSubtitles/v2024/en-it) | Attribution | Example sentences, frequency data |
 | [Tatoeba](https://tatoeba.org) | CC-BY 2.0 FR | Example sentences, frequency data |
+| [Profilo della lingua italiana](https://www.unistrapg.it/profilo_lingua_italiana/) | No explicit license* | CEFR levels (A1-B2) |
+
+\* Published book (Spinelli & Parizzi, 2010); word lists hosted publicly for educational use. See `data-licenses/profilo.txt`.
 
 ## What's In The Database
 
 - **100k+ lemmas** (verbs, nouns, adjectives) with stress-marked forms to aid pronunciation
 - **945k+ inflected forms** like verb conjugations and gendered versions of nouns and adjectives
 - **Frequency data** derived from Stanza-parsed sentence tokens (all POS)
+- **CEFR levels** (A1-B2) from expert-curated Profilo della lingua italiana
 - **6M+ example sentences** with English translations (Tatoeba + OpenSubtitles)
 - **Full data provenance**: every form tracks where it came from (`form_origin`, `written_source`)
 
@@ -180,14 +184,16 @@ open-italian-db-with-anki/
 │   │   ├── tatoeba.py      #     Tatoeba example sentences with translations
 │   │   ├── opensubtitles_sentences.py  # OpenSubtitles parallel sentences
 │   │   ├── sentence_tokens.py         # Stanza POS-tagged token import
-│   │   └── frequency_from_tokens.py   # Frequency computation from tokens
+│   │   ├── frequency_from_tokens.py   # Frequency computation from tokens
+│   │   └── profilo.py                 # Profilo CEFR level import
 │   ├── normalize.py        #   Text normalization (accents, unicode)
 │   ├── articles.py         #   Italian definite article rules
 │   └── cli.py              #   Command-line interface
 ├── data/                   # Downloaded source data (~2.5GB, not committed)
 │   ├── wiktextract/        #   Kaikki.org dictionary extract
 │   ├── tatoeba/            #   Tatoeba sentence corpus
-│   └── opensubtitles/      #   OpenSubtitles v2024 parallel sentences
+│   ├── opensubtitles/      #   OpenSubtitles v2024 parallel sentences
+│   └── profilo/            #   Profilo CEFR word lists (HTML)
 ├── data-licenses/          # Full license texts for each data source
 ├── tests/                  # Test suite
 ├── Taskfile.yml            # Task runner commands

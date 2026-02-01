@@ -531,6 +531,24 @@ verb_irregularity = Table(
     Column("notes", Text),  # Optional notes for edge cases
 )
 
+# CEFR level assignments from external sources (e.g., Profilo della lingua italiana)
+#
+# Each lemma can have at most one CEFR level assignment per source.
+# Currently the only source is 'profilo' (Spinelli & Parizzi 2010).
+#
+# source_word and source_pos preserve the original Profilo entry for provenance
+# (e.g., source_word="amico/a" before cleaning to "amico").
+#
+cefr_levels = Table(
+    "cefr_levels",
+    metadata,
+    Column("lemma_id", Integer, ForeignKey("lemmas.id"), primary_key=True),
+    Column("level", String(2), nullable=False),  # A1, A2, B1, B2
+    Column("source", Text, nullable=False),  # 'profilo'
+    Column("source_word", Text),  # original word for provenance
+    Column("source_pos", Text),  # original POS abbreviation
+)
+
 # Indexes (defined separately for clarity)
 Index(
     "idx_lemmas_stressed_pos", lemmas.c.stressed, lemmas.c.pos
@@ -565,6 +583,8 @@ Index("idx_verb_irregularity_remote", verb_irregularity.c.remote_pattern)
 Index("idx_verb_irregularity_future", verb_irregularity.c.future_pattern)
 Index("idx_verb_irregularity_participle", verb_irregularity.c.participle_pattern)
 Index("idx_verb_irregularity_subjunctive", verb_irregularity.c.subjunctive_pattern)
+# cefr_levels indexes
+Index("idx_cefr_levels_level", cefr_levels.c.level)
 # Other indexes
 Index("idx_definitions_lemma", definitions.c.lemma_id)
 Index("idx_definitions_derived_from", definitions.c.derived_from_lemma_id)

@@ -1,0 +1,32 @@
+Profilo della lingua italiana (CEFR Word Lists)
+================================================
+
+Source: Profilo della lingua italiana - livelli di riferimento del QCER
+        A1, A2, B1, B2
+URL: https://www.unistrapg.it/profilo_lingua_italiana/
+Authors: Barbara Spinelli and Francesca Parizzi
+Publisher: La Nuova Italia / RCS Libri (now Mondadori Education), 2010
+ISBN: 978-88-221-6579-1
+
+The word lists ("liste lessicali") are hosted publicly on the website of the
+University for Foreigners of Perugia (CVCL - Centro per la Valutazione e le
+Certificazioni Linguistiche).
+
+License Status
+--------------
+No explicit open license (CC, MIT, etc.) was found on the website or in the
+published book. The data consists of factual word-to-CEFR-level assignments.
+
+Usage in This Project
+---------------------
+Used as metadata enrichment for non-commercial educational purposes.
+CEFR level assignments are stored with full source attribution
+(source='profilo') and original word/POS provenance.
+
+Citation
+--------
+When using CEFR data derived from this source, please cite:
+
+  Spinelli, B. & Parizzi, F. (2010). Profilo della lingua italiana:
+  livelli di riferimento del QCER A1, A2, B1, B2.
+  La Nuova Italia / RCS Libri. ISBN 978-88-221-6579-1.

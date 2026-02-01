@@ -99,6 +99,11 @@ tasks:
     cmds:
       - uv run italian-db import-sentence-tokens {{if .SOURCE}}--source {{.SOURCE}}{{end}}
 
+  import-profilo:
+    desc: Import Profilo CEFR level data
+    cmds:
+      - uv run italian-db import-profilo
+
   import-all:
     desc: Run full import pipeline
     cmds:
@@ -128,6 +133,11 @@ tasks:
     desc: Download OpenSubtitles parallel sentences from OPUS
     cmds:
       - uv run italian-db download-opensubtitles {{if .FORCE}}--force{{end}}
+
+  download-profilo:
+    desc: Download Profilo CEFR word lists
+    cmds:
+      - uv run italian-db download-profilo {{if .FORCE}}--force{{end}}
 
   download-all:
     desc: Download all data sources

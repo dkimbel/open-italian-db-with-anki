@@ -1,6 +1,7 @@
 """Data importers for Italian Anki deck generator."""
 
 from italian_db.importers.frequency_ranking import compute_pos_frequency_ranks
+from italian_db.importers.profilo import import_profilo
 from italian_db.importers.sentence_tokens import import_sentence_tokens
 from italian_db.importers.tatoeba import import_tatoeba
 from italian_db.importers.verb_irregularity import import_verb_irregularity
@@ -14,6 +15,7 @@ __all__ = [
     "compute_pos_frequency_ranks",
     "enrich_missing_feminine_plurals",
     "generate_gendered_participles",
+    "import_profilo",
     "import_sentence_tokens",
     "import_tatoeba",
     "import_verb_irregularity",
