@@ -20,6 +20,7 @@ from italian_db.db import (
 )
 from italian_db.download import (
     download_all,
+    download_nvdb,
     download_opensubtitles,
     download_profilo,
     download_tatoeba,
@@ -28,6 +29,7 @@ from italian_db.download import (
 from italian_db.enums import POS
 from italian_db.importers import (
     compute_pos_frequency_ranks,
+    import_nvdb,
     import_profilo,
     import_sentence_tokens,
     import_tatoeba,
@@ -61,6 +63,7 @@ DEFAULT_OPENSUBTITLES_ITA_PATH = Path("data/opensubtitles/it_sentences.tsv")
 DEFAULT_OPENSUBTITLES_ENG_PATH = Path("data/opensubtitles/en_sentences.tsv")
 DEFAULT_OPENSUBTITLES_LINKS_PATH = Path("data/opensubtitles/links.tsv")
 DEFAULT_PROFILO_DIR = Path("data/profilo")
+DEFAULT_NVDB_DIR = Path("data/nvdb")
 DEFAULT_DB_PATH = Path("italian.db")
 
 
@@ -366,6 +369,46 @@ def cmd_download_profilo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import_nvdb(args: argparse.Namespace) -> int:
+    """Import NVdB usage tier data."""
+    nvdb_dir = Path(args.nvdb_dir)
+    db_path = Path(args.database)
+
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        print("Run 'import-wiktextract' first to create the database.", file=sys.stderr)
+        return 1
+
+    nvdb_path = nvdb_dir / "nvdb.html"
+    if not nvdb_path.exists():
+        print(f"Error: NVdB HTML file not found: {nvdb_path}", file=sys.stderr)
+        print("Run 'download-nvdb' first to download the data.", file=sys.stderr)
+        return 1
+
+    # Ensure nvdb_tiers table exists
+    engine = get_engine(db_path)
+    init_db(engine)
+
+    print(f"Importing NVdB usage tiers to: {db_path}")
+    print(f"  From: {nvdb_path}")
+    print()
+
+    with get_connection(db_path) as conn:
+        _run_nvdb_import(conn, nvdb_path)
+
+    print()
+    print("Import complete!")
+    return 0
+
+
+def cmd_download_nvdb(args: argparse.Namespace) -> int:
+    """Download NVdB vocabulary list."""
+    stats = download_nvdb(force=args.force)
+    if stats["downloaded"] > 0:
+        print("Download complete!")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     """Print database statistics."""
     from sqlalchemy import func, select
@@ -488,7 +531,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
         )
 
         # CEFR level statistics
-        from italian_db.db.schema import cefr_levels
+        from italian_db.db.schema import cefr_levels, nvdb_tiers
 
         cefr_total = conn.execute(select(func.count()).select_from(cefr_levels)).scalar() or 0
         cefr_by_level: dict[str, int] = {}
@@ -503,6 +546,21 @@ def cmd_stats(args: argparse.Namespace) -> int:
                     or 0
                 )
                 cefr_by_level[level_val] = cnt
+
+        # NVdB tier statistics
+        nvdb_total = conn.execute(select(func.count()).select_from(nvdb_tiers)).scalar() or 0
+        nvdb_by_tier: dict[str, int] = {}
+        if nvdb_total > 0:
+            for tier_val in ["FO", "AU", "AD"]:
+                cnt = (
+                    conn.execute(
+                        select(func.count())
+                        .select_from(nvdb_tiers)
+                        .where(nvdb_tiers.c.tier == tier_val)
+                    ).scalar()
+                    or 0
+                )
+                nvdb_by_tier[tier_val] = cnt
 
     print(f"Database: {db_path}")
     print()
@@ -548,6 +606,12 @@ def cmd_stats(args: argparse.Namespace) -> int:
         print(f"  Total:       {cefr_total:,}")
         for level_val, cnt in cefr_by_level.items():
             print(f"  {level_val}:          {cnt:,}")
+    if nvdb_total > 0:
+        print()
+        print("NVdB Usage Tiers:")
+        print(f"  Total:       {nvdb_total:,}")
+        for tier_val, cnt in nvdb_by_tier.items():
+            print(f"  {tier_val}:          {cnt:,}")
 
     return 0
 
@@ -802,6 +866,24 @@ def _run_profilo_import(conn: Connection, profilo_dir: Path, indent: str = "  ")
     return stats
 
 
+def _run_nvdb_import(conn: Connection, nvdb_path: Path, indent: str = "  ") -> dict[str, Any]:
+    """Run NVdB import and print stats."""
+    stats = import_nvdb(conn, nvdb_path, progress_callback=_make_progress_callback())
+    print()
+    if stats["cleared"] > 0:
+        print(f"{indent}Cleared:            {stats['cleared']:,} existing NVdB rows")
+    print(f"{indent}Total entries:      {stats['total_entries']:,}")
+    print(f"{indent}Matched:            {stats['matched']:,}")
+    print(f"{indent}Unmatched:          {stats['unmatched']:,}")
+    print(f"{indent}Skipped (multiword):{stats['skipped_multiword']:,}")
+    print(f"{indent}Skipped (POS):      {stats['skipped_pos']:,}")
+    print(f"{indent}Per tier:")
+    for tier in ["FO", "AU", "AD"]:
+        count = stats[f"tier_{tier}"]
+        print(f"{indent}  {tier}: {count:,}")
+    return stats
+
+
 def _run_verb_irregularity_import(conn: Connection, indent: str = "  ") -> dict[str, Any]:
     """Run verb irregularity import and print stats."""
     stats = import_verb_irregularity(conn, progress_callback=_make_progress_callback())
@@ -881,13 +963,16 @@ def cmd_import_all(args: argparse.Namespace) -> int:
     # 3 POS + post-processing + Tatoeba + OpenSubtitles(optional) + sentence tokens + frequency
     has_opensub = DEFAULT_OPENSUBTITLES_ITA_PATH.exists()
     has_profilo = any(DEFAULT_PROFILO_DIR.glob("liste_lessicali_*.html"))
+    has_nvdb = (DEFAULT_NVDB_DIR / "nvdb.html").exists()
     has_tatoeba_tokens = DEFAULT_TATOEBA_SENTENCE_TOKENS_PATH.exists()
     has_opensub_tokens = DEFAULT_OPENSUBTITLES_SENTENCE_TOKENS_PATH.exists()
     has_any_tokens = has_tatoeba_tokens or has_opensub_tokens
 
-    # Count phases: 3 POS + post-processing + [Profilo] + Tatoeba + [OpenSubtitles] + [tokens] + [frequencies]
+    # Count phases: 3 POS + post-processing + [Profilo] + [NVdB] + Tatoeba + [OpenSubtitles] + [tokens] + [frequencies]
     total_phases = 3 + 1 + 1  # POS + post-processing + Tatoeba
     if has_profilo:
+        total_phases += 1
+    if has_nvdb:
         total_phases += 1
     if has_opensub:
         total_phases += 1
@@ -1061,6 +1146,18 @@ def cmd_import_all(args: argparse.Namespace) -> int:
 
         with get_connection(db_path) as conn:
             _run_profilo_import(conn, DEFAULT_PROFILO_DIR, indent="  ")
+        print()
+
+    # NVdB usage tiers (optional - only if HTML file exists)
+    if has_nvdb:
+        current_phase += 1
+        print("=" * 80)
+        print(f"Importing NVdB usage tiers (Step {current_phase} of {total_phases})")
+        print("=" * 80)
+        print()
+
+        with get_connection(db_path) as conn:
+            _run_nvdb_import(conn, DEFAULT_NVDB_DIR / "nvdb.html", indent="  ")
         print()
 
     # Tatoeba sentences
@@ -1401,6 +1498,26 @@ def main() -> int:
     )
     profilo_parser.set_defaults(func=cmd_import_profilo)
 
+    # import-nvdb subcommand
+    nvdb_parser = subparsers.add_parser(
+        "import-nvdb",
+        help="Import NVdB usage tier data",
+    )
+    nvdb_parser.add_argument(
+        "--nvdb-dir",
+        type=str,
+        default=str(DEFAULT_NVDB_DIR),
+        help=f"Path to NVdB HTML directory (default: {DEFAULT_NVDB_DIR})",
+    )
+    nvdb_parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+    nvdb_parser.set_defaults(func=cmd_import_nvdb)
+
     # import-all subcommand
     import_all_parser = subparsers.add_parser(
         "import-all",
@@ -1496,6 +1613,18 @@ def main() -> int:
         help="Re-download even if files already exist",
     )
     dl_profilo_parser.set_defaults(func=cmd_download_profilo)
+
+    # download-nvdb subcommand
+    dl_nvdb_parser = subparsers.add_parser(
+        "download-nvdb",
+        help="Download NVdB vocabulary list",
+    )
+    dl_nvdb_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if file already exists",
+    )
+    dl_nvdb_parser.set_defaults(func=cmd_download_nvdb)
 
     # download-all subcommand
     dl_all_parser = subparsers.add_parser(

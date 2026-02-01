@@ -177,6 +177,41 @@ def _map_pos(pos_raw: str) -> str | None:
     return None
 
 
+def _map_all_matchable_pos(pos_raw: str) -> list[str]:
+    """Return all matchable POS values from a compound POS string.
+
+    Splits on en-dash/hyphen, maps each component via POS_MAP,
+    and returns the deduplicated list of values in MATCHABLE_POS.
+
+    Examples:
+        "s.m. - agg." -> ["noun", "adjective"]
+        "s.m. - s.f." -> ["noun"] (deduped)
+        "avv. - prep." -> [] (neither matchable)
+    """
+    parts = re.split(r"\s*[" + _EN_DASH + r"-]\s*", pos_raw)
+
+    seen: set[str] = set()
+    result: list[str] = []
+
+    for part in parts:
+        part = part.strip()
+        part = re.sub(r"\s+", " ", part)
+
+        mapped: str | None = None
+        if part in POS_MAP:
+            mapped = POS_MAP[part]
+        elif not part.endswith("."):
+            with_period = part + "."
+            if with_period in POS_MAP:
+                mapped = POS_MAP[with_period]
+
+        if mapped is not None and mapped in MATCHABLE_POS and mapped not in seen:
+            seen.add(mapped)
+            result.append(mapped)
+
+    return result
+
+
 def _parse_all_levels(profilo_dir: Path) -> list[ProfiloEntry]:
     """Parse all four CEFR level HTML files and compute per-level deltas.
 
@@ -202,20 +237,38 @@ def _parse_all_levels(profilo_dir: Path) -> list[ProfiloEntry]:
 
         for word, pos_raw in raw_entries:
             clean, is_multi, has_refl = _clean_word(word)
-            pos = _map_pos(pos_raw)
 
-            key = (clean.lower(), pos)
-            if key not in seen:
-                seen[key] = level
-                entries[key] = ProfiloEntry(
-                    word=word,
-                    clean_word=clean,
-                    pos_raw=pos_raw,
-                    pos_mapped=pos,
-                    cefr_level=level,
-                    is_multiword=is_multi,
-                    has_reflexive=has_refl,
-                )
+            # Explode compound POS into one entry per matchable POS
+            matchable_list = _map_all_matchable_pos(pos_raw)
+            if matchable_list:
+                for pos in matchable_list:
+                    key = (clean.lower(), pos)
+                    if key not in seen:
+                        seen[key] = level
+                        entries[key] = ProfiloEntry(
+                            word=word,
+                            clean_word=clean,
+                            pos_raw=pos_raw,
+                            pos_mapped=pos,
+                            cefr_level=level,
+                            is_multiword=is_multi,
+                            has_reflexive=has_refl,
+                        )
+            else:
+                # No matchable POS — create entry with first mapped POS for stats
+                pos = _map_pos(pos_raw)
+                key = (clean.lower(), pos)
+                if key not in seen:
+                    seen[key] = level
+                    entries[key] = ProfiloEntry(
+                        word=word,
+                        clean_word=clean,
+                        pos_raw=pos_raw,
+                        pos_mapped=pos,
+                        cefr_level=level,
+                        is_multiword=is_multi,
+                        has_reflexive=has_refl,
+                    )
 
     return list(entries.values())
 

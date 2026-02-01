@@ -1,0 +1,43 @@
+Nuovo Vocabolario di Base della Lingua Italiana (NVdB)
+=====================================================
+
+Source: https://www.internazionale.it/opinione/tullio-de-mauro/2016/12/23/il-nuovo-vocabolario-di-base-della-lingua-italiana
+
+License Status
+--------------
+The NVdB was published online by Internazionale without an explicit open license.
+No Creative Commons or other standard license was applied to the data. Standard
+copyright applies under Italian law (Legge 22 aprile 1941, n. 633) and the EU
+Database Directive (96/9/EC).
+
+The word list may be protected both as a creative database (the scholarly selection
+and arrangement of ~7,500 words from the full Italian lexicon) and under sui generis
+database rights (the substantial research investment in corpus analysis and
+psycholinguistic testing).
+
+Copyright holders are believed to be the authors (Tullio De Mauro, deceased 2017;
+Isabella Chiari) and/or Internazionale S.p.A.
+
+Attribution
+-----------
+If you use this data, please cite:
+
+De Mauro, Tullio (2016). "Il Nuovo vocabolario di base della lingua italiana."
+Internazionale, 23 December 2016.
+
+See also:
+
+Chiari, Isabella & De Mauro, Tullio (2014). "Il Nuovo vocabolario di base della
+lingua italiana (NVdB): che cosa è cambiato nel Vocabolario fondamentale."
+In Ferreri, S. (ed.), Linguistica educativa, pp. 99-120, Bulzoni, Roma.
+
+Additional Notes
+----------------
+- Contains ~7,500 Italian words classified into usage tiers:
+  FO (fondamentale, ~2,000 words covering ~90% of text),
+  AU (alto uso, ~2,750 words), and AD (alta disponibilità, ~2,300 words)
+- PDF extracted and structured by: https://github.com/pettarin/nvdb (CC BY 4.0
+  for documentation, public domain for processed files, AGPL-3.0 for code)
+- Also available as a dataset at: https://github.com/memdevice/nvdb (no license)
+- All use should be for research and/or personal purposes only, consistent with
+  the terms under which the data was originally published

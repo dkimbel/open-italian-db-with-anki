@@ -19,6 +19,7 @@ task download-wiktextract     # Italian dictionary (634 MB)
 task download-tatoeba         # Sentences and links (660 MB)
 task download-opensubtitles   # OpenSubtitles v2024 parallel sentences (~1.8 GB zip)
 task download-profilo         # Profilo CEFR word lists (4 small HTML files)
+task download-nvdb            # NVdB vocabulary tier list (1 HTML file)
 
 # Force re-download (even if files exist):
 task download-all FORCE=1
@@ -117,6 +118,23 @@ The import runs in stages for each part of speech (verb, noun, adjective):
 │                                                                             │
 │ Cumulative lists are converted to per-level deltas: each word gets its     │
 │ lowest CEFR level (A1 word appearing in A2 list stays A1).                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                │
+                ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STEP 2.6: Import NVdB Usage Tiers [optional]                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ NVdB - Nuovo Vocabolario di Base (De Mauro, 2016):                         │
+│   - ~7,500 words classified into three usage tiers                         │
+│   - FO (fondamentale, ~2,000 words covering ~90% of text)                  │
+│   - AU (alto uso, ~2,750 words)                                            │
+│   - AD (alta disponibilità, ~2,300 words)                                  │
+│   - Matches ~3,500+ lemmas in our database (verbs, nouns, adjectives)      │
+│   - Skips multiword expressions and non-matchable POS                      │
+│                                                                             │
+│ HTML formatting encodes tiers: <b>bold</b>=FO, plain=AU, <i>italic</i>=AD │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
                 │
@@ -328,6 +346,33 @@ not B2).
 2. Clean words: strip gender variants (`/a`), parentheticals, reflexive (`/si`)
 3. Map Profilo POS abbreviations to our system (verb/noun/adjective)
 4. Compute per-level deltas (cumulative lists → lowest level per word)
+5. Match against `lemmas` table (exact → case-insensitive → reflexive fallback)
+
+## NVdB - Nuovo Vocabolario di Base (data/nvdb/)
+
+**Source:** Nuovo Vocabolario di Base della lingua italiana
+**URL:** https://www.internazionale.it/opinione/tullio-de-mauro/2016/12/23/il-nuovo-vocabolario-di-base-della-lingua-italiana
+**Authors:** Tullio De Mauro (2016), with Isabella Chiari
+**License:** No explicit open license (see `data-licenses/nvdb.txt`)
+**Files:** 1 HTML file (nvdb.html) from https://github.com/memdevice/nvdb
+
+Classifies ~7,500 Italian words into three usage tiers:
+- **FO** (fondamentale, ~2,000 words): Core vocabulary covering ~90% of text
+- **AU** (alto uso, ~2,750 words): High-use vocabulary
+- **AD** (alta disponibilità, ~2,300 words): High-availability vocabulary
+
+The tiers are non-overlapping (unlike Profilo's cumulative CEFR lists).
+
+**HTML format:** Tiers are encoded via formatting:
+- `<p><b>word</b> pos.,</p>` → FO (bold)
+- `<p>word pos.,</p>` → AU (plain text)
+- `<p><i>word</i> pos.,</p>` → AD (italic)
+
+**Processing:**
+1. Parse `<p>` tags, detect tier from bold/italic/plain formatting
+2. Split word from POS (handling no-space edge cases)
+3. Map NVdB POS abbreviations (`v.tr.`, `s.m.`, `agg.`, etc.) to our system
+4. Deduplicate by (word, POS) — some words appear with multiple POS entries
 5. Match against `lemmas` table (exact → case-insensitive → reflexive fallback)
 
 ---

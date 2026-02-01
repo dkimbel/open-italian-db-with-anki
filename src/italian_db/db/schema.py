@@ -549,6 +549,25 @@ cefr_levels = Table(
     Column("source_pos", Text),  # original POS abbreviation
 )
 
+# NVdB (Nuovo Vocabolario di Base) usage tier assignments
+#
+# Each lemma can have at most one NVdB tier assignment.
+# Source: De Mauro (2016), ~7,500 words classified into three tiers:
+#   FO (fondamentale, ~2,000 words covering ~90% of text)
+#   AU (alto uso, ~2,750 words)
+#   AD (alta disponibilità, ~2,300 words)
+#
+# source_word and source_pos preserve the original NVdB entry for provenance.
+#
+nvdb_tiers = Table(
+    "nvdb_tiers",
+    metadata,
+    Column("lemma_id", Integer, ForeignKey("lemmas.id"), primary_key=True),
+    Column("tier", String(2), nullable=False),  # FO, AU, AD
+    Column("source_word", Text),  # original word for provenance
+    Column("source_pos", Text),  # original POS abbreviation
+)
+
 # Indexes (defined separately for clarity)
 Index(
     "idx_lemmas_stressed_pos", lemmas.c.stressed, lemmas.c.pos
@@ -585,6 +604,8 @@ Index("idx_verb_irregularity_participle", verb_irregularity.c.participle_pattern
 Index("idx_verb_irregularity_subjunctive", verb_irregularity.c.subjunctive_pattern)
 # cefr_levels indexes
 Index("idx_cefr_levels_level", cefr_levels.c.level)
+# nvdb_tiers indexes
+Index("idx_nvdb_tiers_tier", nvdb_tiers.c.tier)
 # Other indexes
 Index("idx_definitions_lemma", definitions.c.lemma_id)
 Index("idx_definitions_derived_from", definitions.c.derived_from_lemma_id)

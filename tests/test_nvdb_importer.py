@@ -1,4 +1,4 @@
-"""Tests for Profilo CEFR level importer."""
+"""Tests for NVdB usage tier importer."""
 
 import tempfile
 from pathlib import Path
@@ -7,17 +7,17 @@ import pytest
 from sqlalchemy import text
 
 from italian_db.db import get_connection, get_engine, init_db
-from italian_db.importers.profilo import (
+from italian_db.importers.nvdb import (
     MATCHABLE_POS,
     POS_MAP,
-    ProfiloEntry,
+    NvdbEntry,
     _clean_word,  # pyright: ignore[reportPrivateUsage]
     _map_all_matchable_pos,  # pyright: ignore[reportPrivateUsage]
     _map_pos,  # pyright: ignore[reportPrivateUsage]
     _match_entry,  # pyright: ignore[reportPrivateUsage]
-    _parse_all_levels,  # pyright: ignore[reportPrivateUsage]
+    _parse_all_entries,  # pyright: ignore[reportPrivateUsage]
     _parse_entries,  # pyright: ignore[reportPrivateUsage]
-    import_profilo,
+    import_nvdb,
 )
 
 # ruff: noqa: SIM300
@@ -31,47 +31,72 @@ from italian_db.importers.profilo import (
 class TestParseEntries:
     """Tests for HTML entry parsing."""
 
-    def test_basic_entry(self) -> None:
-        html = '1.\t<a href="#" onClick="mostraFrase(1)">gatto</a> (s.m.)<br>'
+    def test_bold_is_fo(self) -> None:
+        html = "<p><b>casa </b> s.f.,</p>"
         entries = _parse_entries(html)
         assert len(entries) == 1
-        assert entries[0] == ("gatto", "s.m.")
+        assert entries[0] == ("casa", "s.f.", "FO")
+
+    def test_italic_is_ad(self) -> None:
+        html = "<p><i>abbaiare </i> v.intr. e tr.,</p>"
+        entries = _parse_entries(html)
+        assert len(entries) == 1
+        assert entries[0] == ("abbaiare", "v.intr. e tr.", "AD")
+
+    def test_plain_is_au(self) -> None:
+        html = "<p>abbandono s.m.,</p>"
+        entries = _parse_entries(html)
+        assert len(entries) == 1
+        assert entries[0] == ("abbandono", "s.m.", "AU")
 
     def test_multiple_entries(self) -> None:
         html = (
-            '1.\t<a href="#">casa</a> (s.f.)<br>\n'
-            '2.\t<a href="#">parlare</a> (v.t.)<br>\n'
-            '3.\t<a href="#">bello</a> (agg.)<br>\n'
+            "<p><b>abbandonare </b> v.tr.,</p>\n"
+            "<p>abbandonato p.pass., agg., s.m.,</p>\n"
+            "<p><i>abbasso </i> avv., inter.,</p>\n"
         )
         entries = _parse_entries(html)
         assert len(entries) == 3
-        assert entries[0][0] == "casa"
-        assert entries[1][0] == "parlare"
-        assert entries[2][0] == "bello"
+        assert entries[0][2] == "FO"
+        assert entries[1][2] == "AU"
+        assert entries[2][2] == "AD"
 
     def test_compound_pos(self) -> None:
-        html = '1.\t<a href="#">amico</a> (s.m. \u2013 s.f.)<br>'
+        html = "<p><i>abbagliante </i> p.pres., agg., s.m.,</p>"
         entries = _parse_entries(html)
         assert len(entries) == 1
-        assert entries[0] == ("amico", "s.m. \u2013 s.f.")
+        assert entries[0] == ("abbagliante", "p.pres., agg., s.m.", "AD")
 
-    def test_reflexive_word(self) -> None:
-        html = '1.\t<a href="#">chiamare/si</a> (v.t.)<br>'
+    def test_invariable_noun(self) -> None:
+        html = "<p>abilità s.f.inv.,</p>"
         entries = _parse_entries(html)
         assert len(entries) == 1
-        assert entries[0][0] == "chiamare/si"
+        assert entries[0] == ("abilità", "s.f.inv.", "AU")
 
-    def test_gender_variant(self) -> None:
-        html = '1.\t<a href="#">amico/a</a> (s.m.)<br>'
+    def test_pos_with_e_separator(self) -> None:
+        html = "<p><i>abruzzese </i> agg., s.m. e f.,</p>"
         entries = _parse_entries(html)
         assert len(entries) == 1
-        assert entries[0][0] == "amico/a"
+        assert entries[0] == ("abruzzese", "agg., s.m. e f.", "AD")
 
-    def test_no_space_before_pos(self) -> None:
-        html = '1.\t<a href="#">casa</a>(s.f.)<br>'
+    def test_no_space_between_word_and_pos(self) -> None:
+        """Handle data quality issue: word and POS run together."""
+        html = "<p>accederev.intr.,</p>"
         entries = _parse_entries(html)
         assert len(entries) == 1
-        assert entries[0] == ("casa", "s.f.")
+        assert entries[0][0] == "accedere"
+        assert entries[0][1] == "v.intr."
+        assert entries[0][2] == "AU"
+
+    def test_skips_comments(self) -> None:
+        html = "<!--- Comment line --->\n<p><b>casa </b> s.f.,</p>\n"
+        entries = _parse_entries(html)
+        assert len(entries) == 1
+
+    def test_skips_empty_lines(self) -> None:
+        html = "\n\n<p><b>casa </b> s.f.,</p>\n\n"
+        entries = _parse_entries(html)
+        assert len(entries) == 1
 
 
 class TestCleanWord:
@@ -107,12 +132,6 @@ class TestCleanWord:
         assert not is_multi
         assert not has_refl
 
-    def test_abbreviation_parenthetical(self) -> None:
-        word, is_multi, has_refl = _clean_word("auto(mobile)")
-        assert word == "auto"
-        assert not is_multi
-        assert not has_refl
-
     def test_multiword(self) -> None:
         word, is_multi, has_refl = _clean_word("per favore")
         assert word == "per favore"
@@ -127,83 +146,90 @@ class TestCleanWord:
 class TestMapPos:
     """Tests for POS mapping."""
 
-    def test_basic_verb(self) -> None:
-        assert _map_pos("v.t.") == "verb"
+    def test_transitive_verb(self) -> None:
+        assert _map_pos("v.tr.") == "verb"
 
-    def test_basic_noun_m(self) -> None:
+    def test_intransitive_verb(self) -> None:
+        assert _map_pos("v.intr.") == "verb"
+
+    def test_pronominal_verb(self) -> None:
+        assert _map_pos("v.pronom.intr.") == "verb"
+
+    def test_masculine_noun(self) -> None:
         assert _map_pos("s.m.") == "noun"
 
-    def test_basic_noun_f(self) -> None:
+    def test_feminine_noun(self) -> None:
         assert _map_pos("s.f.") == "noun"
+
+    def test_invariable_noun(self) -> None:
+        assert _map_pos("s.m.inv.") == "noun"
+        assert _map_pos("s.f.inv.") == "noun"
 
     def test_adjective(self) -> None:
         assert _map_pos("agg.") == "adjective"
 
-    def test_compound_pos_takes_first(self) -> None:
-        # s.m. - s.f. -> noun (from first component)
-        assert _map_pos("s.m. \u2013 s.f.") == "noun"
+    def test_compound_pos_takes_first_matchable(self) -> None:
+        # "p.pres., agg., s.m." -> adjective (first matchable component)
+        assert _map_pos("p.pres., agg., s.m.") == "adjective"
+
+    def test_compound_pos_noun_first(self) -> None:
+        # "agg., s.m." -> adjective (first matchable)
+        assert _map_pos("agg., s.m.") == "adjective"
+
+    def test_pos_with_e_separator(self) -> None:
+        # "s.m. e f." -> noun (take left side of "e")
+        assert _map_pos("s.m. e f.") == "noun"
+        # "v.intr. e tr." -> verb (take left side)
+        assert _map_pos("v.intr. e tr.") == "verb"
 
     def test_non_matchable_pos(self) -> None:
         assert _map_pos("avv.") == "adverb"
         assert _map_pos("prep.") == "preposition"
 
-    def test_typo_variant(self) -> None:
-        # Missing trailing period
-        assert _map_pos("v.t") == "verb"
-        assert _map_pos("s.m") == "noun"
-
-    def test_space_variant(self) -> None:
-        assert _map_pos("v. int.") == "verb"
-
     def test_unknown_pos(self) -> None:
         assert _map_pos("xyz") is None
-
-    def test_reflexive_verb(self) -> None:
-        assert _map_pos("v.rifl.") == "verb"
-
-    def test_pronominal_verb(self) -> None:
-        assert _map_pos("v.t. pron.") == "verb"
 
 
 class TestMapAllMatchablePos:
     """Tests for compound POS splitting into all matchable values."""
 
-    def test_noun_and_adjective(self) -> None:
-        result = _map_all_matchable_pos("s.m. \u2013 agg.")
-        assert result == ["noun", "adjective"]
+    def test_compound_adjective_and_noun(self) -> None:
+        # "p.pres., agg., s.m." → adjective + noun (p.pres. is not matchable)
+        result = _map_all_matchable_pos("p.pres., agg., s.m.")
+        assert result == ["adjective", "noun"]
 
-    def test_verb_and_noun(self) -> None:
-        result = _map_all_matchable_pos("v.int. \u2013 s.m.")
-        assert result == ["verb", "noun"]
+    def test_adjective_and_noun(self) -> None:
+        # "agg., s.m. e f." → adjective + noun
+        result = _map_all_matchable_pos("agg., s.m. e f.")
+        assert result == ["adjective", "noun"]
+
+    def test_verb_with_e_separator(self) -> None:
+        # "v.intr. e tr." → ["verb"] (single component with "e" modifier)
+        result = _map_all_matchable_pos("v.intr. e tr.")
+        assert result == ["verb"]
 
     def test_dedup_same_pos(self) -> None:
-        result = _map_all_matchable_pos("s.m. \u2013 s.f.")
+        # "s.m., s.f." → ["noun"] (both map to noun, deduped)
+        result = _map_all_matchable_pos("s.m., s.f.")
         assert result == ["noun"]
 
     def test_non_matchable_returns_empty(self) -> None:
-        result = _map_all_matchable_pos("avv. \u2013 prep.")
+        # "avv., inter." → []
+        result = _map_all_matchable_pos("avv., inter.")
         assert result == []
 
     def test_single_matchable(self) -> None:
-        result = _map_all_matchable_pos("v.t.")
+        result = _map_all_matchable_pos("v.tr.")
         assert result == ["verb"]
 
     def test_single_non_matchable(self) -> None:
         result = _map_all_matchable_pos("avv.")
         assert result == []
 
-    def test_mixed_matchable_and_non_matchable(self) -> None:
-        result = _map_all_matchable_pos("agg. \u2013 avv.")
+    def test_participle_with_adjective(self) -> None:
+        # "p.pass., agg." → ["adjective"]
+        result = _map_all_matchable_pos("p.pass., agg.")
         assert result == ["adjective"]
-
-    def test_hyphen_separator(self) -> None:
-        # Hyphen instead of en-dash
-        result = _map_all_matchable_pos("s.m. - agg.")
-        assert result == ["noun", "adjective"]
-
-    def test_typo_variant_missing_period(self) -> None:
-        result = _map_all_matchable_pos("s.m \u2013 agg.")
-        assert result == ["noun", "adjective"]
 
 
 class TestPosMapCompleteness:
@@ -213,87 +239,72 @@ class TestPosMapCompleteness:
         assert MATCHABLE_POS == {"verb", "noun", "adjective"}
 
     def test_all_matchable_in_pos_map(self) -> None:
-        # All matchable POS values should appear as values in POS_MAP
         mapped_values = {v for v in POS_MAP.values() if v is not None}
         assert MATCHABLE_POS.issubset(mapped_values)
 
 
 # ---------------------------------------------------------------------------
-# Parse all levels (integration with HTML files)
+# Parse all entries (integration)
 # ---------------------------------------------------------------------------
 
 
-class TestParseAllLevels:
-    """Tests for parsing and deduplication across levels."""
+class TestParseAllEntries:
+    """Tests for parsing and deduplication."""
 
-    def test_cumulative_dedup(self, tmp_path: Path) -> None:
-        """Words appearing in multiple levels get the lowest level."""
-        # Create A1 with "casa"
-        (tmp_path / "liste_lessicali_a1.html").write_text(
-            '1.\t<a href="#">casa</a> (s.f.)<br>\n2.\t<a href="#">gatto</a> (s.m.)<br>\n',
-            encoding="utf-8",
+    def test_deduplication(self, tmp_path: Path) -> None:
+        """Duplicate words with same POS are deduplicated (first wins)."""
+        html = (
+            "<p><b>a </b> prep.,</p>\n"
+            "<p><i>a </i> s.f. e m.inv.,</p>\n"  # different POS -> not a duplicate
         )
-        # A2 includes A1 words plus new ones
-        (tmp_path / "liste_lessicali_a2.html").write_text(
-            '1.\t<a href="#">casa</a> (s.f.)<br>\n'
-            '2.\t<a href="#">gatto</a> (s.m.)<br>\n'
-            '3.\t<a href="#">tavolo</a> (s.m.)<br>\n',
-            encoding="utf-8",
-        )
-        (tmp_path / "liste_lessicali_b1.html").write_text("", encoding="utf-8")
-        (tmp_path / "liste_lessicali_b2.html").write_text("", encoding="utf-8")
+        (tmp_path / "nvdb.html").write_text(html, encoding="utf-8")
 
-        entries = _parse_all_levels(tmp_path)
+        entries = _parse_all_entries(tmp_path / "nvdb.html")
+        # "a" as preposition and "a" as noun are different POS mappings
+        # Both should survive deduplication
+        assert len(entries) >= 1
 
-        # Should have 3 unique entries
-        assert len(entries) == 3
+    def test_tier_assignment(self, tmp_path: Path) -> None:
+        """Each entry gets the correct tier."""
+        html = "<p><b>casa </b> s.f.,</p>\n<p>tavolo s.m.,</p>\n<p><i>abete </i> s.m.,</p>\n"
+        (tmp_path / "nvdb.html").write_text(html, encoding="utf-8")
 
-        # "casa" and "gatto" should be A1 (lowest level)
+        entries = _parse_all_entries(tmp_path / "nvdb.html")
         by_word = {e.clean_word: e for e in entries}
-        assert by_word["casa"].cefr_level == "A1"
-        assert by_word["gatto"].cefr_level == "A1"
-        assert by_word["tavolo"].cefr_level == "A2"
+        assert by_word["casa"].tier == "FO"
+        assert by_word["tavolo"].tier == "AU"
+        assert by_word["abete"].tier == "AD"
 
     def test_compound_pos_creates_multiple_entries(self, tmp_path: Path) -> None:
-        """Compound POS like 's.m. - agg.' creates entries for both noun and adjective."""
-        (tmp_path / "liste_lessicali_a1.html").write_text(
-            '1.\t<a href="#">freddo</a> (s.m. \u2013 agg.)<br>\n',
-            encoding="utf-8",
-        )
-        (tmp_path / "liste_lessicali_a2.html").write_text("", encoding="utf-8")
-        (tmp_path / "liste_lessicali_b1.html").write_text("", encoding="utf-8")
-        (tmp_path / "liste_lessicali_b2.html").write_text("", encoding="utf-8")
+        """Compound POS like 'p.pres., agg., s.m.' creates entries for both adjective and noun."""
+        html = "<p><i>abbagliante </i> p.pres., agg., s.m.,</p>\n"
+        (tmp_path / "nvdb.html").write_text(html, encoding="utf-8")
 
-        entries = _parse_all_levels(tmp_path)
+        entries = _parse_all_entries(tmp_path / "nvdb.html")
 
-        # Should have 2 entries: freddo as noun and freddo as adjective
+        # Should have 2 entries: abbagliante as adjective and as noun
         assert len(entries) == 2
         by_pos = {e.pos_mapped: e for e in entries}
-        assert "noun" in by_pos
         assert "adjective" in by_pos
-        assert by_pos["noun"].clean_word == "freddo"
-        assert by_pos["adjective"].clean_word == "freddo"
-        assert by_pos["noun"].cefr_level == "A1"
-        assert by_pos["adjective"].cefr_level == "A1"
+        assert "noun" in by_pos
+        assert by_pos["adjective"].clean_word == "abbagliante"
+        assert by_pos["noun"].clean_word == "abbagliante"
+        assert by_pos["adjective"].tier == "AD"
+        assert by_pos["noun"].tier == "AD"
 
     def test_compound_pos_non_matchable_creates_single_entry(self, tmp_path: Path) -> None:
         """Non-matchable compound POS still creates a single entry for stats."""
-        (tmp_path / "liste_lessicali_a1.html").write_text(
-            '1.\t<a href="#">molto</a> (avv. \u2013 prep.)<br>\n',
-            encoding="utf-8",
-        )
-        (tmp_path / "liste_lessicali_a2.html").write_text("", encoding="utf-8")
-        (tmp_path / "liste_lessicali_b1.html").write_text("", encoding="utf-8")
-        (tmp_path / "liste_lessicali_b2.html").write_text("", encoding="utf-8")
+        html = "<p><i>abbasso </i> avv., inter.,</p>\n"
+        (tmp_path / "nvdb.html").write_text(html, encoding="utf-8")
 
-        entries = _parse_all_levels(tmp_path)
+        entries = _parse_all_entries(tmp_path / "nvdb.html")
         assert len(entries) == 1
         assert entries[0].pos_mapped == "adverb"
 
     def test_missing_file_raises(self, tmp_path: Path) -> None:
         """Missing HTML file should raise FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
-            _parse_all_levels(tmp_path)
+            _parse_all_entries(tmp_path / "nonexistent.html")
 
 
 # ---------------------------------------------------------------------------
@@ -316,30 +327,20 @@ def temp_db():
 
 
 @pytest.fixture
-def profilo_dir(tmp_path: Path) -> Path:
-    """Create test HTML files in a temp directory."""
-    (tmp_path / "liste_lessicali_a1.html").write_text(
-        '1.\t<a href="#">casa</a> (s.f.)<br>\n'
-        '2.\t<a href="#">gatto</a> (s.m.)<br>\n'
-        '3.\t<a href="#">parlare</a> (v.t.)<br>\n'
-        '4.\t<a href="#">per favore</a> (loc.)<br>\n'
-        '5.\t<a href="#">molto</a> (avv.)<br>\n',
-        encoding="utf-8",
+def nvdb_html(tmp_path: Path) -> Path:
+    """Create a test NVdB HTML file."""
+    html = (
+        "<p><b>casa </b> s.f.,</p>\n"
+        "<p><b>gatto </b> s.m.,</p>\n"
+        "<p><b>parlare </b> v.tr.,</p>\n"
+        "<p>tavolo s.m.,</p>\n"
+        "<p>bello agg.,</p>\n"
+        "<p><i>abete </i> s.m.,</p>\n"
+        "<p><b>molto </b> avv.,</p>\n"  # non-matchable POS
     )
-    (tmp_path / "liste_lessicali_a2.html").write_text(
-        '1.\t<a href="#">casa</a> (s.f.)<br>\n'
-        '2.\t<a href="#">gatto</a> (s.m.)<br>\n'
-        '3.\t<a href="#">parlare</a> (v.t.)<br>\n'
-        '4.\t<a href="#">tavolo</a> (s.m.)<br>\n'
-        '5.\t<a href="#">bello</a> (agg.)<br>\n',
-        encoding="utf-8",
-    )
-    (tmp_path / "liste_lessicali_b1.html").write_text(
-        '1.\t<a href="#">economia</a> (s.f.)<br>\n',
-        encoding="utf-8",
-    )
-    (tmp_path / "liste_lessicali_b2.html").write_text("", encoding="utf-8")
-    return tmp_path
+    nvdb_path = tmp_path / "nvdb.html"
+    nvdb_path.write_text(html, encoding="utf-8")
+    return nvdb_path
 
 
 class TestMatchEntry:
@@ -351,12 +352,12 @@ class TestMatchEntry:
                 text("INSERT INTO lemmas (written, stressed, pos) VALUES ('casa', 'casa', 'noun')")
             )
 
-            entry = ProfiloEntry(
+            entry = NvdbEntry(
                 word="casa",
                 clean_word="casa",
                 pos_raw="s.f.",
                 pos_mapped="noun",
-                cefr_level="A1",
+                tier="FO",
             )
             result = _match_entry(conn, entry)
             assert result is not None
@@ -367,12 +368,12 @@ class TestMatchEntry:
                 text("INSERT INTO lemmas (written, stressed, pos) VALUES ('cd', 'cd', 'noun')")
             )
 
-            entry = ProfiloEntry(
+            entry = NvdbEntry(
                 word="CD",
                 clean_word="CD",
                 pos_raw="s.m.",
                 pos_mapped="noun",
-                cefr_level="A1",
+                tier="AU",
             )
             result = _match_entry(conn, entry)
             assert result is not None
@@ -386,12 +387,12 @@ class TestMatchEntry:
                 )
             )
 
-            entry = ProfiloEntry(
-                word="chiamare/si",
+            entry = NvdbEntry(
+                word="chiamare",
                 clean_word="chiamare",
-                pos_raw="v.t.",
+                pos_raw="v.tr.",
                 pos_mapped="verb",
-                cefr_level="A1",
+                tier="FO",
                 has_reflexive=True,
             )
             result = _match_entry(conn, entry)
@@ -399,24 +400,23 @@ class TestMatchEntry:
 
     def test_no_match(self, temp_db: Path) -> None:
         with get_connection(temp_db) as conn:
-            entry = ProfiloEntry(
+            entry = NvdbEntry(
                 word="nonexistent",
                 clean_word="nonexistent",
                 pos_raw="s.m.",
                 pos_mapped="noun",
-                cefr_level="A1",
+                tier="AU",
             )
             result = _match_entry(conn, entry)
             assert result is None
 
 
-class TestImportProfilo:
+class TestImportNvdb:
     """Integration tests for the full import function."""
 
-    def test_basic_import(self, temp_db: Path, profilo_dir: Path) -> None:
+    def test_basic_import(self, temp_db: Path, nvdb_html: Path) -> None:
         """Test basic import with matching lemmas."""
         with get_connection(temp_db) as conn:
-            # Insert some lemmas that will match
             conn.execute(
                 text("INSERT INTO lemmas (written, stressed, pos) VALUES ('casa', 'casa', 'noun')")
             )
@@ -433,28 +433,32 @@ class TestImportProfilo:
             )
             conn.commit()
 
-            stats = import_profilo(conn, profilo_dir)
+            stats = import_nvdb(conn, nvdb_html)
 
             assert stats["matched"] == 3  # casa, gatto, parlare
-            assert stats["level_A1"] == 3  # all matched are A1
+            assert stats["tier_FO"] == 3  # all matched are FO
 
             # Verify data in table
-            rows = conn.execute(text("SELECT * FROM cefr_levels ORDER BY lemma_id")).fetchall()
+            rows = conn.execute(text("SELECT * FROM nvdb_tiers ORDER BY lemma_id")).fetchall()
             assert len(rows) == 3
 
-    def test_skips_multiword(self, temp_db: Path, profilo_dir: Path) -> None:
+    def test_skips_multiword(self, temp_db: Path, tmp_path: Path) -> None:
         """Test that multiword expressions are skipped."""
-        with get_connection(temp_db) as conn:
-            stats = import_profilo(conn, profilo_dir)
-            assert stats["skipped_multiword"] >= 1  # "per favore"
+        html = "<p><b>per favore </b> loc.,</p>\n<p><b>casa </b> s.f.,</p>\n"
+        nvdb_path = tmp_path / "nvdb.html"
+        nvdb_path.write_text(html, encoding="utf-8")
 
-    def test_skips_non_matchable_pos(self, temp_db: Path, profilo_dir: Path) -> None:
+        with get_connection(temp_db) as conn:
+            stats = import_nvdb(conn, nvdb_path)
+            assert stats["skipped_multiword"] >= 1
+
+    def test_skips_non_matchable_pos(self, temp_db: Path, nvdb_html: Path) -> None:
         """Test that non-matchable POS (adverb, etc.) are skipped."""
         with get_connection(temp_db) as conn:
-            stats = import_profilo(conn, profilo_dir)
+            stats = import_nvdb(conn, nvdb_html)
             assert stats["skipped_pos"] >= 1  # "molto" (avv.)
 
-    def test_idempotent(self, temp_db: Path, profilo_dir: Path) -> None:
+    def test_idempotent(self, temp_db: Path, nvdb_html: Path) -> None:
         """Test that import is idempotent (clears existing data)."""
         with get_connection(temp_db) as conn:
             conn.execute(
@@ -463,23 +467,23 @@ class TestImportProfilo:
             conn.commit()
 
             # First import
-            stats1 = import_profilo(conn, profilo_dir)
+            stats1 = import_nvdb(conn, nvdb_html)
             assert stats1["matched"] == 1
             assert stats1["cleared"] == 0
 
             # Second import should clear and re-insert
-            stats2 = import_profilo(conn, profilo_dir)
+            stats2 = import_nvdb(conn, nvdb_html)
             assert stats2["matched"] == 1
             assert stats2["cleared"] == 1
 
             # Should still have exactly 1 row
-            count = conn.execute(text("SELECT COUNT(*) FROM cefr_levels")).scalar()
+            count = conn.execute(text("SELECT COUNT(*) FROM nvdb_tiers")).scalar()
             assert count == 1
 
-    def test_per_level_counts(self, temp_db: Path, profilo_dir: Path) -> None:
-        """Test that per-level counts are correct."""
+    def test_per_tier_counts(self, temp_db: Path, nvdb_html: Path) -> None:
+        """Test that per-tier counts are correct."""
         with get_connection(temp_db) as conn:
-            # Insert lemmas for different levels
+            # Insert lemmas for different tiers
             conn.execute(
                 text("INSERT INTO lemmas (written, stressed, pos) VALUES ('casa', 'casa', 'noun')")
             )
@@ -491,52 +495,47 @@ class TestImportProfilo:
             )
             conn.execute(
                 text(
-                    "INSERT INTO lemmas (written, stressed, pos) "
-                    "VALUES ('economia', 'economia', 'noun')"
+                    "INSERT INTO lemmas (written, stressed, pos) VALUES ('abete', 'abete', 'noun')"
                 )
             )
             conn.commit()
 
-            stats = import_profilo(conn, profilo_dir)
+            stats = import_nvdb(conn, nvdb_html)
 
-            assert stats["level_A1"] == 1  # casa (gatto not inserted)
-            assert stats["level_A2"] == 1  # tavolo
-            assert stats["level_B1"] == 1  # economia
+            assert stats["tier_FO"] >= 1  # casa
+            assert stats["tier_AU"] >= 1  # tavolo
+            assert stats["tier_AD"] >= 1  # abete
 
     def test_compound_pos_matches_both_lemmas(self, temp_db: Path, tmp_path: Path) -> None:
-        """Compound POS entry matches both noun and adjective lemmas."""
-        (tmp_path / "liste_lessicali_a1.html").write_text(
-            '1.\t<a href="#">freddo</a> (s.m. \u2013 agg.)<br>\n',
-            encoding="utf-8",
-        )
-        (tmp_path / "liste_lessicali_a2.html").write_text("", encoding="utf-8")
-        (tmp_path / "liste_lessicali_b1.html").write_text("", encoding="utf-8")
-        (tmp_path / "liste_lessicali_b2.html").write_text("", encoding="utf-8")
+        """Compound POS entry matches both adjective and noun lemmas."""
+        html = "<p><i>abbagliante </i> p.pres., agg., s.m.,</p>\n"
+        nvdb_path = tmp_path / "nvdb.html"
+        nvdb_path.write_text(html, encoding="utf-8")
 
         with get_connection(temp_db) as conn:
             conn.execute(
                 text(
                     "INSERT INTO lemmas (written, stressed, pos) "
-                    "VALUES ('freddo', 'fréddo', 'noun')"
+                    "VALUES ('abbagliante', 'abbagliante', 'adjective')"
                 )
             )
             conn.execute(
                 text(
                     "INSERT INTO lemmas (written, stressed, pos) "
-                    "VALUES ('freddo', 'fréddo', 'adjective')"
+                    "VALUES ('abbagliante', 'abbagliante', 'noun')"
                 )
             )
             conn.commit()
 
-            stats = import_profilo(conn, tmp_path)
+            stats = import_nvdb(conn, nvdb_path)
 
-            assert stats["matched"] == 2  # both noun and adjective
+            assert stats["matched"] == 2  # both adjective and noun
             rows = conn.execute(
-                text("SELECT lemma_id FROM cefr_levels ORDER BY lemma_id")
+                text("SELECT lemma_id FROM nvdb_tiers ORDER BY lemma_id")
             ).fetchall()
             assert len(rows) == 2
 
-    def test_provenance_stored(self, temp_db: Path, profilo_dir: Path) -> None:
+    def test_provenance_stored(self, temp_db: Path, nvdb_html: Path) -> None:
         """Test that source_word and source_pos provenance are stored."""
         with get_connection(temp_db) as conn:
             conn.execute(
@@ -544,12 +543,12 @@ class TestImportProfilo:
             )
             conn.commit()
 
-            import_profilo(conn, profilo_dir)
+            import_nvdb(conn, nvdb_html)
 
             row = conn.execute(
-                text("SELECT source, source_word, source_pos FROM cefr_levels")
+                text("SELECT tier, source_word, source_pos FROM nvdb_tiers")
             ).fetchone()
             assert row is not None
-            assert row[0] == "profilo"
+            assert row[0] == "FO"
             assert row[1] == "casa"
             assert row[2] == "s.f."

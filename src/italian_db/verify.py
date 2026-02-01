@@ -275,6 +275,33 @@ def check_orphaned_cefr_levels(conn: Connection) -> CheckResult:
         )
 
 
+def check_orphaned_nvdb_tiers(conn: Connection) -> CheckResult:
+    """Check that all nvdb_tiers records reference existing lemmas."""
+    query = text("""
+        SELECT nt.lemma_id
+        FROM nvdb_tiers nt
+        LEFT JOIN lemmas l ON nt.lemma_id = l.id
+        WHERE l.id IS NULL
+    """)
+    result = conn.execute(query).fetchall()
+    count = len(result)
+
+    if count == 0:
+        return CheckResult(
+            name="orphaned_nvdb_tiers",
+            passed=True,
+            message="No orphaned NVdB tiers",
+        )
+    else:
+        details = [f"lemma_id={row[0]}" for row in result[:10]]
+        return CheckResult(
+            name="orphaned_nvdb_tiers",
+            passed=False,
+            message=f"Orphaned NVdB tiers: {count} records without lemmas",
+            details=details,
+        )
+
+
 def check_orphaned_sentence_tokens(conn: Connection) -> CheckResult:
     """Check that all sentence_tokens reference existing sentences."""
     query = text("""
@@ -594,6 +621,8 @@ COVERAGE_THRESHOLDS = {
     "sentence_token_coverage_pct": 95.0,  # % of Italian sentences with tokens
     # CEFR level coverage (only checked if cefr_levels has data)
     "cefr_tagged_lemmas": 1800,
+    # NVdB tier coverage (only checked if nvdb_tiers has data)
+    "nvdb_tagged_lemmas": 3500,
 }
 
 
@@ -809,6 +838,20 @@ def check_coverage_thresholds(conn: Connection) -> list[CheckResult]:
             )
         )
 
+    # NVdB tier coverage (only if data has been imported)
+    nvdb_query = text("SELECT COUNT(*) FROM nvdb_tiers")
+    nvdb_count = conn.execute(nvdb_query).scalar() or 0
+
+    if nvdb_count > 0:
+        threshold = COVERAGE_THRESHOLDS["nvdb_tagged_lemmas"]
+        results.append(
+            CheckResult(
+                name="nvdb_tagged_lemmas",
+                passed=nvdb_count >= threshold,
+                message=f"NVdB-tagged lemmas: {nvdb_count:,} (min: {threshold:,})",
+            )
+        )
+
     # Sentence token coverage (only if tokens have been imported)
     # Check if any tokens exist
     tokens_query = text("SELECT COUNT(*) FROM sentence_tokens LIMIT 1")
@@ -883,6 +926,9 @@ SPOT_CHECKS: list[tuple[str, str, dict[str, Any]]] = [
     # CEFR levels (only checked if cefr_levels table has data)
     ("gatto", "noun", {"cefr_level": "A1"}),
     ("casa", "noun", {"cefr_level": "A1"}),
+    # NVdB tiers (only checked if nvdb_tiers table has data)
+    ("casa", "noun", {"nvdb_tier": "FO"}),
+    ("gatto", "noun", {"nvdb_tier": "FO"}),
 ]
 
 
@@ -976,6 +1022,19 @@ def run_spot_checks(conn: Connection) -> list[CheckResult]:
                 ) > 0
                 if has_cefr:
                     issues.append("cefr_level: not found in cefr_levels table")
+
+        # Check NVdB tier (only if nvdb_tiers table has data)
+        if "nvdb_tier" in checks:
+            nvdb_query = text("SELECT tier FROM nvdb_tiers WHERE lemma_id = :id")
+            nvdb_row = conn.execute(nvdb_query, {"id": lemma_id}).fetchone()
+            if nvdb_row:
+                if nvdb_row[0] != checks["nvdb_tier"]:
+                    issues.append(f"nvdb_tier: {nvdb_row[0]} != {checks['nvdb_tier']}")
+            else:
+                # Only flag as issue if nvdb_tiers table has data at all
+                has_nvdb = (conn.execute(text("SELECT COUNT(*) FROM nvdb_tiers")).scalar() or 0) > 0
+                if has_nvdb:
+                    issues.append("nvdb_tier: not found in nvdb_tiers table")
 
         # Check reflexive relationship (e.g., lavarsi → lavare)
         if checks.get("has_reflexive_relationship"):
@@ -1109,6 +1168,7 @@ def verify_database(conn: Connection, *, verbose: bool = False) -> VerificationR
         check_orphaned_definition_derivations(conn),
         check_orphaned_sentence_tokens(conn),
         check_orphaned_cefr_levels(conn),
+        check_orphaned_nvdb_tiers(conn),
     ]
 
     # Consistency checks

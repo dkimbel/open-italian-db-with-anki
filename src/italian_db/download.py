@@ -18,6 +18,7 @@ WIKTEXTRACT_DIR = DATA_DIR / "wiktextract"
 TATOEBA_DIR = DATA_DIR / "tatoeba"
 OPENSUBTITLES_DIR = DATA_DIR / "opensubtitles"
 PROFILO_DIR = DATA_DIR / "profilo"
+NVDB_DIR = DATA_DIR / "nvdb"
 
 # Download URLs
 WIKTEXTRACT_URL = "https://kaikki.org/dictionary/Italian/kaikki.org-dictionary-Italian.jsonl"
@@ -45,6 +46,9 @@ PROFILO_URLS = {
     "B1": f"{PROFILO_BASE_URL}/liste_lessicali_b1.html",
     "B2": f"{PROFILO_BASE_URL}/liste_lessicali_b2.html",
 }
+
+# NVdB (Nuovo Vocabolario di Base) vocabulary tier list
+NVDB_URL = "https://raw.githubusercontent.com/memdevice/nvdb/master/nvdb.html"
 
 
 def _file_exists_and_nonempty(path: Path) -> bool:
@@ -343,6 +347,22 @@ def download_profilo(force: bool = False) -> dict[str, int]:
     return {"downloaded": downloaded, "skipped": skipped}
 
 
+def download_nvdb(force: bool = False) -> dict[str, int]:
+    """Download NVdB (Nuovo Vocabolario di Base) HTML word list.
+
+    Downloads a single HTML file to data/nvdb/nvdb.html.
+    Returns stats dict with 'downloaded' and 'skipped' counts.
+    """
+    dest = NVDB_DIR / "nvdb.html"
+
+    if not force and _file_exists_and_nonempty(dest):
+        print(f"Skipping NVdB (already exists): {dest}")
+        return {"downloaded": 0, "skipped": 1}
+
+    _download_to_file(NVDB_URL, dest, "NVdB vocabulary list")
+    return {"downloaded": 1, "skipped": 0}
+
+
 def download_all(force: bool = False) -> dict[str, dict[str, int]]:
     """Download all data sources.
 
@@ -372,6 +392,12 @@ def download_all(force: bool = False) -> dict[str, dict[str, int]]:
     print("Downloading Profilo della lingua italiana (CEFR word lists)")
     print("=" * 60)
     results["profilo"] = download_profilo(force)
+    print()
+
+    print("=" * 60)
+    print("Downloading NVdB (Nuovo Vocabolario di Base)")
+    print("=" * 60)
+    results["nvdb"] = download_nvdb(force)
     print()
 
     # Summary
