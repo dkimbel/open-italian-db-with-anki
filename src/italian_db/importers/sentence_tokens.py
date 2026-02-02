@@ -18,7 +18,7 @@ from typing import Any
 from sqlalchemy import Connection, select, text
 from sqlalchemy.schema import CreateIndex
 
-from italian_db.db.schema import sentence_tokens, sentences
+from italian_db.db.schema import sentence_tags, sentence_tokens, sentences, translations
 
 # Features to extract into individual columns
 KEY_FEATURES = {"VerbForm", "Mood", "Tense", "Person", "Number", "Gender"}
@@ -43,6 +43,24 @@ def create_sentence_token_indexes(conn: Connection) -> None:
     """Recreate all indexes on the sentence_tokens table."""
     for index in sentence_tokens.indexes:
         conn.execute(CreateIndex(index, if_not_exists=True))
+
+
+# Tables whose indexes should be dropped during bulk sentence import
+_SENTENCE_TABLES = (sentences, translations, sentence_tags)
+
+
+def drop_sentence_indexes(conn: Connection) -> None:
+    """Drop indexes on sentences, translations, and sentence_tags for faster bulk inserts."""
+    for table in _SENTENCE_TABLES:
+        for index in table.indexes:
+            conn.execute(text(f"DROP INDEX IF EXISTS {index.name}"))
+
+
+def create_sentence_indexes(conn: Connection) -> None:
+    """Recreate indexes on sentences, translations, and sentence_tags."""
+    for table in _SENTENCE_TABLES:
+        for index in table.indexes:
+            conn.execute(CreateIndex(index, if_not_exists=True))
 
 
 def _count_lines(path: Path) -> int:

@@ -236,7 +236,7 @@ def import_tatoeba(
     tags_path: Path | None = None,
     sentences_in_lists_path: Path | None = None,
     ck_list_id: int = CK_LIST_ID,
-    batch_size: int = 1000,
+    batch_size: int = 5000,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Import Tatoeba sentences and build FTS5 search index.

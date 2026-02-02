@@ -3639,7 +3639,6 @@ def enrich_from_form_of_entries(
         - spelling_already_filled: entries where spelling already set
         - spelling_not_found: entries where form not found for spelling
     """
-    from sqlalchemy import update
 
     stats = {
         "scanned": 0,
@@ -3717,6 +3716,13 @@ def enrich_from_form_of_entries(
     total_lines = _count_lines(jsonl_path) if progress_callback else 0
     current_line = 0
 
+    # Accumulate updates for batch execution
+    label_updates: list[dict[str, Any]] = []
+    spelling_updates: list[dict[str, Any]] = []
+    queued_label_ids: set[int] = set()
+
+    table_name = pos_form_table.name
+
     with jsonl_path.open(encoding="utf-8") as f:
         for line in f:
             current_line += 1
@@ -3765,15 +3771,12 @@ def enrich_from_form_of_entries(
                     stats["labels_not_found"] += 1
                     continue
 
-                # Update labels for all matching forms (where labels is NULL)
+                # Queue label updates for all matching forms (where labels is NULL)
+                labels_json = json.dumps(labels)
                 for form_id in form_ids:
-                    result = conn.execute(
-                        update(pos_form_table)
-                        .where(pos_form_table.c.id == form_id)
-                        .where(pos_form_table.c.labels.is_(None))
-                        .values(labels=labels)
-                    )
-                    if result.rowcount > 0:
+                    if form_id not in queued_label_ids:
+                        label_updates.append({"_id": form_id, "labels": labels_json})
+                        queued_label_ids.add(form_id)
                         stats["labels_updated"] += 1
 
             # =========================================================
@@ -3808,17 +3811,37 @@ def enrich_from_form_of_entries(
                         stats["spelling_already_filled"] += 1
                         continue
 
-                    # Update written and written_source for all matching forms
+                    # Queue written updates for all matching forms
                     for form_id in form_ids:
-                        conn.execute(
-                            update(pos_form_table)
-                            .where(pos_form_table.c.id == form_id)
-                            .values(written=form_word, written_source="wiktionary")
+                        spelling_updates.append(
+                            {"_id": form_id, "written": form_word, "written_source": "wiktionary"}
                         )
                         stats["spelling_updated"] += 1
 
                     # Remove from lookup to avoid duplicate updates
                     del spelling_lookup[key]
+
+    # Flush label updates in batch
+    if label_updates:
+        conn.execute(
+            text(
+                f"UPDATE {table_name} "  # noqa: S608 - table_name from schema, not user input
+                "SET labels = :labels "
+                "WHERE id = :_id AND labels IS NULL"
+            ),
+            label_updates,
+        )
+
+    # Flush spelling updates in batch
+    if spelling_updates:
+        conn.execute(
+            text(
+                f"UPDATE {table_name} "  # noqa: S608 - table_name from schema, not user input
+                "SET written = :written, written_source = :written_source "
+                "WHERE id = :_id"
+            ),
+            spelling_updates,
+        )
 
     # Final progress callback
     if progress_callback:
@@ -5491,6 +5514,11 @@ def import_form_ipa(
     # Count lines for progress
     total_lines = _count_lines(jsonl_path) if progress_callback else 0
 
+    # Accumulate IPA updates and flush in batch at the end
+    ipa_updates: list[dict[str, str | int]] = []
+    # Track which form_ids we've already queued to avoid duplicates
+    queued_form_ids: set[int] = set()
+
     with jsonl_path.open(encoding="utf-8") as f:
         for line_num, line in enumerate(f, 1):
             if progress_callback and line_num % 10000 == 0:
@@ -5549,14 +5577,12 @@ def import_form_ipa(
                     key = (lemma_id, form_normalized)
                     form_ids = form_lookup.get(key)
                     if form_ids:
-                        # Update all matching forms
                         for form_id in form_ids:
-                            conn.execute(
-                                update(form_table)
-                                .where(form_table.c.id == form_id)
-                                .where(form_table.c.ipa.is_(None))  # Don't overwrite
-                                .values(ipa=ipa, ipa_source="wiktextract")
-                            )
+                            if form_id not in queued_form_ids:
+                                ipa_updates.append(
+                                    {"_id": form_id, "ipa": ipa, "ipa_source": "wiktextract"}
+                                )
+                                queued_form_ids.add(form_id)
                         stats["form_ipa_updated"] += 1
                         found = True
                         break
@@ -5580,15 +5606,24 @@ def import_form_ipa(
                     stats["lemma_not_found"] += 1
                     continue
 
-                # Update the citation form's IPA
-                result = conn.execute(
-                    update(form_table)
-                    .where(form_table.c.id == citation_form_id)
-                    .where(form_table.c.ipa.is_(None))  # Don't overwrite
-                    .values(ipa=ipa, ipa_source="wiktextract")
-                )
-                if result.rowcount > 0:
+                if citation_form_id not in queued_form_ids:
+                    ipa_updates.append(
+                        {"_id": citation_form_id, "ipa": ipa, "ipa_source": "wiktextract"}
+                    )
+                    queued_form_ids.add(citation_form_id)
                     stats["lemma_ipa_updated"] += 1
+
+    # Flush all IPA updates in a single batch
+    if ipa_updates:
+        table_name = form_table.name
+        conn.execute(
+            text(
+                f"UPDATE {table_name} "  # noqa: S608 - table_name from schema, not user input
+                "SET ipa = :ipa, ipa_source = :ipa_source "
+                "WHERE id = :_id AND ipa IS NULL"
+            ),
+            ipa_updates,
+        )
 
     if progress_callback:
         progress_callback(total_lines, total_lines)

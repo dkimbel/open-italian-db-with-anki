@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Connection, Engine, create_engine, event
+from sqlalchemy import Connection, Engine, create_engine, event, text
 from sqlalchemy.pool import ConnectionPoolEntry
 
 DEFAULT_DB_PATH = Path("italian.db")
@@ -39,10 +39,17 @@ def get_engine(db_path: Path | str = DEFAULT_DB_PATH) -> Engine:
 @contextmanager
 def get_connection(
     db_path: Path | str = DEFAULT_DB_PATH,
+    *,
+    bulk: bool = False,
 ) -> Generator[Connection]:
     """Context manager for database connections.
 
     Automatically commits on success, rolls back on exception.
+
+    Args:
+        db_path: Path to the SQLite database file.
+        bulk: If True, set SQLite pragmas for faster bulk inserts:
+            WAL journal mode, synchronous=NORMAL, 64MB page cache.
 
     Example:
         with get_connection() as conn:
@@ -52,6 +59,10 @@ def get_connection(
     """
     engine = get_engine(db_path)
     with engine.connect() as conn:
+        if bulk:
+            conn.execute(text("PRAGMA journal_mode=WAL"))
+            conn.execute(text("PRAGMA synchronous=NORMAL"))
+            conn.execute(text("PRAGMA cache_size=-64000"))
         try:
             yield conn
             conn.commit()

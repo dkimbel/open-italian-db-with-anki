@@ -29,7 +29,9 @@ from italian_db.download import (
 from italian_db.enums import POS
 from italian_db.importers import (
     compute_pos_frequency_ranks,
+    create_sentence_indexes,
     create_sentence_token_indexes,
+    drop_sentence_indexes,
     drop_sentence_token_indexes,
     import_nvdb,
     import_profilo,
@@ -38,11 +40,6 @@ from italian_db.importers import (
     import_verb_irregularity,
     import_wiktextract,
 )
-from italian_db.importers.morphit import (
-    apply_orthography_fallback,
-    apply_unstressed_fallback,
-    enrich_lemma_written,
-)
 from italian_db.importers.wiktextract import (
     enrich_from_form_of_entries,
     enrich_missing_feminine_plurals,
@@ -50,6 +47,11 @@ from italian_db.importers.wiktextract import (
     import_adjective_allomorphs,
     import_form_ipa,
     import_noun_allomorphs,
+)
+from italian_db.importers.written_enrichment import (
+    apply_orthography_fallback,
+    apply_unstressed_fallback,
+    enrich_lemma_written,
 )
 from italian_db.verify import verify_database
 
@@ -187,15 +189,21 @@ def cmd_import_tatoeba(args: argparse.Namespace) -> int:
         print(f"  CK whitelist: {sentences_in_lists_path}")
     print()
 
-    with get_connection(db_path) as conn:
-        _run_tatoeba_import(
-            conn,
-            ita_path,
-            eng_path,
-            links_path,
-            tags_path=tags_path,
-            sentences_in_lists_path=sentences_in_lists_path,
-        )
+    with get_connection(db_path, bulk=True) as conn:
+        print("Dropping sentence indexes for bulk insert...")
+        drop_sentence_indexes(conn)
+        try:
+            _run_tatoeba_import(
+                conn,
+                ita_path,
+                eng_path,
+                links_path,
+                tags_path=tags_path,
+                sentences_in_lists_path=sentences_in_lists_path,
+            )
+        finally:
+            print("Recreating sentence indexes...")
+            create_sentence_indexes(conn)
 
     print()
     print("Import complete!")
@@ -231,20 +239,26 @@ def cmd_import_opensubtitles_sentences(args: argparse.Namespace) -> int:
 
     from italian_db.importers.opensubtitles_sentences import import_opensubtitles_sentences
 
-    with get_connection(db_path) as conn:
-        stats = import_opensubtitles_sentences(
-            conn,
-            ita_path,
-            eng_path,
-            links_path,
-            progress_callback=_make_progress_callback(),
-        )
-        print()
-        if stats["cleared"] > 0:
-            print(f"  Cleared:           {stats['cleared']:,} existing sentences")
-        print(f"  Italian sentences: {stats['ita_sentences']:,}")
-        print(f"  English sentences: {stats['eng_sentences']:,}")
-        print(f"  Translations:      {stats['translations']:,}")
+    with get_connection(db_path, bulk=True) as conn:
+        print("Dropping sentence indexes for bulk insert...")
+        drop_sentence_indexes(conn)
+        try:
+            stats = import_opensubtitles_sentences(
+                conn,
+                ita_path,
+                eng_path,
+                links_path,
+                progress_callback=_make_progress_callback(),
+            )
+            print()
+            if stats["cleared"] > 0:
+                print(f"  Cleared:           {stats['cleared']:,} existing sentences")
+            print(f"  Italian sentences: {stats['ita_sentences']:,}")
+            print(f"  English sentences: {stats['eng_sentences']:,}")
+            print(f"  Translations:      {stats['translations']:,}")
+        finally:
+            print("Recreating sentence indexes...")
+            create_sentence_indexes(conn)
 
     print()
     print("Import complete!")
@@ -316,7 +330,7 @@ def cmd_import_sentence_tokens(args: argparse.Namespace) -> int:
     print(f"  Source: {source}")
     print()
 
-    with get_connection(db_path) as conn:
+    with get_connection(db_path, bulk=True) as conn:
         print("\r  Dropping indexes for bulk insert...", end="", flush=True)
         drop_sentence_token_indexes(conn)
         try:
@@ -1032,7 +1046,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         else:
             total_steps = 7
 
-        with get_connection(db_path) as conn:
+        with get_connection(db_path, bulk=True) as conn:
             # Step 1: Wiktextract import
             print(f"[1/{total_steps}] Importing from Wiktextract...")
             _run_wiktextract_import(conn, jsonl_path, pos, indent=indent)
@@ -1202,45 +1216,52 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print("Using CK whitelist filtering (List 907)")
     if tags_path:
         print("Importing sentence tags for tense matching")
-    print("Importing sentences...")
 
-    with get_connection(db_path) as conn:
-        _run_tatoeba_import(
-            conn,
-            ita_path,
-            eng_path,
-            links_path,
-            tags_path=tags_path,
-            sentences_in_lists_path=sentences_in_lists_path,
-            indent="  ",
-        )
-    print()
-
-    # OpenSubtitles sentences (optional - only if download files exist)
-    if has_opensub:
-        current_phase += 1
-        print("=" * 80)
-        print(f"Importing OpenSubtitles sentences (Step {current_phase} of {total_phases})")
-        print("=" * 80)
-        print()
-
-        from italian_db.importers.opensubtitles_sentences import import_opensubtitles_sentences
-
-        with get_connection(db_path) as conn:
-            stats = import_opensubtitles_sentences(
+    with get_connection(db_path, bulk=True) as conn:
+        print("Dropping sentence indexes for bulk insert...")
+        drop_sentence_indexes(conn)
+        try:
+            print("Importing sentences...")
+            _run_tatoeba_import(
                 conn,
-                DEFAULT_OPENSUBTITLES_ITA_PATH,
-                DEFAULT_OPENSUBTITLES_ENG_PATH,
-                DEFAULT_OPENSUBTITLES_LINKS_PATH,
-                progress_callback=_make_progress_callback(),
+                ita_path,
+                eng_path,
+                links_path,
+                tags_path=tags_path,
+                sentences_in_lists_path=sentences_in_lists_path,
+                indent="  ",
             )
             print()
-            if stats["cleared"] > 0:
-                print(f"  Cleared:           {stats['cleared']:,} existing sentences")
-            print(f"  Italian sentences: {stats['ita_sentences']:,}")
-            print(f"  English sentences: {stats['eng_sentences']:,}")
-            print(f"  Translations:      {stats['translations']:,}")
-        print()
+
+            # OpenSubtitles sentences (optional - only if download files exist)
+            if has_opensub:
+                current_phase += 1
+                print("=" * 80)
+                print(f"Importing OpenSubtitles sentences (Step {current_phase} of {total_phases})")
+                print("=" * 80)
+                print()
+
+                from italian_db.importers.opensubtitles_sentences import (
+                    import_opensubtitles_sentences,
+                )
+
+                stats = import_opensubtitles_sentences(
+                    conn,
+                    DEFAULT_OPENSUBTITLES_ITA_PATH,
+                    DEFAULT_OPENSUBTITLES_ENG_PATH,
+                    DEFAULT_OPENSUBTITLES_LINKS_PATH,
+                    progress_callback=_make_progress_callback(),
+                )
+                print()
+                if stats["cleared"] > 0:
+                    print(f"  Cleared:           {stats['cleared']:,} existing sentences")
+                print(f"  Italian sentences: {stats['ita_sentences']:,}")
+                print(f"  English sentences: {stats['eng_sentences']:,}")
+                print(f"  Translations:      {stats['translations']:,}")
+                print()
+        finally:
+            print("Recreating sentence indexes...")
+            create_sentence_indexes(conn)
 
     # Sentence tokens (optional - only if JSONL exists for either source)
     if has_any_tokens:
@@ -1250,7 +1271,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print("=" * 80)
         print()
 
-        with get_connection(db_path) as conn:
+        with get_connection(db_path, bulk=True) as conn:
             print("Dropping indexes for bulk insert...")
             drop_sentence_token_indexes(conn)
             try:

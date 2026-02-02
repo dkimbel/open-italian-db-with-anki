@@ -7,7 +7,7 @@ found were Morphit errors. See DATA_SOURCES.md for details.
 
 from collections.abc import Callable
 
-from sqlalchemy import Connection, Table, select, update
+from sqlalchemy import Connection, Table, select, text
 
 from italian_db.db.schema import (
     adjective_forms,
@@ -23,15 +23,6 @@ POS_FORM_TABLES: dict[POS, Table] = {
     POS.NOUN: noun_forms,
     POS.ADJECTIVE: adjective_forms,
 }
-
-
-# Accented characters in Italian
-_ACCENTED_CHARS = set("àèéìòóùÀÈÉÌÒÓÙ")
-
-
-def _has_accents(text: str) -> bool:
-    """Check if text contains any accented characters."""
-    return any(c in _ACCENTED_CHARS for c in text)
 
 
 def apply_unstressed_fallback(
@@ -65,23 +56,17 @@ def apply_unstressed_fallback(
     if pos_form_table is None:
         return stats
 
-    # Find forms with NULL written and check if stressed has accents
+    table_name = pos_form_table.name
     result = conn.execute(
-        select(pos_form_table.c.id, pos_form_table.c.stressed).where(
-            pos_form_table.c.written.is_(None)
+        text(
+            f"UPDATE {table_name} "  # noqa: S608 - table_name from schema, not user input
+            "SET written = stressed, written_source = 'fallback:no_accent' "
+            "WHERE written IS NULL "
+            "AND stressed != '-' "
+            "AND stressed NOT GLOB '*[àèéìòóùÀÈÉÌÒÓÙ]*'"
         )
     )
-
-    for row in result:
-        stressed_form = row.stressed
-        # Skip "-" which represents missing forms for defective verbs
-        if stressed_form != "-" and not _has_accents(stressed_form):
-            conn.execute(
-                update(pos_form_table)
-                .where(pos_form_table.c.id == row.id)
-                .values(written=stressed_form, written_source="fallback:no_accent")
-            )
-            stats["updated"] += 1
+    stats["updated"] = result.rowcount
 
     return stats
 
@@ -131,6 +116,8 @@ def apply_orthography_fallback(
         )
     )
 
+    update_batch: list[dict[str, str | int]] = []
+
     for row in result:
         stressed_form = row.stressed
         # Skip "-" which represents missing forms for defective verbs
@@ -151,12 +138,19 @@ def apply_orthography_fallback(
         else:
             written_source = "derived:orthography_rule"
 
-        conn.execute(
-            update(pos_form_table)
-            .where(pos_form_table.c.id == row.id)
-            .values(written=written, written_source=written_source)
-        )
+        update_batch.append({"_id": row.id, "written": written, "written_source": written_source})
         stats["updated"] += 1
+
+    if update_batch:
+        table_name = pos_form_table.name
+        conn.execute(
+            text(
+                f"UPDATE {table_name} "  # noqa: S608 - table_name from schema, not user input
+                "SET written = :written, written_source = :written_source "
+                "WHERE id = :_id"
+            ),
+            update_batch,
+        )
 
     return stats
 
@@ -201,6 +195,16 @@ def enrich_lemma_written(
     if pos_form_table is None:
         return stats
 
+    # Preload all citation forms in a single query to avoid N+1
+    citation_result = conn.execute(
+        select(
+            pos_form_table.c.lemma_id, pos_form_table.c.written, pos_form_table.c.written_source
+        ).where(pos_form_table.c.is_citation_form == True)  # noqa: E712
+    )
+    citation_lookup: dict[int, tuple[str | None, str | None]] = {
+        row.lemma_id: (row.written, row.written_source) for row in citation_result
+    }
+
     # Get all lemmas that don't have written form yet
     result = conn.execute(
         select(lemmas.c.id, lemmas.c.stressed)
@@ -210,6 +214,8 @@ def enrich_lemma_written(
     all_lemmas = result.fetchall()
     total_lemmas = len(all_lemmas)
 
+    update_batch: list[dict[str, str | int | None]] = []
+
     for idx, row in enumerate(all_lemmas, 1):
         if progress_callback and idx % 5000 == 0:
             progress_callback(idx, total_lemmas)
@@ -217,20 +223,15 @@ def enrich_lemma_written(
         lemma_id = row.id
         stressed_lemma = row.stressed
 
-        # Query the citation form using is_citation_form flag (unified across all POS)
-        form_result = conn.execute(
-            select(pos_form_table.c.written, pos_form_table.c.written_source)
-            .where(pos_form_table.c.lemma_id == lemma_id)
-            .where(pos_form_table.c.is_citation_form == True)  # noqa: E712
-            .limit(1)
-        ).fetchone()
+        # Look up citation form from preloaded dict
+        citation_data = citation_lookup.get(lemma_id)
 
         written: str | None = None
         written_source: str | None = None
 
-        if form_result and form_result.written:
+        if citation_data and citation_data[0]:
             # Copy from citation form
-            written = form_result.written
+            written = citation_data[0]
             written_source = f"from:{pos_filter}_forms"
             stats["from_form"] += 1
         elif stressed_lemma != "-":
@@ -246,14 +247,22 @@ def enrich_lemma_written(
                     stats["derived"] += 1
 
         if written is not None:
-            conn.execute(
-                update(lemmas)
-                .where(lemmas.c.id == lemma_id)
-                .values(written=written, written_source=written_source)
+            update_batch.append(
+                {"_id": lemma_id, "written": written, "written_source": written_source}
             )
             stats["updated"] += 1
         else:
             stats["no_citation_form"] += 1
+
+    if update_batch:
+        conn.execute(
+            text("""
+                UPDATE lemmas
+                SET written = :written, written_source = :written_source
+                WHERE id = :_id
+            """),
+            update_batch,
+        )
 
     if progress_callback:
         progress_callback(total_lemmas, total_lemmas)

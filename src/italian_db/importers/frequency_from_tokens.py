@@ -85,14 +85,8 @@ def compute_frequencies_from_tokens(
     """)
     token_counts = conn.execute(count_query, {"tat_weight": TATOEBA_WEIGHT}).fetchall()
 
-    # Step 3: Get total countable tokens (weighted)
-    total_query = text("""
-        SELECT SUM(CASE WHEN s.source = 'tatoeba' THEN :tat_weight ELSE 1 END)
-        FROM sentence_tokens st
-        JOIN sentences s ON s.id = st.sentence_id
-        WHERE st.upos NOT IN ('PUNCT', 'SYM', 'X')
-    """)
-    total_tokens = conn.execute(total_query, {"tat_weight": TATOEBA_WEIGHT}).scalar() or 0
+    # Step 3: Derive total countable tokens from grouped counts (avoids redundant full scan)
+    total_tokens = sum(row[2] for row in token_counts)
     stats["total_tokens"] = total_tokens
 
     # Step 4: Aggregate by (stanza_lemma, mapped_pos)

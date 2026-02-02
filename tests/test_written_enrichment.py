@@ -20,11 +20,11 @@ from italian_db.db import (
     noun_forms,
     verb_forms,
 )
-from italian_db.importers.morphit import (
+from italian_db.importers.wiktextract import import_wiktextract
+from italian_db.importers.written_enrichment import (
     apply_orthography_fallback,
     apply_unstressed_fallback,
 )
-from italian_db.importers.wiktextract import import_wiktextract
 
 # Sample verb entry from Wiktextract (with stressed forms)
 SAMPLE_VERB = {

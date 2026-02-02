@@ -110,7 +110,7 @@ def import_opensubtitles_sentences(
     eng_sentences_path: Path,
     links_path: Path,
     *,
-    batch_size: int = 1000,
+    batch_size: int = 5000,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Import OpenSubtitles sentences and build FTS5 search index.
