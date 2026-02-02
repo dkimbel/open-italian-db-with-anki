@@ -29,6 +29,8 @@ from italian_db.download import (
 from italian_db.enums import POS
 from italian_db.importers import (
     compute_pos_frequency_ranks,
+    create_sentence_token_indexes,
+    drop_sentence_token_indexes,
     import_nvdb,
     import_profilo,
     import_sentence_tokens,
@@ -315,14 +317,24 @@ def cmd_import_sentence_tokens(args: argparse.Namespace) -> int:
     print()
 
     with get_connection(db_path) as conn:
-        stats = import_sentence_tokens(
-            conn, jsonl_path, source=source, progress_callback=_make_progress_callback()
-        )
-        print()
-        print(f"  Sentences processed:  {stats.sentences_processed:,}")
-        print(f"  Tokens inserted:      {stats.tokens_inserted:,}")
-        if stats.sentences_not_found > 0:
-            print(f"  Sentences not found:  {stats.sentences_not_found:,}")
+        print("\r  Dropping indexes for bulk insert...", end="", flush=True)
+        drop_sentence_token_indexes(conn)
+        try:
+            stats = import_sentence_tokens(
+                conn,
+                jsonl_path,
+                source=source,
+                progress_callback=_make_progress_callback(),
+                status_callback=_make_status_callback(),
+            )
+            print()
+            print(f"  Sentences processed:  {stats.sentences_processed:,}")
+            print(f"  Tokens inserted:      {stats.tokens_inserted:,}")
+            if stats.sentences_not_found > 0:
+                print(f"  Sentences not found:  {stats.sentences_not_found:,}")
+        finally:
+            print("  Recreating indexes...")
+            create_sentence_token_indexes(conn)
 
     print()
     print("Import complete!")
@@ -682,6 +694,15 @@ def _make_progress_callback(desc: str = "Processing"):
     return callback
 
 
+def _make_status_callback():
+    """Create a status callback that prints phase messages with carriage return."""
+
+    def callback(message: str) -> None:
+        print(f"\r  {message}\033[K", end="", flush=True)
+
+    return callback
+
+
 # --- Shared import helpers ---
 # These encapsulate the import logic + output formatting, used by both
 # standalone commands and cmd_import_all.
@@ -918,7 +939,11 @@ def _run_sentence_tokens_import(
 ) -> dict[str, Any]:
     """Run sentence tokens import and print stats."""
     stats = import_sentence_tokens(
-        conn, jsonl_path, source=source, progress_callback=_make_progress_callback()
+        conn,
+        jsonl_path,
+        source=source,
+        progress_callback=_make_progress_callback(),
+        status_callback=_make_status_callback(),
     )
     print()
     print(f"{indent}Sentences processed:  {stats.sentences_processed:,}")
@@ -1226,28 +1251,36 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         print()
 
         with get_connection(db_path) as conn:
-            if has_tatoeba_tokens:
-                print(f"Importing Tatoeba tokens from {DEFAULT_TATOEBA_SENTENCE_TOKENS_PATH}...")
-                _run_sentence_tokens_import(
-                    conn,
-                    DEFAULT_TATOEBA_SENTENCE_TOKENS_PATH,
-                    source="tatoeba",
-                    indent="  ",
-                )
-                print()
+            print("Dropping indexes for bulk insert...")
+            drop_sentence_token_indexes(conn)
+            try:
+                if has_tatoeba_tokens:
+                    print(
+                        f"Importing Tatoeba tokens from {DEFAULT_TATOEBA_SENTENCE_TOKENS_PATH}..."
+                    )
+                    _run_sentence_tokens_import(
+                        conn,
+                        DEFAULT_TATOEBA_SENTENCE_TOKENS_PATH,
+                        source="tatoeba",
+                        indent="  ",
+                    )
+                    print()
 
-            if has_opensub_tokens:
-                print(
-                    f"Importing OpenSubtitles tokens from "
-                    f"{DEFAULT_OPENSUBTITLES_SENTENCE_TOKENS_PATH}..."
-                )
-                _run_sentence_tokens_import(
-                    conn,
-                    DEFAULT_OPENSUBTITLES_SENTENCE_TOKENS_PATH,
-                    source="opensubtitles",
-                    indent="  ",
-                )
-                print()
+                if has_opensub_tokens:
+                    print(
+                        f"Importing OpenSubtitles tokens from "
+                        f"{DEFAULT_OPENSUBTITLES_SENTENCE_TOKENS_PATH}..."
+                    )
+                    _run_sentence_tokens_import(
+                        conn,
+                        DEFAULT_OPENSUBTITLES_SENTENCE_TOKENS_PATH,
+                        source="opensubtitles",
+                        indent="  ",
+                    )
+                    print()
+            finally:
+                print("Recreating indexes...")
+                create_sentence_token_indexes(conn)
 
     # Frequency computation from sentence tokens
     if has_any_tokens:

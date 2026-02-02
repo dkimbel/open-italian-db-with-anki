@@ -10,12 +10,13 @@ Token annotations enable:
 """
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Connection, select, text
+from sqlalchemy.schema import CreateIndex
 
 from italian_db.db.schema import sentence_tokens, sentences
 
@@ -32,15 +33,35 @@ class SentenceTokensStats:
     sentences_not_found: int = 0
 
 
-def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
-    """Parse JSONL file into list of records."""
-    records: list[dict[str, Any]] = []
+def drop_sentence_token_indexes(conn: Connection) -> None:
+    """Drop all indexes on the sentence_tokens table for faster bulk inserts."""
+    for index in sentence_tokens.indexes:
+        conn.execute(text(f"DROP INDEX IF EXISTS {index.name}"))
+
+
+def create_sentence_token_indexes(conn: Connection) -> None:
+    """Recreate all indexes on the sentence_tokens table."""
+    for index in sentence_tokens.indexes:
+        conn.execute(CreateIndex(index, if_not_exists=True))
+
+
+def _count_lines(path: Path) -> int:
+    """Count non-empty lines in a JSONL file without parsing JSON."""
+    count = 0
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                count += 1
+    return count
+
+
+def _stream_jsonl(path: Path) -> Iterator[dict[str, Any]]:
+    """Stream records from a JSONL file one at a time."""
     with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
-                records.append(json.loads(line))
-    return records
+                yield json.loads(line)
 
 
 def _extract_token_row(
@@ -167,15 +188,16 @@ def import_sentence_tokens(
     jsonl_path: Path,
     *,
     source: str,
-    batch_size: int = 1000,
+    batch_size: int = 5000,
     progress_callback: Callable[[int, int], None] | None = None,
+    status_callback: Callable[[str], None] | None = None,
 ) -> SentenceTokensStats:
     """Import sentence tokens from Stanza JSONL into the database.
 
     This function:
     1. Clears existing sentence_tokens entries for the given source
     2. Builds mapping from native sentence_id to surrogate id
-    3. Parses JSONL and inserts token rows in batches
+    3. Streams JSONL and inserts token rows in batches
 
     Args:
         conn: SQLAlchemy connection
@@ -184,6 +206,7 @@ def import_sentence_tokens(
             Only clears and imports tokens for sentences from this source.
         batch_size: Number of token rows to insert per batch
         progress_callback: Optional callback for progress reporting (current, total)
+        status_callback: Optional callback for status messages during silent phases
 
     Returns:
         SentenceTokensStats with counts of processed sentences and tokens
@@ -191,6 +214,8 @@ def import_sentence_tokens(
     stats = SentenceTokensStats()
 
     # Clear existing entries for this source
+    if status_callback:
+        status_callback("Clearing existing tokens...")
     conn.execute(
         text("""
             DELETE FROM sentence_tokens
@@ -202,6 +227,8 @@ def import_sentence_tokens(
     )
 
     # Build mapping from native sentence_id to surrogate id
+    if status_callback:
+        status_callback("Building sentence ID mapping...")
     result = conn.execute(
         select(sentences.c.id, sentences.c.sentence_id).where(
             sentences.c.lang == "ita", sentences.c.source == source
@@ -209,14 +236,17 @@ def import_sentence_tokens(
     )
     native_to_surrogate: dict[int, int] = {row.sentence_id: row.id for row in result}
 
-    # Parse JSONL
-    records = _parse_jsonl(jsonl_path)
-    total = len(records)
+    # Count lines for progress reporting
+    if status_callback:
+        status_callback("Counting sentences in JSONL...")
+    total = _count_lines(jsonl_path)
 
-    # Process and insert tokens in batches
+    # Stream and insert tokens in batches
+    if status_callback:
+        status_callback("Inserting tokens...")
     token_batch: list[dict[str, Any]] = []
 
-    for idx, record in enumerate(records, 1):
+    for idx, record in enumerate(_stream_jsonl(jsonl_path), 1):
         native_id = record["sentence_id"]
         surrogate_id = native_to_surrogate.get(native_id)
 
@@ -247,8 +277,8 @@ def import_sentence_tokens(
             stats.tokens_inserted += len(token_batch)
             token_batch = []
 
-        # Progress reporting
-        if progress_callback and idx % 1000 == 0:
+        # Progress reporting (aligned with batch flushes)
+        if progress_callback and idx % batch_size == 0 and idx < total:
             progress_callback(idx, total)
 
     # Insert remaining batch
