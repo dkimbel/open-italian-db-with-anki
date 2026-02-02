@@ -13,6 +13,8 @@ Usage:
             sys.exit(1)
 """
 
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -303,12 +305,18 @@ def check_orphaned_nvdb_tiers(conn: Connection) -> CheckResult:
 
 
 def check_orphaned_sentence_tokens(conn: Connection) -> CheckResult:
-    """Check that all sentence_tokens reference existing sentences."""
+    """Check that all sentence_tokens reference existing sentences.
+
+    Uses GROUP BY sentence_id to check distinct sentence_ids only (~5M)
+    instead of scanning all token rows (~51M).
+    """
     query = text("""
-        SELECT st.sentence_id, st.token_index, st.text
+        SELECT st.sentence_id
         FROM sentence_tokens st
         LEFT JOIN sentences s ON st.sentence_id = s.id
         WHERE s.id IS NULL
+        GROUP BY st.sentence_id
+        LIMIT 10
     """)
     result = conn.execute(query).fetchall()
 
@@ -319,11 +327,11 @@ def check_orphaned_sentence_tokens(conn: Connection) -> CheckResult:
             message="No orphaned sentence tokens",
         )
     else:
-        details = [f"sentence_id={row[0]} token={row[2]}" for row in result[:10]]
+        details = [f"sentence_id={row[0]}" for row in result]
         return CheckResult(
             name="orphaned_sentence_tokens",
             passed=False,
-            message=f"Orphaned sentence tokens: {len(result)} records without sentences",
+            message=f"Orphaned sentence tokens: at least {len(result)} sentence(s) without match",
             details=details,
         )
 
@@ -853,21 +861,30 @@ def check_coverage_thresholds(conn: Connection) -> list[CheckResult]:
         )
 
     # Sentence token coverage (only if tokens have been imported)
-    # Check if any tokens exist
-    tokens_query = text("SELECT COUNT(*) FROM sentence_tokens LIMIT 1")
-    has_tokens = (conn.execute(tokens_query).scalar() or 0) > 0
+    # Check if any tokens exist (EXISTS avoids counting all ~51M rows)
+    tokens_query = text("SELECT EXISTS(SELECT 1 FROM sentence_tokens)")
+    has_tokens = conn.execute(tokens_query).scalar() == 1
 
     if has_tokens:
-        # Check what % of Italian sentences have tokens
-        query = text("""
-            SELECT
-                CAST(COUNT(DISTINCT st.sentence_id) AS FLOAT) * 100 /
-                NULLIF((SELECT COUNT(*) FROM sentences WHERE lang = 'ita'), 0)
-            FROM sentence_tokens st
-            JOIN sentences s ON st.sentence_id = s.id
+        # Count Italian sentences with tokens in one pass, grouped by source.
+        # Searches from the sentences side with EXISTS to avoid scanning
+        # the full sentence_tokens table (~51M rows).
+        ita_total_query = text("SELECT COUNT(*) FROM sentences WHERE lang = 'ita'")
+        ita_total = conn.execute(ita_total_query).scalar() or 0
+
+        coverage_query = text("""
+            SELECT s.source, COUNT(*) AS with_tokens
+            FROM sentences s
             WHERE s.lang = 'ita'
+                AND EXISTS(SELECT 1 FROM sentence_tokens st WHERE st.sentence_id = s.id)
+            GROUP BY s.source
         """)
-        pct = conn.execute(query).scalar() or 0.0
+        by_source: dict[str, int] = {
+            str(row[0]): int(row[1]) for row in conn.execute(coverage_query).fetchall()
+        }
+        total_with_tokens = sum(by_source.values())
+
+        pct = (float(total_with_tokens) * 100 / ita_total) if ita_total else 0.0
         threshold = COVERAGE_THRESHOLDS["sentence_token_coverage_pct"]
         results.append(
             CheckResult(
@@ -877,15 +894,8 @@ def check_coverage_thresholds(conn: Connection) -> list[CheckResult]:
             )
         )
 
-        # Check that both Tatoeba and OpenSubtitles sources have tokens
         for source in ("tatoeba", "opensubtitles"):
-            source_query = text("""
-                SELECT COUNT(DISTINCT st.sentence_id)
-                FROM sentence_tokens st
-                JOIN sentences s ON st.sentence_id = s.id
-                WHERE s.lang = 'ita' AND s.source = :source
-            """)
-            source_count = conn.execute(source_query, {"source": source}).scalar() or 0
+            source_count = by_source.get(source, 0)
             results.append(
                 CheckResult(
                     name=f"sentence_tokens_{source}",
@@ -1148,19 +1158,40 @@ def collect_metrics(conn: Connection) -> dict[str, Any]:
 # =============================================================================
 
 
-def verify_database(conn: Connection, *, verbose: bool = False) -> VerificationReport:
+def _default_progress(message: str) -> None:
+    """Print progress to stderr, overwriting the current line."""
+    print(f"\r\033[K  {message}...", end="", flush=True, file=sys.stderr)
+
+
+def _default_progress_done() -> None:
+    """Clear the progress line."""
+    print("\r\033[K", end="", flush=True, file=sys.stderr)
+
+
+def verify_database(
+    conn: Connection,
+    *,
+    verbose: bool = False,
+    progress: Callable[[str], None] | None = _default_progress,
+    progress_done: Callable[[], None] | None = _default_progress_done,
+) -> VerificationReport:
     """Run all verification checks and return a complete report.
 
     Args:
         conn: SQLAlchemy database connection
         verbose: If True, collect additional metrics
+        progress: Callback to report current section (None to suppress)
+        progress_done: Callback to clear progress line (None to suppress)
 
     Returns:
         VerificationReport with all check results and optional metrics
     """
     report = VerificationReport()
+    _progress: Callable[[str], None] = progress or (lambda _msg: None)
+    _done: Callable[[], None] = progress_done or (lambda: None)
 
     # Integrity checks
+    _progress("Performing integrity checks")
     report.integrity_checks = [
         check_orphaned_frequencies(conn),
         check_orphaned_translations(conn),
@@ -1172,6 +1203,7 @@ def verify_database(conn: Connection, *, verbose: bool = False) -> VerificationR
     ]
 
     # Consistency checks
+    _progress("Performing consistency checks")
     report.consistency_checks = [
         check_number_class_consistency(conn),
         check_adjective_class_consistency(conn),
@@ -1183,13 +1215,17 @@ def verify_database(conn: Connection, *, verbose: bool = False) -> VerificationR
     ]
 
     # Coverage checks
+    _progress("Performing coverage checks")
     report.coverage_checks = check_coverage_thresholds(conn)
 
     # Spot checks
+    _progress("Performing spot checks")
     report.spot_checks = run_spot_checks(conn)
 
     # Metrics (only if verbose)
     if verbose:
+        _progress("Collecting metrics")
         report.metrics = collect_metrics(conn)
 
+    _done()
     return report
