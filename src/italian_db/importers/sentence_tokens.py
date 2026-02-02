@@ -149,6 +149,7 @@ def _resolve_compound_tenses(token_rows: list[dict[str, Any]]) -> None:
                 and row.get("upos") == "AUX"
                 and row.get("verbform") == "Fin"
                 and row.get("mood") is not None
+                and row.get("tense") is not None
             ):
                 head_row = by_stanza_id.get(row["head"])
                 if (
