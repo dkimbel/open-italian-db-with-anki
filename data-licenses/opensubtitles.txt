@@ -1,33 +1,47 @@
-OpenSubtitles Frequency Data (FrequencyWords)
-=============================================
+OpenSubtitles v2024 Parallel Sentences (OPUS)
+==============================================
 
-Source: https://github.com/hermitdave/FrequencyWords
+Source: OPUS OpenSubtitles v2024 parallel corpus
+URL: https://opus.nlpl.eu/OpenSubtitles/v2024/en-it
+Corpus: Italian-English parallel sentences from movie/TV subtitles
 
-This frequency data is derived from OpenSubtitles and released under the
-Creative Commons Attribution-ShareAlike 4.0 International license (CC BY-SA 4.0).
+License Status
+--------------
+The licensing of OpenSubtitles data distributed through OPUS is complex and
+layered, with different entities asserting different terms:
 
-CC BY-SA 4.0: https://creativecommons.org/licenses/by-sa/4.0/
+1. OPUS project: Does not claim ownership of the text. States "We do not own
+   any of the text from which the data has been extracted." Requests attribution
+   to opensubtitles.org. No formal license specified on the download page.
 
-License Terms
--------------
-You are free to:
-- Share: Copy and redistribute the material in any medium or format
-- Adapt: Remix, transform, and build upon the material for any purpose,
-  including commercially
+2. META-SHARE (EU language resource repository): Catalogs the OPUS Subtitles
+   Corpus under CC BY-NC-SA 3.0 (Creative Commons Attribution-NonCommercial-
+   ShareAlike 3.0 Unported).
+   https://metashare.csc.fi/repository/browse/opus-subtitles-corpus/
 
-Under the following terms:
-- Attribution: You must give appropriate credit
-- ShareAlike: If you remix, transform, or build upon the material, you must
-  distribute your contributions under the same license
+3. OpenSubtitles.org Terms of Service: Explicitly restricts use to
+   "non-commercial, scientific and educational purposes." Commercial use is
+   prohibited under their terms.
+
+4. Hugging Face (Helsinki-NLP/open_subtitles): Lists the license as "unknown."
+
+Taken together, the most defensible interpretation is that OpenSubtitles data
+carries noncommercial restrictions. This project treats the data accordingly.
 
 Attribution
 -----------
 When using this data, please credit:
-- FrequencyWords project by Hermit Dave (https://github.com/hermitdave/FrequencyWords)
+
+- OPUS project (https://opus.nlpl.eu/)
 - OpenSubtitles (https://www.opensubtitles.org/)
+
+And cite:
+
+P. Lison and J. Tiedemann, 2016, OpenSubtitles2016: Extracting Large Parallel
+Corpora from Movie and TV Subtitles. In Proceedings of LREC 2016.
 
 Additional Notes
 ----------------
-- Contains word frequency data derived from Italian subtitle files
-- Used in this project for noun and adjective frequency rankings
-- The FrequencyWords repository uses MIT license for code and CC BY-SA 4.0 for content
+- Contains ~5M Italian-English parallel sentence pairs (sampled from full corpus)
+- Used in this project for example sentences and Stanza-derived frequency data
+- Preprocessed during download: HTML cleaned, length-filtered, deduplicated

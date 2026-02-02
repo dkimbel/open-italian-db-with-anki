@@ -434,9 +434,14 @@ conversational content.
 **Source:** Word frequency lists derived from the Italian Web as Corpus (itWaC)
 **URL:** https://github.com/franfranz/Word_Frequency_Lists_ITA
 **Corpus:** itWaC (~1.5 billion words of web Italian)
-**License:** MIT
+**Repo License:** MIT (applied by the repo author to the derived frequency lists)
+**Underlying Corpus License:** CC BY-NC-SA 4.0 (itWaC / WaCky project, per https://docs.sslmit.unibo.it/doku.php?id=corpora:itwac)
 **Evaluated:** January 2025
 **Decision:** Replaced by Stanza-derived frequency from Tatoeba + OpenSubtitles v2024
+
+Note: The repo's MIT license is more permissive than the underlying itWaC corpus
+license (CC BY-NC-SA 4.0) allows. The frequency lists are derived from the corpus,
+so the upstream NC restriction likely applies regardless of the repo's LICENSE file.
 
 ItWaC was the original frequency source but analysis revealed significant issues:
 

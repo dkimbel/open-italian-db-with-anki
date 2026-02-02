@@ -149,16 +149,19 @@ task stats
 ## Data Sources & Licenses
 
 All data is downloaded from freely available, pre-packaged datasets published by their respective
-projects. See `data-licenses/` for full license texts.
+projects. See `data-licenses/` for full license texts and detailed discussion.
 
 | Source | License | Role |
 |--------|---------|------|
 | [Wiktextract](https://kaikki.org) | CC-BY-SA 3.0 + GFDL | Lemmas, conjugations, definitions |
-| [OpenSubtitles v2024](https://opus.nlpl.eu/OpenSubtitles/v2024/en-it) | Attribution | Example sentences, frequency data |
+| [OpenSubtitles v2024](https://opus.nlpl.eu/OpenSubtitles/v2024/en-it) | Noncommercial\* | Example sentences, frequency data |
 | [Tatoeba](https://tatoeba.org) | CC-BY 2.0 FR | Example sentences, frequency data |
-| [Profilo della lingua italiana](https://www.unistrapg.it/profilo_lingua_italiana/) | No explicit license* | CEFR levels (A1-B2) |
+| [Profilo della lingua italiana](https://www.unistrapg.it/profilo_lingua_italiana/) | No explicit license\*\* | CEFR levels (A1-B2) |
+| [NVdB](https://www.internazionale.it/opinione/tullio-de-mauro/2016/12/23/il-nuovo-vocabolario-di-base-della-lingua-italiana) | No explicit license\*\* | Usage tiers (FO/AU/AD) |
 
-\* Published book (Spinelli & Parizzi, 2010); word lists hosted publicly for educational use. See `data-licenses/profilo.txt`.
+\* OpenSubtitles licensing is layered and ambiguous. META-SHARE catalogs the OPUS corpus as CC BY-NC-SA 3.0; OpenSubtitles.org's ToS restrict use to noncommercial, scientific, and educational purposes. See `data-licenses/opensubtitles.txt` for full details.
+
+\*\* Profilo (Spinelli & Parizzi, 2010) is a published book with word lists hosted publicly for educational use. NVdB (De Mauro, 2016) was published online by Internazionale without an explicit license. Both are used here for noncommercial educational purposes with full attribution. See `data-licenses/profilo.txt` and `data-licenses/nvdb.txt`.
 
 ## What's In The Database
 
@@ -166,6 +169,7 @@ projects. See `data-licenses/` for full license texts.
 - **945k+ inflected forms** like verb conjugations and gendered versions of nouns and adjectives
 - **Frequency data** derived from Stanza-parsed sentence tokens (all POS)
 - **CEFR levels** (A1-B2) from expert-curated Profilo della lingua italiana
+- **NVdB usage tiers** (fondamentale/alto uso/alta disponibilità) from De Mauro (2016)
 - **6M+ example sentences** with English translations (Tatoeba + OpenSubtitles)
 - **Full data provenance**: every form tracks where it came from (`form_origin`, `written_source`)
 
@@ -185,7 +189,8 @@ open-italian-db-with-anki/
 │   │   ├── opensubtitles_sentences.py  # OpenSubtitles parallel sentences
 │   │   ├── sentence_tokens.py         # Stanza POS-tagged token import
 │   │   ├── frequency_from_tokens.py   # Frequency computation from tokens
-│   │   └── profilo.py                 # Profilo CEFR level import
+│   │   ├── profilo.py                 # Profilo CEFR level import
+│   │   └── nvdb.py                    # NVdB usage tier import
 │   ├── normalize.py        #   Text normalization (accents, unicode)
 │   ├── articles.py         #   Italian definite article rules
 │   └── cli.py              #   Command-line interface
@@ -193,7 +198,8 @@ open-italian-db-with-anki/
 │   ├── wiktextract/        #   Kaikki.org dictionary extract
 │   ├── tatoeba/            #   Tatoeba sentence corpus
 │   ├── opensubtitles/      #   OpenSubtitles v2024 parallel sentences
-│   └── profilo/            #   Profilo CEFR word lists (HTML)
+│   ├── profilo/            #   Profilo CEFR word lists (HTML)
+│   └── nvdb/               #   NVdB usage tier list (HTML)
 ├── data-licenses/          # Full license texts for each data source
 ├── tests/                  # Test suite
 ├── Taskfile.yml            # Task runner commands
@@ -229,12 +235,30 @@ Where the correct Italian spelling came from:
 **Code**: MIT
 
 **Database and Anki decks**: The generated database incorporates content from
-multiple copyleft sources. The combined work is subject to **CC-BY-SA 3.0**
-(the most restrictive component license, from Wiktextract).
+multiple sources with different licensing terms. The most restrictive are:
+
+- **OpenSubtitles**: Noncommercial use only (see [License Considerations](#license-considerations) below)
+- **Wiktextract**: CC-BY-SA 3.0 (share-alike, attribution required)
+- **Profilo / NVdB**: No explicit open license (used for noncommercial educational purposes)
 
 If you redistribute the database or Anki decks derived from it:
-1. **Attribution required**: Credit Wiktionary/Wiktextract, Tatoeba, and OpenSubtitles
-2. **Share-alike required**: Distribute under CC-BY-SA 3.0 or a compatible license
+1. **Noncommercial use only**: Required by OpenSubtitles terms
+2. **Attribution required**: Credit Wiktionary/Wiktextract, Tatoeba, OpenSubtitles, Profilo, and NVdB
+3. **Share-alike required**: Distribute under CC-BY-SA 3.0 or a compatible license (from Wiktextract)
+
+### License Considerations
+
+The OpenSubtitles data distributed through OPUS has a complex licensing situation.
+OPUS itself does not specify a formal license, but META-SHARE catalogs the corpus
+as CC BY-NC-SA 3.0, and OpenSubtitles.org's Terms of Service explicitly restrict
+use to "non-commercial, scientific and educational purposes." This project treats
+the combined database as **noncommercial** accordingly.
+
+Profilo della lingua italiana and NVdB are published scholarly works without
+explicit open licenses. Their word-to-level/tier assignments are used here as
+factual metadata for noncommercial educational purposes, with full attribution.
+
+See `data-licenses/` for detailed licensing information on each source.
 
 ## Development
 
@@ -247,6 +271,3 @@ task test           # Run tests only
 
 This project was originally inspired by [Lisardo's exceptional KOFI method](https://www.asiteaboutnothing.net/w_ultimate_italian_conjugation.php)
 and [Anki deck](https://ankiweb.net/shared/info/1891639832).
-
-The project was developed largely using **Claude Code** (Anthropic's Claude Opus 4.5)
-for implementation and documentation.
