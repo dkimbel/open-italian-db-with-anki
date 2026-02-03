@@ -301,7 +301,6 @@ translations = Table(
 # Normalized storage for Tatoeba sentence tags. Each sentence can have multiple tags.
 # Used for:
 # - Quality filtering: exclude sentences with problematic tags (@change, @needs native check, etc.)
-# - Tense matching: find sentences with specific tense tags (presente, imperfetto, etc.)
 # - Content preference: prefer proverbs in example sentence ranking
 #
 # WITHOUT ROWID: Composite PK covers all columns, no need for hidden rowid

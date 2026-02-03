@@ -1262,6 +1262,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
         finally:
             print("Recreating sentence indexes...")
             create_sentence_indexes(conn)
+            print()
 
     # Sentence tokens (optional - only if JSONL exists for either source)
     if has_any_tokens:
@@ -1302,6 +1303,7 @@ def cmd_import_all(args: argparse.Namespace) -> int:
             finally:
                 print("Recreating indexes...")
                 create_sentence_token_indexes(conn)
+                print()
 
     # Frequency computation from sentence tokens
     if has_any_tokens:

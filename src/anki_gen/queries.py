@@ -185,7 +185,7 @@ def get_present_indicative_forms(conn: Connection, lemma_id: int) -> list[VerbFo
     ]
 
 
-# Mapping from tense_id (card generator) to (mood, tense) for tag-based sentence matching
+# Mapping from tense_id (card generator) to (mood, tense) for morphology-based sentence matching
 TENSE_ID_TO_MOOD_TENSE: dict[str, tuple[str, str]] = {
     "presente_indicativo": ("indicative", "present"),
     "imperfetto": ("indicative", "imperfect"),

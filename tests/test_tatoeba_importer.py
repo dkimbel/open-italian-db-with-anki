@@ -421,8 +421,8 @@ class TestTatoebaImporter:
         tags_path = _create_test_tags_csv(
             [
                 "100\tproverb",
-                "100\tpresente",
-                "101\tpresente",
+                "100\t@change",
+                "101\tpresente",  # Tense tag — should be skipped
             ]
         )
 
@@ -436,7 +436,7 @@ class TestTatoebaImporter:
             with get_connection(db_path) as conn:
                 stats = import_tatoeba(conn, ita_path, eng_path, links_path, tags_path=tags_path)
 
-            assert stats["tags"] == 3  # 2 tags for sentence 100, 1 for 101
+            assert stats["tags"] == 2  # proverb + @change for sentence 100; presente skipped
 
             # Verify tags are correctly associated
             with get_connection(db_path) as conn:
@@ -455,7 +455,8 @@ class TestTatoebaImporter:
                 tags_for_100 = {row[0] for row in tags_for_100_rows}
 
             assert "proverb" in tags_for_100
-            assert "presente" in tags_for_100
+            assert "@change" in tags_for_100
+            assert "presente" not in tags_for_100
 
         finally:
             db_path.unlink()
@@ -492,7 +493,7 @@ class TestTatoebaImporter:
         tags_path = _create_test_tags_csv(
             [
                 "100\tproverb",
-                "101\tpresente",  # Tag for non-CK sentence (should not be imported)
+                "101\tproverb",  # Tag for non-CK sentence (should not be imported)
             ]
         )
         sentences_in_lists_path = _create_test_sentences_in_lists_csv(

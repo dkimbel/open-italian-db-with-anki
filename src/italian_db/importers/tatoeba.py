@@ -14,7 +14,7 @@ Files used:
 Quality Filtering:
 - CK whitelist (List 907): High-quality English sentences curated for language learning
 - Only import Italian sentences that have translations to CK-whitelisted English sentences
-- Import tags for tense matching (presente, imperfetto, etc.) and proverb preference
+- Import tags for proverb preference and quality filtering (@change, @needs native check, etc.)
 """
 
 from collections.abc import Callable
@@ -160,8 +160,28 @@ def _load_ck_whitelist(path: Path, list_id: int = CK_LIST_ID) -> set[int]:
     return sentence_ids
 
 
+# Tags we actually use: quality filtering + proverb preference.
+# Tense tags (presente, imperfetto, etc.) are NOT imported — tense matching
+# uses Stanza morphological features from sentence_tokens instead.
+IMPORTED_TAGS = frozenset(
+    {
+        # Quality filtering (excluded from example selection)
+        "@change",
+        "@needs native check",
+        "@delete",
+        "@check",
+        "@check translation",
+        # Content preference (boosted in ranking)
+        "proverb",
+    }
+)
+
+
 def _parse_tags(path: Path, sentence_ids: set[int]) -> dict[int, list[str]]:
-    """Parse tags for given sentence IDs.
+    """Parse tags for given sentence IDs, keeping only tags we use.
+
+    Only imports tags in IMPORTED_TAGS (quality-filtering and proverb tags).
+    Tense tags are skipped since tense matching uses Stanza morphological features.
 
     Args:
         path: Path to tags.csv file
@@ -179,7 +199,7 @@ def _parse_tags(path: Path, sentence_ids: set[int]) -> dict[int, list[str]]:
                 try:
                     sentence_id = int(parts[0])
                     tag = parts[1].strip()
-                    if sentence_id in sentence_ids and tag:
+                    if sentence_id in sentence_ids and tag in IMPORTED_TAGS:
                         if sentence_id not in tags_by_id:
                             tags_by_id[sentence_id] = []
                         tags_by_id[sentence_id].append(tag)
@@ -248,9 +268,8 @@ def import_tatoeba(
     This reduces the corpus from ~952K to ~377K high-quality Italian sentences.
 
     When tags_path is provided, imports sentence tags for:
-    - Tense matching (presente, imperfetto, passato remoto, etc.)
-    - Proverb preference in example sentence ranking
     - Quality filtering (exclude @change, @needs native check, etc.)
+    - Proverb preference in example sentence ranking
 
     Args:
         conn: SQLAlchemy connection
