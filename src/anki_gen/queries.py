@@ -243,6 +243,15 @@ def get_example_sentence(
         ideal_tokens: Preferred number of tokens (for ranking)
         prefer_proverbs: Whether to prefer sentences tagged as proverbs
 
+    Limitations — homonyms and polysemy:
+        Sentence matching uses (lemma, UPOS) from Stanza, which cannot distinguish
+        between same-POS homonyms (separate lemma rows with different etymology,
+        e.g., "toro" = bull vs "toro" = torus) or between different senses of a
+        polysemous lemma (e.g., "pianta" = plant vs map vs sole). The returned
+        sentence may illustrate any sense of the word. In practice, common senses
+        dominate the corpus, so this is usually acceptable for high-frequency
+        vocabulary.
+
     Returns:
         ExampleSentence with Italian text and English translation,
         or None if no suitable sentence found

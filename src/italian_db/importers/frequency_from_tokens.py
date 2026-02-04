@@ -103,13 +103,23 @@ def compute_frequencies_from_tokens(
 
         aggregated[(stanza_lemma, mapped_pos)] += count
 
-    # Step 5: Build lookup map from (written, pos) -> lemma_id
+    # Step 5: Build lookup map from (written, pos) -> list of lemma_ids
     # Load all lemmas with their written forms
+    #
+    # Homonyms and polysemy: Stanza token counts are keyed by (lemma_text, UPOS),
+    # which cannot distinguish between same-POS homonyms (e.g., "radio" = radius
+    # vs "radio" = radium vs "radio" = radio are three separate lemma rows but
+    # produce identical tokens). We assign the same frequency to ALL matching
+    # lemmas, since the count genuinely reflects the combined usage and we cannot
+    # determine the per-etymology breakdown. This means homonyms will share a
+    # frequency rank, which is the honest representation of what we know.
+    #
+    # Polysemous lemmas (single lemma row, multiple definitions) are unaffected —
+    # one lemma row means one frequency row, regardless of how many senses it has.
     lemma_query = text("SELECT id, written, stressed, pos FROM lemmas")
     all_lemmas = conn.execute(lemma_query).fetchall()
 
-    # Primary index: (written, pos) -> lemma_id (first match wins for homonyms)
-    written_pos_to_id: dict[tuple[str, str], int] = {}
+    written_pos_to_ids: dict[tuple[str, str], list[int]] = {}
     for lemma_row in all_lemmas:
         written = lemma_row[1]  # lemmas.written
         stressed = lemma_row[2]  # lemmas.stressed
@@ -119,8 +129,7 @@ def compute_frequencies_from_tokens(
         key_form = written if written else stressed
         if key_form:
             key = (key_form, pos)
-            if key not in written_pos_to_id:
-                written_pos_to_id[key] = lemma_row[0]
+            written_pos_to_ids.setdefault(key, []).append(lemma_row[0])
 
     # Step 6: Match and insert
     total_to_match = len(aggregated)
@@ -130,15 +139,15 @@ def compute_frequencies_from_tokens(
         if progress_callback and idx % 10000 == 0:
             progress_callback(idx, total_to_match)
 
-        lemma_id = written_pos_to_id.get((stanza_lemma, mapped_pos))
-        if lemma_id is None:
+        lemma_ids = written_pos_to_ids.get((stanza_lemma, mapped_pos))
+        if lemma_ids is None:
             stats["not_found"] += 1
             continue
 
         stats["matched"] += 1
         zipf = _compute_zipf(total_count, total_tokens)
 
-        insert_batch.append(
+        insert_batch.extend(
             {
                 "lemma_id": lemma_id,
                 "corpus": CORPUS_NAME,
@@ -146,6 +155,7 @@ def compute_frequencies_from_tokens(
                 "freq_zipf": zipf,
                 "corpus_version": CORPUS_VERSION,
             }
+            for lemma_id in lemma_ids
         )
 
     # Batch insert
