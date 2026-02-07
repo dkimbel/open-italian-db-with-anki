@@ -133,7 +133,8 @@ belle    f       plural
 # Install dependencies
 uv sync
 
-# Download source data (~2.5GB, skips existing)
+# Download pinned data from GitHub release (~2.5GB compressed, skips existing)
+# (Includes pre-computed Stanza JSONL so you don't need a GPU)
 task download-all
 
 # Build database
@@ -145,6 +146,10 @@ task verify-db
 # Check stats
 task stats
 ```
+
+> [!TIP]
+> `task download-all` fetches pinned artifacts from a GitHub Release.
+> To fetch fresh data from original upstream sources, use `task download-upstream`.
 
 ## Data Sources & Licenses
 

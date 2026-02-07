@@ -20,6 +20,7 @@ from italian_db.db import (
 )
 from italian_db.download import (
     download_all,
+    download_all_upstream,
     download_nvdb,
     download_opensubtitles,
     download_profilo,
@@ -684,8 +685,14 @@ def cmd_download_opensubtitles(args: argparse.Namespace) -> int:
 
 
 def cmd_download_all(args: argparse.Namespace) -> int:
-    """Download all data sources."""
+    """Download all data: release artifacts + upstream-only sources."""
     download_all(force=args.force)
+    return 0
+
+
+def cmd_download_all_upstream(args: argparse.Namespace) -> int:
+    """Download all data from original upstream sources."""
+    download_all_upstream(force=args.force)
     return 0
 
 
@@ -1685,7 +1692,7 @@ def main() -> int:
     # download-all subcommand
     dl_all_parser = subparsers.add_parser(
         "download-all",
-        help="Download all data sources",
+        help="Download data (pinned release + upstream-only sources)",
     )
     dl_all_parser.add_argument(
         "--force",
@@ -1693,6 +1700,18 @@ def main() -> int:
         help="Re-download even if files already exist",
     )
     dl_all_parser.set_defaults(func=cmd_download_all)
+
+    # download-upstream subcommand
+    dl_upstream_parser = subparsers.add_parser(
+        "download-upstream",
+        help="Download all data from original upstream sources (for refreshing data)",
+    )
+    dl_upstream_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if files already exist",
+    )
+    dl_upstream_parser.set_defaults(func=cmd_download_all_upstream)
 
     args = parser.parse_args()
     return args.func(args)

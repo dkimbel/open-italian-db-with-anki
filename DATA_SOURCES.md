@@ -8,11 +8,22 @@ Licenses for all the data described here can be found in `data-licenses`.
 
 ## Downloading Data
 
-All data can be downloaded programmatically using the provided tasks:
+By default, `task download-all` fetches pinned data artifacts from a [GitHub Release](https://github.com/dkimbel/open-italian-db-with-anki/releases/tag/data-v1). This is fast, reproducible, and includes the pre-computed Stanza JSONL files that take hours to regenerate.
 
 ```bash
-# Download all data sources (~2.5 GB total)
+# Download pinned artifacts from GitHub release (~2.5 GB compressed)
+# + Profilo/NVdB from upstream (no redistribution license)
 task download-all
+
+# Force re-download (even if files exist):
+task download-all FORCE=1
+```
+
+To fetch fresh data from original upstream sources instead (e.g. when updating to newer versions):
+
+```bash
+# Download everything from original upstream servers
+task download-upstream
 
 # Or download individual sources:
 task download-wiktextract     # Italian dictionary (634 MB)
@@ -20,9 +31,6 @@ task download-tatoeba         # Sentences and links (660 MB)
 task download-opensubtitles   # OpenSubtitles v2024 parallel sentences (~1.8 GB zip)
 task download-profilo         # Profilo CEFR word lists (4 small HTML files)
 task download-nvdb            # NVdB vocabulary tier list (1 HTML file)
-
-# Force re-download (even if files exist):
-task download-all FORCE=1
 ```
 
 After downloading, run the import pipeline:
@@ -33,6 +41,34 @@ task import-all
 
 # Or import a single part of speech
 task import-all POS=verb
+```
+
+## Release Artifacts
+
+The ETL pipeline produces two expensive Stanza-tagged JSONL files that take hours of GPU compute
+to regenerate. These are pinned alongside the CC-licensed source files in a GitHub Release
+(`data-v1`) so that contributors can rebuild the database without running Stanza.
+
+| Asset | Contents | Size (compressed) |
+|-------|----------|-------------------|
+| `tatoeba--ita_sentences_pos.jsonl.gz` | Stanza POS-tagged Tatoeba sentences | ~28 MB |
+| `opensubtitles--it_sentences_pos.jsonl.gz` | Stanza POS-tagged OpenSubtitles sentences | ~512 MB |
+| `wiktextract--kaikki.org-dictionary-Italian.jsonl.gz` | Wiktextract Italian dictionary | ~50 MB |
+| `tatoeba--sources.tar.gz` | Tatoeba source files (TSVs, audio, tags) | ~40 MB |
+| `opensubtitles--en-it.txt.zip` | OPUS OpenSubtitles v2024 Moses zip | ~1.7 GB |
+| `opensubtitles--derived.tar.gz` | OpenSubtitles derived TSVs | ~50 MB |
+| `checksums.sha256` | SHA-256 checksums for all assets | <1 KB |
+
+**Not included in the release** (fetched from upstream):
+- **Profilo** and **NVdB**: No explicit open license; tiny files hosted on stable academic URLs.
+
+**Not uploaded** (too large / redistribution risk):
+- **`italian.db`**: Contains Profilo/NVdB data. At ~2.2 GB compressed, it's at the GitHub
+  Releases per-file limit. With all source data available, `task import-all` rebuilds it in minutes.
+
+To create or update the release (maintainer only):
+```bash
+task upload-data
 ```
 
 ---

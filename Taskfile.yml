@@ -150,9 +150,97 @@ tasks:
       - uv run italian-db download-nvdb {{if .FORCE}}--force{{end}}
 
   download-all:
-    desc: Download all data sources
+    desc: Download data (pinned release + upstream-only sources)
     cmds:
       - uv run italian-db download-all {{if .FORCE}}--force{{end}}
+
+  download-upstream:
+    desc: Download all data from original upstream sources (for refreshing)
+    cmds:
+      - uv run italian-db download-upstream {{if .FORCE}}--force{{end}}
+
+  upload-data:
+    desc: Compress and upload data artifacts to a GitHub release (maintainer only)
+    cmds:
+      - |
+        set -euo pipefail
+
+        TAG="data-v1"
+        TMPDIR=$(mktemp -d)
+        trap 'rm -rf "$TMPDIR"' EXIT
+
+        echo "=== Compressing assets ==="
+
+        echo "  tatoeba--ita_sentences_pos.jsonl.gz"
+        gzip -c data/tatoeba/ita_sentences_pos.jsonl > "$TMPDIR/tatoeba--ita_sentences_pos.jsonl.gz"
+
+        echo "  opensubtitles--it_sentences_pos.jsonl.gz"
+        gzip -c data/opensubtitles/it_sentences_pos.jsonl > "$TMPDIR/opensubtitles--it_sentences_pos.jsonl.gz"
+
+        echo "  wiktextract--kaikki.org-dictionary-Italian.jsonl.gz"
+        gzip -c data/wiktextract/kaikki.org-dictionary-Italian.jsonl > "$TMPDIR/wiktextract--kaikki.org-dictionary-Italian.jsonl.gz"
+
+        echo "  tatoeba--sources.tar.gz"
+        tar czf "$TMPDIR/tatoeba--sources.tar.gz" -C data/tatoeba \
+          ita_sentences.tsv eng_sentences.tsv ita_eng_links.tsv \
+          sentences_with_audio.csv tags.csv sentences_in_lists.csv
+
+        echo "  opensubtitles--en-it.txt.zip"
+        cp data/opensubtitles/en-it.txt.zip "$TMPDIR/opensubtitles--en-it.txt.zip"
+
+        echo "  opensubtitles--derived.tar.gz"
+        tar czf "$TMPDIR/opensubtitles--derived.tar.gz" -C data/opensubtitles \
+          it_sentences.tsv en_sentences.tsv links.tsv
+
+        echo "=== Computing checksums ==="
+        cd "$TMPDIR"
+        shasum -a 256 *.gz *.zip > checksums.sha256
+        cat checksums.sha256
+        cd -
+
+        echo "=== Creating GitHub release ==="
+        gh release create "$TAG" \
+          --repo dkimbel/open-italian-db-with-anki \
+          --title "Data artifacts $TAG" \
+          --notes "$(cat <<'NOTES'
+        Pinned data artifacts for the ETL pipeline.
+
+        ## Contents
+
+        | Asset | Description |
+        |-------|-------------|
+        | `tatoeba--ita_sentences_pos.jsonl.gz` | Stanza POS-tagged Tatoeba sentences |
+        | `opensubtitles--it_sentences_pos.jsonl.gz` | Stanza POS-tagged OpenSubtitles sentences |
+        | `wiktextract--kaikki.org-dictionary-Italian.jsonl.gz` | Wiktextract Italian dictionary |
+        | `tatoeba--sources.tar.gz` | Tatoeba source files (TSVs, audio, tags) |
+        | `opensubtitles--en-it.txt.zip` | OPUS OpenSubtitles v2024 Moses zip |
+        | `opensubtitles--derived.tar.gz` | OpenSubtitles derived TSVs |
+        | `checksums.sha256` | SHA-256 checksums for all assets |
+
+        ## Licenses
+
+        - **Stanza JSONL**: Derivative work (inherits source licenses)
+        - **Wiktextract**: CC BY-SA 3.0 / GFDL
+        - **Tatoeba**: CC BY 2.0 FR
+        - **OpenSubtitles**: CC BY-NC-SA 3.0
+
+        ## Usage
+
+        ```bash
+        task download-all   # fetches these assets automatically
+        ```
+        NOTES
+        )" \
+          "$TMPDIR"/tatoeba--ita_sentences_pos.jsonl.gz \
+          "$TMPDIR"/opensubtitles--it_sentences_pos.jsonl.gz \
+          "$TMPDIR"/wiktextract--kaikki.org-dictionary-Italian.jsonl.gz \
+          "$TMPDIR"/tatoeba--sources.tar.gz \
+          "$TMPDIR"/opensubtitles--en-it.txt.zip \
+          "$TMPDIR"/opensubtitles--derived.tar.gz \
+          "$TMPDIR"/checksums.sha256
+
+        echo "=== Done ==="
+        echo "Release: https://github.com/dkimbel/open-italian-db-with-anki/releases/tag/$TAG"
 
   generate-deck:
     desc: Generate Anki deck from database

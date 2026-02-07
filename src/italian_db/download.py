@@ -1,12 +1,16 @@
 """Download data sources for the Italian Anki deck generator."""
 
 import bz2
+import gzip
 import hashlib
 import io
 import re
+import shutil
+import subprocess
 import sys
 import tarfile
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from random import Random
 
@@ -19,6 +23,56 @@ TATOEBA_DIR = DATA_DIR / "tatoeba"
 OPENSUBTITLES_DIR = DATA_DIR / "opensubtitles"
 PROFILO_DIR = DATA_DIR / "profilo"
 NVDB_DIR = DATA_DIR / "nvdb"
+
+# GitHub release configuration
+GITHUB_REPO = "dkimbel/open-italian-db-with-anki"
+RELEASE_TAG = "data-v1"
+
+
+@dataclass(frozen=True)
+class ReleaseAsset:
+    """Maps a GitHub release asset to its local file path(s) and decompression strategy."""
+
+    asset_name: str
+    # For single files: the destination path relative to DATA_DIR's parent (project root)
+    dest_path: Path | None = None
+    # For tar.gz archives: the directory to extract into
+    extract_dir: Path | None = None
+
+
+# Assets uploaded to the GitHub release and how to restore them locally.
+# Order matters for display only.
+RELEASE_ASSETS: list[ReleaseAsset] = [
+    # Stanza-tagged JSONL (gzipped single files)
+    ReleaseAsset(
+        asset_name="tatoeba--ita_sentences_pos.jsonl.gz",
+        dest_path=TATOEBA_DIR / "ita_sentences_pos.jsonl",
+    ),
+    ReleaseAsset(
+        asset_name="opensubtitles--it_sentences_pos.jsonl.gz",
+        dest_path=OPENSUBTITLES_DIR / "it_sentences_pos.jsonl",
+    ),
+    # Wiktextract dictionary (gzipped single file)
+    ReleaseAsset(
+        asset_name="wiktextract--kaikki.org-dictionary-Italian.jsonl.gz",
+        dest_path=WIKTEXTRACT_DIR / "kaikki.org-dictionary-Italian.jsonl",
+    ),
+    # Tatoeba source files (tar.gz archive)
+    ReleaseAsset(
+        asset_name="tatoeba--sources.tar.gz",
+        extract_dir=TATOEBA_DIR,
+    ),
+    # OpenSubtitles zip (already compressed, kept as-is)
+    ReleaseAsset(
+        asset_name="opensubtitles--en-it.txt.zip",
+        dest_path=OPENSUBTITLES_DIR / "en-it.txt.zip",
+    ),
+    # OpenSubtitles derived TSVs (tar.gz archive)
+    ReleaseAsset(
+        asset_name="opensubtitles--derived.tar.gz",
+        extract_dir=OPENSUBTITLES_DIR,
+    ),
+]
 
 # Download URLs
 WIKTEXTRACT_URL = "https://kaikki.org/dictionary/Italian/kaikki.org-dictionary-Italian.jsonl"
@@ -363,39 +417,231 @@ def download_nvdb(force: bool = False) -> dict[str, int]:
     return {"downloaded": 1, "skipped": 0}
 
 
-def download_all(force: bool = False) -> dict[str, dict[str, int]]:
-    """Download all data sources.
+def _check_gh_cli() -> None:
+    """Verify that the GitHub CLI is available."""
+    if shutil.which("gh") is None:
+        print("Error: 'gh' CLI not found.", file=sys.stderr)
+        print("Install it from https://cli.github.com/", file=sys.stderr)
+        sys.exit(1)
+
+
+def _verify_checksums(download_dir: Path, checksums_path: Path, assets: list[ReleaseAsset]) -> None:
+    """Verify SHA-256 checksums of downloaded release assets.
+
+    Only checks assets that were actually downloaded (in case some were skipped).
+    Raises ValueError if any checksum doesn't match.
+    """
+    expected: dict[str, str] = {}
+    for line in checksums_path.read_text().strip().splitlines():
+        sha256, name = line.split()
+        expected[name] = sha256
+
+    asset_names = {a.asset_name for a in assets}
+    verified = 0
+    for name, expected_hash in expected.items():
+        if name not in asset_names:
+            continue
+        path = download_dir / name
+        if not path.exists():
+            raise ValueError(f"Checksum file lists '{name}' but it was not downloaded")
+        h = hashlib.sha256()
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        actual_hash = h.hexdigest()
+        if actual_hash != expected_hash:
+            raise ValueError(
+                f"Checksum mismatch for {name}:\n"
+                f"  expected: {expected_hash}\n"
+                f"  actual:   {actual_hash}"
+            )
+        verified += 1
+    print(f"  All {verified} checksums verified.")
+
+
+def _decompress_asset(asset: ReleaseAsset, download_dir: Path) -> None:
+    """Decompress a downloaded release asset to its final location."""
+    src = download_dir / asset.asset_name
+
+    if asset.extract_dir is not None:
+        # tar.gz archive → extract into target directory
+        asset.extract_dir.mkdir(parents=True, exist_ok=True)
+        print(f"  Extracting {asset.asset_name} → {asset.extract_dir}/")
+        with tarfile.open(src, "r:gz") as tar:
+            tar.extractall(path=asset.extract_dir)  # noqa: S202
+    elif asset.dest_path is not None:
+        asset.dest_path.parent.mkdir(parents=True, exist_ok=True)
+        if asset.asset_name.endswith(".gz"):
+            # gzipped single file → decompress
+            print(f"  Decompressing {asset.asset_name} → {asset.dest_path}")
+            with gzip.open(src, "rb") as f_in, asset.dest_path.open("wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        else:
+            # Already in final form (e.g. .zip) → just move
+            print(f"  Moving {asset.asset_name} → {asset.dest_path}")
+            shutil.move(str(src), str(asset.dest_path))
+
+    size_mb = asset.dest_path.stat().st_size / (1024 * 1024) if asset.dest_path else 0
+    if asset.dest_path:
+        print(f"    {size_mb:.1f} MB")
+
+
+def download_release(force: bool = False) -> dict[str, int]:
+    """Download data artifacts from the pinned GitHub release.
+
+    Fetches compressed assets from the `data-v1` release, verifies checksums,
+    and decompresses them to their expected `data/` paths.
+
+    Returns stats dict with 'downloaded' and 'skipped' counts.
+    """
+    _check_gh_cli()
+
+    # Check which assets already exist locally
+    assets_to_download: list[ReleaseAsset] = []
+    skipped = 0
+
+    for asset in RELEASE_ASSETS:
+        if not force:
+            if asset.dest_path and _file_exists_and_nonempty(asset.dest_path):
+                print(f"Skipping {asset.asset_name} (already exists: {asset.dest_path})")
+                skipped += 1
+                continue
+            if (
+                asset.extract_dir
+                and asset.extract_dir.exists()
+                and any(asset.extract_dir.iterdir())
+            ):
+                # For archives, skip if the target dir is non-empty
+                # (individual files may have been partially extracted, but this is good enough)
+                print(f"Skipping {asset.asset_name} (directory exists: {asset.extract_dir})")
+                skipped += 1
+                continue
+        assets_to_download.append(asset)
+
+    if not assets_to_download:
+        print("All release assets already present locally.")
+        return {"downloaded": 0, "skipped": skipped}
+
+    # Download all needed assets + checksum file to a temp directory
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="italian-db-release-") as tmpdir:
+        tmp = Path(tmpdir)
+
+        # Build list of asset patterns for gh release download
+        asset_names = [a.asset_name for a in assets_to_download] + ["checksums.sha256"]
+        pattern_args: list[str] = []
+        for name in asset_names:
+            pattern_args.extend(["--pattern", name])
+
+        print(f"Downloading {len(assets_to_download)} assets from release {RELEASE_TAG}...")
+        cmd = [
+            "gh",
+            "release",
+            "download",
+            RELEASE_TAG,
+            "--repo",
+            GITHUB_REPO,
+            "--dir",
+            str(tmp),
+            *pattern_args,
+        ]
+        subprocess.run(cmd, check=True)  # noqa: S603
+
+        # Verify checksums
+        checksums_path = tmp / "checksums.sha256"
+        if checksums_path.exists():
+            print("Verifying checksums...")
+            _verify_checksums(tmp, checksums_path, assets_to_download)
+        else:
+            print("  Warning: No checksums.sha256 in release, skipping verification.")
+
+        # Decompress each asset
+        print("Decompressing assets...")
+        for asset in assets_to_download:
+            _decompress_asset(asset, tmp)
+
+    return {"downloaded": len(assets_to_download), "skipped": skipped}
+
+
+def download_all_upstream(force: bool = False) -> dict[str, dict[str, int]]:
+    """Download all data from original upstream sources.
+
+    This fetches fresh data directly from each source's servers.
+    Use this to refresh data when upstream sources have been updated.
 
     Returns a dict mapping source name to stats dict.
     """
     results: dict[str, dict[str, int]] = {}
 
     print("=" * 60)
-    print("Downloading Wiktextract")
+    print("Downloading Wiktextract (upstream)")
     print("=" * 60)
     results["wiktextract"] = download_wiktextract(force)
     print()
 
     print("=" * 60)
-    print("Downloading Tatoeba")
+    print("Downloading Tatoeba (upstream)")
     print("=" * 60)
     results["tatoeba"] = download_tatoeba(force)
     print()
 
     print("=" * 60)
-    print("Downloading OpenSubtitles (OPUS v2024 parallel sentences)")
+    print("Downloading OpenSubtitles (upstream, OPUS v2024)")
     print("=" * 60)
     results["opensubtitles"] = download_opensubtitles(force)
     print()
 
     print("=" * 60)
-    print("Downloading Profilo della lingua italiana (CEFR word lists)")
+    print("Downloading Profilo della lingua italiana (upstream)")
     print("=" * 60)
     results["profilo"] = download_profilo(force)
     print()
 
     print("=" * 60)
-    print("Downloading NVdB (Nuovo Vocabolario di Base)")
+    print("Downloading NVdB (upstream)")
+    print("=" * 60)
+    results["nvdb"] = download_nvdb(force)
+    print()
+
+    # Summary
+    print("=" * 60)
+    print("Download Summary")
+    print("=" * 60)
+    total_downloaded = sum(r["downloaded"] for r in results.values())
+    total_skipped = sum(r["skipped"] for r in results.values())
+    print(f"  Downloaded: {total_downloaded} files")
+    print(f"  Skipped:    {total_skipped} files")
+
+    return results
+
+
+def download_all(force: bool = False) -> dict[str, dict[str, int]]:
+    """Download all data: CC-licensed artifacts from GitHub release, others from upstream.
+
+    This is the default download strategy:
+    1. Fetch pinned, pre-computed artifacts (Stanza JSONL, Wiktextract, Tatoeba,
+       OpenSubtitles) from the GitHub release — fast and reproducible.
+    2. Fetch Profilo and NVdB from upstream (no redistribution license).
+
+    Returns a dict mapping source name to stats dict.
+    """
+    results: dict[str, dict[str, int]] = {}
+
+    print("=" * 60)
+    print("Downloading pinned data from GitHub release")
+    print("=" * 60)
+    results["release"] = download_release(force)
+    print()
+
+    print("=" * 60)
+    print("Downloading Profilo della lingua italiana (upstream)")
+    print("=" * 60)
+    results["profilo"] = download_profilo(force)
+    print()
+
+    print("=" * 60)
+    print("Downloading NVdB (upstream)")
     print("=" * 60)
     results["nvdb"] = download_nvdb(force)
     print()
@@ -415,4 +661,7 @@ def download_all(force: bool = False) -> dict[str, dict[str, int]]:
 if __name__ == "__main__":
     # Simple CLI for testing
     force = "--force" in sys.argv
-    download_all(force=force)
+    if "--upstream" in sys.argv:
+        download_all_upstream(force=force)
+    else:
+        download_all(force=force)
