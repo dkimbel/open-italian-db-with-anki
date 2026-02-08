@@ -4593,6 +4593,7 @@ def import_adjective_allomorphs(
         "duplicates_skipped": 0,
         "already_in_parent": 0,
         "hardcoded_added": 0,
+        "apocopic_plurals_skipped": 0,
     }
 
     # Build lookup: written_form -> lemma_id for adjectives
@@ -4608,6 +4609,14 @@ def import_adjective_allomorphs(
         written = row.written or derive_written_from_stressed(row.stressed)
         if written is not None:
             adj_lookup[written] = row.id
+
+    # Build inflection class lookup: lemma_id -> inflection_class
+    inflection_lookup: dict[int, str | None] = {}
+    result2 = conn.execute(
+        select(adjective_metadata.c.lemma_id, adjective_metadata.c.inflection_class)
+    )
+    for row in result2:
+        inflection_lookup[row.lemma_id] = row.inflection_class
 
     # Count lines for progress
     total_lines = _count_lines(jsonl_path) if progress_callback else 0
@@ -4694,9 +4703,13 @@ def import_adjective_allomorphs(
             # Check if parent already has this form (with correct gender/number from forms array)
             # If so, skip — the parent's Wiktextract forms already have proper tagging
             existing_forms = conn.execute(
-                select(adjective_forms.c.written).where(adjective_forms.c.lemma_id == parent_id)
+                select(adjective_forms.c.stressed).where(adjective_forms.c.lemma_id == parent_id)
             ).fetchall()
-            existing_form_texts = {row.written for row in existing_forms if row.written}
+            existing_form_texts = {
+                derive_written_from_stressed(row.stressed) or row.stressed
+                for row in existing_forms
+                if row.stressed
+            }
 
             if allomorph_word in existing_form_texts:
                 stats["already_in_parent"] += 1
@@ -4724,6 +4737,9 @@ def import_adjective_allomorphs(
                 form_tags = form_entry.get("tags", [])
                 if not form_text:
                     continue
+                # Skip alternative spellings — not inflections, no gender/number info
+                if "alternative" in form_tags:
+                    continue
                 # Determine gender and number from tags
                 form_gender = (
                     "m" if "masculine" in form_tags else "f" if "feminine" in form_tags else None
@@ -4740,9 +4756,24 @@ def import_adjective_allomorphs(
                     form_lookup[("m", form_number)] = form_text
                     form_lookup[("f", form_number)] = form_text
 
+            # Restrict apocopic entries to singular only when no plural forms exist
+            # Apocopic forms (gran, bel, buon) are singular-only; plurals use the full form
+            # Check for actual plural entries, not just any forms (alternative spellings are singular-only)
+            has_plural_forms = any(number == "plural" for (_, number) in form_lookup)
+            if label == "apocopic" and not has_plural_forms:
+                numbers: tuple[str, ...] = ("singular",)
+                inflection_class = inflection_lookup.get(parent_id)
+                if inflection_class == "4-form":
+                    genders = ("m",)  # e.g., buon is only m.sg of buono
+                # 2-form/invariable: keep both genders (e.g., gran is m.sg + f.sg of grande)
+                # Count skipped plural slots
+                stats["apocopic_plurals_skipped"] += len(genders)
+            else:
+                numbers = ("singular", "plural")
+
             # Add forms for appropriate gender(s)
             for gender in genders:
-                for number in ("singular", "plural"):
+                for number in numbers:
                     # Use form from lookup if available, otherwise use entry word
                     # (entry word is typically the m/s citation form)
                     form_text = form_lookup.get((gender, number), allomorph_word)
@@ -4796,12 +4827,16 @@ def import_adjective_allomorphs(
         # Check if this specific form+gender+number combo already exists
         existing = conn.execute(
             select(
-                adjective_forms.c.written,
+                adjective_forms.c.stressed,
                 adjective_forms.c.gender,
                 adjective_forms.c.number,
             ).where(adjective_forms.c.lemma_id == parent_id)
         ).fetchall()
-        existing_combos = {(row.written, row.gender, row.number) for row in existing if row.written}
+        existing_combos = {
+            (derive_written_from_stressed(row.stressed) or row.stressed, row.gender, row.number)
+            for row in existing
+            if row.stressed
+        }
 
         if (form, gender, number) in existing_combos:
             continue

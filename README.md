@@ -106,7 +106,7 @@ Che ne dici di mangiare fuori stasera tanto per cambiare?  How about eating out 
 SELECT af.written, af.gender, af.number
 FROM lemmas l
 JOIN adjective_forms af ON l.id = af.lemma_id
-WHERE l.written = 'bello' AND af.labels IS NULL;
+WHERE l.written = 'bello';
 ```
 
 ```

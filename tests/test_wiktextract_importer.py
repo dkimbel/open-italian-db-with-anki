@@ -2114,11 +2114,24 @@ class TestImportAdjAllomorphs:
                 # First import adjectives (grande only, gran skipped)
                 import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
 
+                # Update adjective_metadata for grande to 2-form
+                # (import_wiktextract already created the row as 4-form)
+                grande = conn.execute(
+                    select(lemmas).where(lemmas.c.stressed == "grànde")
+                ).fetchone()
+                assert grande is not None
+                conn.execute(
+                    adjective_metadata.update()
+                    .where(adjective_metadata.c.lemma_id == grande.id)
+                    .values(inflection_class="2-form")
+                )
+
                 # Then import allomorphs
                 stats = import_adjective_allomorphs(conn, jsonl_path)
 
             assert stats["allomorphs_added"] == 1
-            assert stats["forms_added"] == 4  # All 4 gender/number combinations
+            # gran has no forms array + apocopic + 2-form parent → m.sg + f.sg only
+            assert stats["forms_added"] == 2
 
             with get_connection(db_path) as conn:
                 grande = conn.execute(
@@ -2132,11 +2145,12 @@ class TestImportAdjAllomorphs:
 
                 # Find allomorph forms (labeled apocopic)
                 allomorph_forms = [f for f in forms if f.labels == ["apocopic"]]
-                assert len(allomorph_forms) == 4
+                assert len(allomorph_forms) == 2
 
-                # All should have form="gran"
+                # All should have form="gran" and be singular
                 for f in allomorph_forms:
                     assert f.written == "gran"
+                    assert f.number == "singular"
                     assert f.form_origin == "alt_of"
 
         finally:
@@ -2286,6 +2300,200 @@ class TestImportAdjAllomorphs:
                 assert san_form.number == "singular"
                 assert san_form.labels == ["apocopic"]
                 assert san_form.form_origin == "hardcoded"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_apocopic_no_forms_4form_parent_only_adds_m_sg(self) -> None:
+        """Apocopic entry with no forms array and 4-form parent adds only m.sg."""
+        buono_entry = {
+            "pos": "adj",
+            "word": "buono",
+            "forms": [
+                {"form": "buòno", "tags": ["canonical"]},
+                {"form": "buòna", "tags": ["feminine", "singular"]},
+                {"form": "buòni", "tags": ["masculine", "plural"]},
+                {"form": "buòne", "tags": ["feminine", "plural"]},
+            ],
+            "senses": [{"glosses": ["good"]}],
+        }
+
+        buon_entry = {
+            "pos": "adj",
+            "word": "buon",
+            "senses": [
+                {
+                    "tags": ["apocopic"],
+                    "alt_of": [{"word": "buono"}],
+                    "glosses": ["apocopic form of buono"],
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([buono_entry, buon_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
+
+                # import_wiktextract already created adjective_metadata as 4-form
+                stats = import_adjective_allomorphs(conn, jsonl_path)
+
+            assert stats["allomorphs_added"] == 1
+            assert stats["forms_added"] == 1  # Only m.sg
+            assert stats["apocopic_plurals_skipped"] == 1
+
+            with get_connection(db_path) as conn:
+                buono = conn.execute(select(lemmas).where(lemmas.c.stressed == "buòno")).fetchone()
+                assert buono is not None
+
+                forms = conn.execute(
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == buono.id)
+                ).fetchall()
+
+                allomorph_forms = [f for f in forms if f.labels == ["apocopic"]]
+                assert len(allomorph_forms) == 1
+                assert allomorph_forms[0].gender == "m"
+                assert allomorph_forms[0].number == "singular"
+                assert allomorph_forms[0].written == "buon"
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_apocopic_with_alternative_forms_only_adds_singular(self) -> None:
+        """Apocopic entry with forms array containing only alternative spellings adds only singular.
+
+        pro' has forms: [{"form": "pro", "tags": ["alternative"]}] which populates form_lookup
+        with singular-only entries. The plural restriction should still apply because no plural
+        forms exist in form_lookup.
+        """
+        prode_entry = {
+            "pos": "adj",
+            "word": "prode",
+            "forms": [
+                {"form": "pròde", "tags": ["canonical"]},
+                {"form": "pròdi", "tags": ["plural"]},
+            ],
+            "senses": [{"glosses": ["brave, valiant"]}],
+        }
+
+        pro_apo_entry = {
+            "pos": "adj",
+            "word": "pro'",
+            "forms": [
+                {"form": "pro", "tags": ["alternative"]},
+            ],
+            "senses": [
+                {
+                    "tags": ["apocopic"],
+                    "alt_of": [{"word": "prode"}],
+                    "glosses": ["apocopic form of prode"],
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([prode_entry, pro_apo_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
+                stats = import_adjective_allomorphs(conn, jsonl_path)
+
+            assert stats["allomorphs_added"] == 1
+            assert stats["forms_added"] == 2  # m.sg + f.sg (2-form parent)
+            assert stats["apocopic_plurals_skipped"] == 2  # m.pl + f.pl skipped
+
+            with get_connection(db_path) as conn:
+                prode = conn.execute(select(lemmas).where(lemmas.c.stressed == "pròde")).fetchone()
+                assert prode is not None
+
+                forms = conn.execute(
+                    select(adjective_forms).where(adjective_forms.c.lemma_id == prode.id)
+                ).fetchall()
+
+                allomorph_forms = [f for f in forms if f.labels == ["apocopic"]]
+                assert len(allomorph_forms) == 2
+                assert all(f.number == "singular" for f in allomorph_forms)
+                assert all(f.written == "pro'" for f in allomorph_forms)
+                genders = {f.gender for f in allomorph_forms}
+                assert genders == {"m", "f"}
+
+        finally:
+            db_path.unlink()
+            jsonl_path.unlink()
+
+    def test_already_in_parent_detects_via_stressed(self) -> None:
+        """already_in_parent check should work via stressed column even when written is NULL."""
+        bello_entry = {
+            "pos": "adj",
+            "word": "bello",
+            "forms": [
+                {"form": "bèllo", "tags": ["canonical"]},
+                {"form": "bèlla", "tags": ["feminine", "singular"]},
+                {"form": "bèlli", "tags": ["masculine", "plural"]},
+                {"form": "bèlle", "tags": ["feminine", "plural"]},
+            ],
+            "senses": [{"glosses": ["beautiful"]}],
+        }
+
+        bel_entry = {
+            "pos": "adj",
+            "word": "bel",
+            "senses": [
+                {
+                    "tags": ["apocopic"],
+                    "alt_of": [{"word": "bello"}],
+                    "glosses": ["apocopic form of bello"],
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_file:
+            db_path = Path(db_file.name)
+
+        jsonl_path = _create_test_jsonl([bello_entry, bel_entry])
+
+        try:
+            engine = get_engine(db_path)
+            init_db(engine)
+
+            with get_connection(db_path) as conn:
+                import_wiktextract(conn, jsonl_path, pos_filter=POS.ADJECTIVE)
+
+                # Manually insert a form with stressed='bel' and written=NULL
+                # to simulate the state at Step 4 (before written derivation)
+                bello = conn.execute(select(lemmas).where(lemmas.c.stressed == "bèllo")).fetchone()
+                assert bello is not None
+                conn.execute(
+                    adjective_forms.insert().values(
+                        lemma_id=bello.id,
+                        written=None,
+                        stressed="bel",
+                        gender="m",
+                        number="singular",
+                        degree="positive",
+                    )
+                )
+
+                stats = import_adjective_allomorphs(conn, jsonl_path)
+
+            # Should detect 'bel' already exists via stressed column
+            assert stats["already_in_parent"] == 1
+            assert stats["allomorphs_added"] == 0
 
         finally:
             db_path.unlink()
