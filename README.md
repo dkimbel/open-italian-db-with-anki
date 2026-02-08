@@ -9,18 +9,13 @@ This is Python code for:
 This tool is optimized for learners of modern standard Italian. Archaic, poetic, literary,
 and similar forms are not always present.
 
-> [!WARNING]
-> _This database may contain incorrect information!_
-> - The source data we rely on can contain mistakes.
-> - Inference done by this repository could introduce errors. For example, we synthesize the feminine plural forms
-> of nouns when our source data doesn't provide them. (You can always tell when this happened; see the `Data Provenance`
-> section below.)
->
-> If you find any mistakes, please [open an issue](https://github.com/dkimbel/open-italian-db-with-anki/issues).
+> [!NOTE]
+> This is a work in progress — you may find some inaccuracies.
+> If you spot any, please [open an issue](https://github.com/dkimbel/open-italian-db-with-anki/issues).
 
 ## Schema and Example Queries
 
-[See the database schema as a Mermaid diagram here.](https://mermaid.live/edit#pako:eNrdV1tvmzAU_ivIz2mVJmkuvHbaS18q7W2KhE7gQNwZm9mmbZrmv892SArB0LSdtmkoUoTP53P9jn3YklgkSEISBCi_UMgk5EseuIdhnoMKtod3-1CuA5oEd7f1RaUl5VnwKKnWyLslkRKljNEDMH-oFCYeUSGUZ5UWcFjdLY8mH1CuolTI_Byv7aILMTKir38uoFwI37JRp3yaQBUY61PHC5RK-DzjZb5C6RFkyJOmYCUEC6hyCQPmk3DMQNOHhlv3xm7AYIXMVxerKxKSZpT7FMZUG4WCO5tdBcxRQwIa2jU8luvuduCtGJRPlFGQG1-CJXBFTThUb04Vr0Bh5Iz3M6KQgouccmCR3hTYFQGVErOSgWHJ5gNRFIY7yHVUgCGZ9FVZYi409gDSUpeyD1CA1DSmBesDqXJ1X_LYUqAHFTNQiqY03pe2sye4cVl5UsZFyf_5rm23T2fD9XeI0UIf9pmqU6h-QCBw8x-tTaxeBSnl1FTfVZB5z4y9pDvQT7apq9gn2nSfzMgRpzOlZ4k9IVoPYuOgYasleVdHH9u-n00d5aolA5J73LfIf8ThY_SZRHwPuf86N1_L8QmCUp4yq8WYabHwbOLY1EUSmXNXrWlxHuokM7XQquxa3G9hWcZEMzRXXA1Z583uO5pqDqYSf5bIY4rqA0mPhSxK5YnCqo0kPNbXUyagkjzTIu1UZ291RV9HpZq39o41zvp8PYiirlmXAc-8Q9yTLy9u9Kgq7KmchqhpcNA-qtBkvRNUM1UN7S8vFxdiWx-Iw2BJ1qCWxId8OZm8zgE3hpzWhqa-nXD7Ki0WfJy47Ba_87W54A1_mvdRC9wUt32p3Rbnb7IBdPt-eim8EYDn0Grt8GDe61X9AOn1aNto5Rq03TsVvkFxu8Gw-lX323DD7yUhA5Kj-RihifkidX2yJHqNuQnJYhKQP6zOncFBqcW3DY9JqGWJAyJFma1JmAJT5q0sTH6w-p49QArg34U4vmbSmql2u5vxxvKAhPPhzIFJuCVPJLyYjkeXk_nV8Go-nE4nw-loQDYkHE8uJ6Ox-c2ms-F8MZ9MdgPy7PSPLq_H89lsMZ8tjGwxvN79AgCSud0)
+[See the database schema as a Mermaid diagram here.](https://mermaid.live/edit#pako:eNrVV0tv2zAM_iuGzyuwXXvdsMsuA3YbCgiKTTtqZUmjpDRpmv8-Wnbqh2Q36dAN88Uw3_xEkfQxL3QJ-W2WA34RvEbe3KmMHglNw2127L7aRyiXiTL7_m0gWYdC1dkjCudALdGZ1R4LiNj0AmuhjBhG26lbcIdGS10fmPLNBjDSGAQc7F3HPnWvHeCGVRqb15JpSSFrRoyvl2e5mEajdUwkCzaGglsDhZvGYgCtjt0tIFCDKsfkjdYyEzZkzmVMV1BzJ3ZxKJJvQNqI3NphGkUtVGysEI6MaRW8RarC8BRtUhb9YSnt1b85rDl-62gvgEQWxK5Dwh1MjG0DXNGbbSn8hHIllHDAODpRSHiXI-hx5uU91Rsd__8Adgk1Alx-Bn8Pxt4Xyf8phLXUNs7F8XrhJqYrqfUSahBKVqFu2JrLZLGOm2YDjpfc8XlqL0YTo4D7vZCC4yHOBbmyhNVOuJhpUCvdCMVlHEvoCW-JpasyVkiegLartTEzuhpv8SlUJVt1AjU2HVAViFB7yenOHK6xbOgugXLMcLprGF82hEZT1S-xK-88LrNNuC3CyGUR6zf3XnXQTGT67CqEXx5UIcBek1eh0XgbXZbWGkP-OFArqXlPfxKmSoqrByYUe9kf-sgKqJCuwo7axTWRBY0YhsTU2pUb5gTN62vMtwoL1tmjxnLioj16whYu6TNnWfKbaJqqjp2eFYblaT3hcJclTzc-R5N9iCCKDqhrpfizRFnb--a2l-wO7XLZnH4AdbHBlhc0qJxK2CedBXYSsXDqEdVP1tordsTrl8FCN4a6ZsmS5l-4Iz-n0dbPEPqz3QpzUcF1RZscNgFJjjW41WE0djnbncJo3ohSYNdYz9sshTz5VXl-vrnRx_G-f5vd5Vtu7_KU3GjVXJWbr0qrwuOFYEXweTZgV0Wn829VNDG7Xo9iMpBWsxt3-FW744a7ntvQOVc9p-qyVSDKWWHokL3OpEm1woGwKD5tPLNoVqS7vjKSzz9keQP01yVK-q8-5m4LTfjDpuLgXrr8RALcO_3joAqiO_RAFNS-3tJnxaVtv72h84P-n3wQM1z91HpEqDH4OVsJO89nKhlHxI-dQghj338f2ncbwlNn5tPpNwt3EuM)
 
 ### Gender-changing plural (uovo → uova)
 
@@ -42,47 +37,48 @@ l'       uovo     m       singular
 ### Irregular verb conjugation (andare)
 
 ```sql
-SELECT vf.written, vf.stressed, vf.person, vf.number
+SELECT vf.written, vf.person, vf.number
 FROM lemmas l
 JOIN verb_forms vf ON l.id = vf.lemma_id
 WHERE l.written = 'andare' AND vf.mood = 'indicative' AND vf.tense = 'present';
 ```
 
 ```
-written  stressed  person  number
--------  --------  ------  --------
-vado     vàdo      1       singular
-vai      vài       2       singular
-va       và        3       singular
-andiamo  andiàmo   1       plural
-andate   andàte    2       plural
-vanno    vànno     3       plural
+written  person  number
+-------  ------  --------
+vado     1       singular
+vai      2       singular
+va       3       singular
+andiamo  1       plural
+andate   2       plural
+vanno    3       plural
 ```
 
 ### Most frequent verbs, with IPA pronunciations
 
 ```sql
-SELECT l.written, l.ipa, f.freq_raw, f.freq_zipf
+SELECT l.written, vf.ipa, f.freq_raw, f.freq_zipf
 FROM lemmas l
 JOIN frequencies f ON l.id = f.lemma_id
+JOIN verb_forms vf ON l.id = vf.lemma_id AND vf.is_citation_form = 1
 WHERE l.pos = 'verb'
 ORDER BY f.freq_raw DESC
 LIMIT 10;
 ```
 
 ```
-written  ipa          freq_raw    freq_zipf
--------  -----------  ----------  ---------
-fare     /ˈfa.re/     11871786    6.80
-potere   /poˈte.re/   10480649    6.74
-essere   /ˈɛs.se.re/  9390735     6.69
-dovere   /doˈve.re/   6786006     6.55
-avere    /aˈve.re/    5131032     6.43
-volere   /voˈle.re/   3349064     6.25
-dire     /ˈdi.re/     3313374     6.24
-andare   /anˈda.re/   1728924     5.96
-dare     /ˈda.re/     1622741     5.93
-sapere   /saˈpe.re/   1514490     5.90
+written  ipa           freq_raw  freq_zipf
+-------  -----------   --------  ---------
+essere   /ˈɛs.se.re/  3418208   7.75
+avere    /aˈve.re/     1896926   7.50
+fare     /ˈfa.re/      664601    7.04
+volere   /voˈle.re/    430397    6.85
+potere   /poˈte.re/    419482    6.84
+dire     /ˈdi.re/      375834    6.79
+dovere   /doˈve.re/    373282    6.79
+andare   /anˈda.re/    365000    6.78
+stare    /ˈsta.re/     337454    6.75
+sapere   /saˈpe.re/    321769    6.73
 ```
 
 ### Example sentences with translations
@@ -110,7 +106,7 @@ Che ne dici di mangiare fuori stasera tanto per cambiare?  How about eating out 
 SELECT af.written, af.gender, af.number
 FROM lemmas l
 JOIN adjective_forms af ON l.id = af.lemma_id
-WHERE l.written = 'bello';
+WHERE l.written = 'bello' AND af.labels IS NULL;
 ```
 
 ```
@@ -164,6 +160,8 @@ projects. See `data-licenses/` for full license texts and detailed discussion.
 | [Profilo della lingua italiana](https://www.unistrapg.it/profilo_lingua_italiana/) | No explicit license\*\* | CEFR levels (A1-B2) |
 | [NVdB](https://www.internazionale.it/opinione/tullio-de-mauro/2016/12/23/il-nuovo-vocabolario-di-base-della-lingua-italiana) | No explicit license\*\* | Usage tiers (FO/AU/AD) |
 
+Frequency data and sentence-level NLP annotations are computed using [Stanza](https://stanfordnlp.github.io/stanza/).
+
 \* OpenSubtitles licensing is layered and ambiguous. META-SHARE catalogs the OPUS corpus as CC BY-NC-SA 3.0; OpenSubtitles.org's ToS restrict use to noncommercial, scientific, and educational purposes. See `data-licenses/opensubtitles.txt` for full details.
 
 \*\* Profilo (Spinelli & Parizzi, 2010) is a published book with word lists hosted publicly for educational use. NVdB (De Mauro, 2016) was published online by Internazionale without an explicit license. Both are used here for noncommercial educational purposes with full attribution. See `data-licenses/profilo.txt` and `data-licenses/nvdb.txt`.
@@ -171,11 +169,12 @@ projects. See `data-licenses/` for full license texts and detailed discussion.
 ## What's In The Database
 
 - **100k+ lemmas** (verbs, nouns, adjectives) with stress-marked forms to aid pronunciation
-- **945k+ inflected forms** like verb conjugations and gendered versions of nouns and adjectives
+- **1M+ inflected forms** like verb conjugations and gendered versions of nouns and adjectives
 - **Frequency data** derived from Stanza-parsed sentence tokens (all POS)
 - **CEFR levels** (A1-B2) from expert-curated Profilo della lingua italiana
 - **NVdB usage tiers** (fondamentale/alto uso/alta disponibilità) from De Mauro (2016)
-- **6M+ example sentences** with English translations (Tatoeba + OpenSubtitles)
+- **5M+ Italian sentences** with English translations (Tatoeba + OpenSubtitles)
+- **51M+ sentence tokens** with NLP annotations (POS, mood, tense, dependency relations)
 - **Full data provenance**: every form tracks where it came from (`form_origin`, `written_source`)
 
 ## Repository Structure
@@ -183,33 +182,55 @@ projects. See `data-licenses/` for full license texts and detailed discussion.
 ```
 open-italian-db-with-anki/
 ├── italian.db              # SQLite database (generated, not committed)
-├── src/italian_db/         # Python source code
+├── src/italian_db/         # Database builder
 │   ├── db/                 #   Database schema and connection
 │   │   ├── schema.py       #     SQLAlchemy table definitions
 │   │   └── connection.py   #     Database session management
 │   ├── importers/          #   Data import modules
 │   │   ├── wiktextract.py  #     Lemmas, forms, definitions from Wiktionary
-│   │   ├── morphit.py      #     Fallback functions for written form derivation
-│   │   ├── tatoeba.py      #     Tatoeba example sentences with translations
+│   │   ├── written_enrichment.py    # Written-form derivation rules
+│   │   ├── tatoeba.py               # Tatoeba example sentences
 │   │   ├── opensubtitles_sentences.py  # OpenSubtitles parallel sentences
-│   │   ├── sentence_tokens.py         # Stanza POS-tagged token import
-│   │   ├── frequency_from_tokens.py   # Frequency computation from tokens
-│   │   ├── profilo.py                 # Profilo CEFR level import
-│   │   └── nvdb.py                    # NVdB usage tier import
+│   │   ├── sentence_tokens.py      # Stanza POS-tagged token import
+│   │   ├── frequency_from_tokens.py # Frequency computation from tokens
+│   │   ├── frequency_ranking.py     # Per-POS frequency ranking
+│   │   ├── verb_irregularity.py     # Verb irregularity classification
+│   │   ├── profilo.py               # Profilo CEFR level import
+│   │   └── nvdb.py                  # NVdB usage tier import
+│   ├── data/               #   Bundled data files
+│   │   ├── verb_irregularity_data.py  # Irregularity pattern definitions
+│   │   └── semantic_categories.toml   # Semantic category mappings
+│   ├── cli.py              #   Command-line interface
+│   ├── derivation.py       #   Lemma derivation logic
+│   ├── download.py         #   Data download helpers
+│   ├── enums.py            #   Shared enumerations
 │   ├── normalize.py        #   Text normalization (accents, unicode)
 │   ├── articles.py         #   Italian definite article rules
-│   └── cli.py              #   Command-line interface
+│   ├── queries.py          #   Reusable database queries
+│   ├── tags.py             #   Tag processing
+│   └── verify.py           #   Database verification checks
+├── src/anki_gen/           # Anki deck generator
+│   ├── cli.py              #   Anki generation CLI
+│   ├── generator.py        #   Deck building logic
+│   ├── note_types.py       #   Anki note type definitions
+│   ├── templates.py        #   Card HTML/CSS templates
+│   ├── preview.py          #   Browser preview server
+│   ├── queries.py          #   Card data queries
+│   ├── stress.py           #   Stress annotation helpers
+│   └── config/verbs.toml   #   Verb card configuration
+├── scripts/                # Standalone utility scripts
 ├── data/                   # Downloaded source data (~2.5GB, not committed)
 │   ├── wiktextract/        #   Kaikki.org dictionary extract
 │   ├── tatoeba/            #   Tatoeba sentence corpus
 │   ├── opensubtitles/      #   OpenSubtitles v2024 parallel sentences
 │   ├── profilo/            #   Profilo CEFR word lists (HTML)
 │   └── nvdb/               #   NVdB usage tier list (HTML)
+├── output/                 # Generated Anki decks and previews (not committed)
 ├── data-licenses/          # Full license texts for each data source
 ├── tests/                  # Test suite
 ├── Taskfile.yml            # Task runner commands
 ├── DATA_SOURCES.md         # Detailed import/ETL pipeline documentation
-├── project_spec.md         # Full project specification
+├── SPEC.md                 # Full project specification
 └── pyproject.toml          # Python project configuration
 ```
 
@@ -224,15 +245,24 @@ Where the grammatical form itself came from:
 - `wiktextract` — directly from Wiktionary conjugation/declension tables
 - `inferred:base_form` — derived as the citation form of a lemma
 - `inferred:invariable` — marked as invariable (same form for all numbers)
+- `inferred:singular` — singular form inferred from lemma
+- `inferred:two_form` — two-form adjective (same masculine and feminine)
+- `inferred:f_pl_from_f_sg` — feminine plural inferred from feminine singular
+- `inferred:f_pl_invariable` — feminine plural same as feminine singular
+- `inferred:head_template` — derived from Wiktionary head template
+- `derived:gender_rule` — gender derived by rule from existing forms
 - `wiktextract:gender_fallback` — gender inferred from Wiktionary patterns
 - `alt_of` — alternative form entry in Wiktionary
+- `hardcoded` — manually specified for known exceptions
 
 ### Written source (`written_source` column)
 
 Where the correct Italian spelling came from:
 - `wiktionary` — from Wiktionary form-of entry
 - `derived:orthography_rule` — computed using Italian spelling rules
+- `copied:f_sg` — copied from feminine singular form
 - `fallback:no_accent` — stress mark simply removed (for unaccented words)
+- `hardcoded` — manually specified for known exceptions
 - `hardcoded:loanword` — manually specified for French loanwords
 
 ## License
