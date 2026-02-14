@@ -1758,6 +1758,10 @@ def _extract_thematic_tags(
                 continue
             my_score = scores[sense_index]
             max_score = max(scores)
+            # Accept this sense if it has the highest score (ties included),
+            # or if its score is >= 50 (meaning it's a strong enough match
+            # even when another sense scored higher). Wiktextract _dis scores
+            # are percentage-like weights that sum to 100 across senses.
             if my_score < max_score and my_score < 50:
                 continue
         elif source_val != "w":
@@ -4228,8 +4232,13 @@ def link_definition_tags(
     # Build lookup: (lemma_id, gloss) → list of definition IDs
     # A single (lemma_id, gloss) can map to multiple definition rows when
     # form_meaning_hint creates duplicates (e.g., braccio).
+    relevant_lemma_ids = {t[0] for t in tag_links}
     defn_lookup: dict[tuple[int, str], list[int]] = {}
-    for row in conn.execute(select(definitions.c.id, definitions.c.lemma_id, definitions.c.gloss)):
+    for row in conn.execute(
+        select(definitions.c.id, definitions.c.lemma_id, definitions.c.gloss).where(
+            definitions.c.lemma_id.in_(relevant_lemma_ids)
+        )
+    ):
         key = (row.lemma_id, row.gloss)
         defn_lookup.setdefault(key, []).append(row.id)
 

@@ -271,7 +271,8 @@ definitions = Table(
 #   'other' — standard thematic category
 #   'place' — geographic/place-related category (filtered out during card gen)
 #
-# WITHOUT ROWID: Composite PK covers all columns, no need for hidden rowid.
+# WITHOUT ROWID: PK covers the three identifying columns; `kind` is stored
+# inline in the B-tree leaf. This is efficient for this append-only table.
 definition_tags = Table(
     "definition_tags",
     metadata,

@@ -9,7 +9,11 @@ from sqlalchemy import Connection
 
 from anki_gen.generator import build_verb_tags
 from anki_gen.queries import Verb, get_cefr_level, get_nvdb_tier, get_thematic_tags
-from anki_gen.topic_tags import normalize_thematic_tag
+from anki_gen.topic_tags import (
+    THEMATIC_TAG_RENAMES,
+    THEMATIC_TAG_WHITELIST,
+    normalize_thematic_tag,
+)
 from italian_db.db import (
     cefr_levels,
     definition_tags,
@@ -223,6 +227,11 @@ class TestNormalizeThematicTag:
     def test_excluded_demonym(self) -> None:
         """'Demonyms' is excluded."""
         assert normalize_thematic_tag("Demonyms") is None
+
+    @pytest.mark.parametrize("target", sorted(set(THEMATIC_TAG_RENAMES.values())))
+    def test_rename_targets_in_whitelist(self, target: str) -> None:
+        """Every rename target must exist in the whitelist."""
+        assert target in THEMATIC_TAG_WHITELIST
 
 
 # ── get_thematic_tags integration tests ───────────────────────────────────

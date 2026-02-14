@@ -263,8 +263,6 @@ THEMATIC_TAG_RENAMES: dict[str, str] = {
     "Animal body parts": "body-parts",
     "Board games": "board-games",
     "Card games": "card-games",
-    "Ball games": "ball-games",
-    "Dice games": "dice",
     "Video games": "video-games",
     "Criminal law": "criminal-law",
     "Horse racing": "horse-racing",
