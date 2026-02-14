@@ -8,8 +8,11 @@ from dataclasses import dataclass
 
 from sqlalchemy import Connection, select, text
 
+from anki_gen.topic_tags import normalize_thematic_tag
 from italian_db.db import (
     cefr_levels,
+    definition_tags,
+    definitions,
     frequencies,
     lemmas,
     nvdb_tiers,
@@ -411,6 +414,40 @@ def get_nvdb_tier(conn: Connection, lemma_id: int) -> str | None:
     stmt = select(nvdb_tiers.c.tier).where(nvdb_tiers.c.lemma_id == lemma_id)
     row = conn.execute(stmt).fetchone()
     return row[0] if row else None
+
+
+def get_thematic_tags(conn: Connection, lemma_id: int) -> list[str]:
+    """Get thematic tags for a lemma across all its definitions.
+
+    Joins definition_tags to definitions to find all thematic categories
+    and topics for the given lemma. Geographic/place categories are excluded
+    as they are not useful for learner tags.
+
+    Args:
+        conn: Database connection
+        lemma_id: The lemma ID
+
+    Returns:
+        Sorted, deduplicated list of "topic::{tag_name}" strings
+    """
+    stmt = (
+        select(definition_tags.c.tag)
+        .select_from(
+            definition_tags.join(definitions, definition_tags.c.definition_id == definitions.c.id)
+        )
+        .where(
+            definitions.c.lemma_id == lemma_id,
+            # Exclude geographic categories (not useful for learner tags)
+            (definition_tags.c.kind != "place") | (definition_tags.c.kind.is_(None)),
+        )
+        .distinct()
+    )
+
+    rows = conn.execute(stmt).fetchall()
+    canonical_tags = {
+        canonical for row in rows if (canonical := normalize_thematic_tag(row[0])) is not None
+    }
+    return sorted(f"topic::{tag}" for tag in canonical_tags)
 
 
 def _rank_to_pos_band(rank: int | None, pos: str) -> str:

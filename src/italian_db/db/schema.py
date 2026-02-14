@@ -257,6 +257,32 @@ definitions = Table(
     ),  # DerivationType enum value: diminutive, augmentative, pejorative, endearing
 )
 
+# Thematic tags from Wiktextract (categories and topics)
+#
+# Per-definition storage preserves sense-level granularity. A single lemma
+# may have different thematic tags on different definitions (e.g., "calcio"
+# has "Sports" on the football sense and "Chemical elements" on the calcium sense).
+#
+# source values:
+#   'wiktextract:category' — from Wiktextract entry categories
+#   'wiktextract:topic'    — from Wiktextract sense topics
+#
+# kind values (categories only, NULL for topics):
+#   'other' — standard thematic category
+#   'place' — geographic/place-related category (filtered out during card gen)
+#
+# WITHOUT ROWID: Composite PK covers all columns, no need for hidden rowid.
+definition_tags = Table(
+    "definition_tags",
+    metadata,
+    Column("definition_id", Integer, ForeignKey("definitions.id"), nullable=False),
+    Column("tag", Text, nullable=False),
+    Column("source", Text, nullable=False),  # 'wiktextract:category' or 'wiktextract:topic'
+    Column("kind", Text),  # 'other' or 'place' (categories only, NULL for topics)
+    PrimaryKeyConstraint("definition_id", "tag", "source"),
+    sqlite_with_rowid=False,
+)
+
 # Sentences (Tatoeba)
 #
 # Uses a surrogate primary key (id) with a composite unique constraint on
@@ -608,6 +634,8 @@ Index("idx_nvdb_tiers_tier", nvdb_tiers.c.tier)
 # Other indexes
 Index("idx_definitions_lemma", definitions.c.lemma_id)
 Index("idx_definitions_derived_from", definitions.c.derived_from_lemma_id)
+# definition_tags indexes
+Index("idx_definition_tags_definition", definition_tags.c.definition_id)
 Index("idx_frequencies_lemma", frequencies.c.lemma_id)
 Index("idx_sentences_lang", sentences.c.lang)
 Index("idx_sentences_source", sentences.c.source)

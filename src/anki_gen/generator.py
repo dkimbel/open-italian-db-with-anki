@@ -38,6 +38,7 @@ from anki_gen.queries import (
     get_frequency_bands,
     get_nvdb_tier,
     get_present_indicative_forms,
+    get_thematic_tags,
     get_verb_by_lemma,
     validate_verb_list,
 )
@@ -152,6 +153,7 @@ def build_verb_tags(
         tags.append(f"cefr::{cefr}")
     if nvdb is not None:
         tags.append(f"nvdb::{nvdb}")
+    tags.extend(get_thematic_tags(conn, verb.lemma_id))
     tags.append(f"infinitive::{verb.written}")
 
     return tags

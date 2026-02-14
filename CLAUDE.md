@@ -2,6 +2,12 @@
 
 Generate Anki flashcard decks for learning Italian using linguistic databases.
 
+## Project Layout
+
+- **Database**: `./italian.db` (SQLite, project root)
+- **Raw source data**: `data/` (wiktextract JSONL, Tatoeba, etc.)
+- **Output**: `output/` (generated `.apkg` files)
+
 ## Commands
 
 - `task check` - Run all checks (lint, typecheck)

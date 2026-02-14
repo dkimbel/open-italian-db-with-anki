@@ -1,0 +1,323 @@
+"""Curated thematic tag whitelist and normalization for Anki cards.
+
+The definition_tags table stores tags from two wiktextract sources:
+- Categories (kind='other'): Title Case from Wiktionary editors (e.g., "Cooking", "Body parts")
+- Topics (kind=NULL): lowercase-hyphenated from wiktextract taxonomy (e.g., "cooking", "nautical")
+
+This module provides a curated whitelist of ~150 canonical tags and normalization
+logic to merge both sources into clean, consistent topic:: tags for Anki cards.
+"""
+
+# Canonical tag names in lowercase-hyphenated form.
+# Organized by domain for maintainability.
+THEMATIC_TAG_WHITELIST: frozenset[str] = frozenset(
+    {
+        # ── Food & drink ──────────────────────────────────────────────
+        "cooking",
+        "baking",
+        "food",
+        "beverages",
+        "wine",
+        "brewing",
+        "pastries",
+        "cookware",
+        "meat",
+        # ── Body & health ─────────────────────────────────────────────
+        "anatomy",
+        "body-parts",
+        "medicine",
+        "surgery",
+        "pathology",
+        "dentistry",
+        "dermatology",
+        "cardiology",
+        "oncology",
+        "ophthalmology",
+        "neurology",
+        "psychiatry",
+        "pharmacology",
+        "obstetrics",
+        "veterinary",
+        "hair",
+        "pregnancy",
+        "death",
+        "sleep",
+        # ── Natural sciences ──────────────────────────────────────────
+        "biology",
+        "botany",
+        "zoology",
+        "ecology",
+        "genetics",
+        "microbiology",
+        "mycology",
+        "ornithology",
+        "entomology",
+        "ichthyology",
+        "paleontology",
+        "chemistry",
+        "organic-chemistry",
+        "inorganic-chemistry",
+        "biochemistry",
+        "physics",
+        "astronomy",
+        "astrophysics",
+        "geology",
+        "mineralogy",
+        "meteorology",
+        "climatology",
+        "oceanography",
+        "seismology",
+        "volcanology",
+        # ── Mathematics & logic ───────────────────────────────────────
+        "mathematics",
+        "geometry",
+        "algebra",
+        "arithmetic",
+        "statistics",
+        "trigonometry",
+        "logic",
+        # ── Social sciences & humanities ──────────────────────────────
+        "philosophy",
+        "psychology",
+        "sociology",
+        "economics",
+        "linguistics",
+        "anthropology",
+        "archaeology",
+        "history",
+        "geography",
+        "mythology",
+        "folklore",
+        "ethics",
+        "education",
+        # ── Law & politics ────────────────────────────────────────────
+        "law",
+        "criminal-law",
+        "politics",
+        "diplomacy",
+        "taxation",
+        # ── Arts & culture ────────────────────────────────────────────
+        "music",
+        "musical-instruments",
+        "art",
+        "architecture",
+        "photography",
+        "film",
+        "theater",
+        "dance",
+        "literature",
+        "poetry",
+        "comedy",
+        "drama",
+        "fiction",
+        "science-fiction",
+        "fantasy",
+        "comics",
+        "calligraphy",
+        "sculpture",
+        "painting",
+        "graffiti",
+        # ── Sports & games ────────────────────────────────────────────
+        "sports",
+        "football",
+        "soccer",
+        "baseball",
+        "basketball",
+        "tennis",
+        "golf",
+        "swimming",
+        "skiing",
+        "cycling",
+        "boxing",
+        "wrestling",
+        "fencing",
+        "archery",
+        "athletics",
+        "gymnastics",
+        "volleyball",
+        "rugby",
+        "cricket",
+        "rowing",
+        "sailing",
+        "climbing",
+        "surfing",
+        "diving",
+        "horse-racing",
+        "martial-arts",
+        "weightlifting",
+        "equestrianism",
+        "board-games",
+        "card-games",
+        "chess",
+        "gambling",
+        "video-games",
+        "billiards",
+        "snooker",
+        "poker",
+        # ── Technology & computing ────────────────────────────────────
+        "computing",
+        "programming",
+        "software",
+        "internet",
+        "robotics",
+        "telecommunications",
+        "electronics",
+        "printing",
+        "television",
+        "radio",
+        "broadcasting",
+        # ── Military & weapons ────────────────────────────────────────
+        "military",
+        "firearms",
+        "weaponry",
+        # ── Transport ─────────────────────────────────────────────────
+        "nautical",
+        "aviation",
+        "aeronautics",
+        "automotive",
+        "railways",
+        "shipping",
+        # ── Trades & crafts ───────────────────────────────────────────
+        "agriculture",
+        "forestry",
+        "horticulture",
+        "carpentry",
+        "masonry",
+        "woodworking",
+        "metalworking",
+        "sewing",
+        "knitting",
+        "weaving",
+        "ceramics",
+        "construction",
+        "mining",
+        "fishing",
+        "hunting",
+        # ── Commerce & finance ────────────────────────────────────────
+        "commerce",
+        "banking",
+        "finance",
+        "accounting",
+        "marketing",
+        "advertising",
+        # ── Religion ──────────────────────────────────────────────────
+        "religion",
+        "theology",
+        "christianity",
+        "islam",
+        "buddhism",
+        "judaism",
+        "astrology",
+        # ── Everyday life ─────────────────────────────────────────────
+        "clothing",
+        "fashion",
+        "cosmetics",
+        "furniture",
+        "tools",
+        "jewelry",
+        "household",
+        "family",
+        "occupations",
+        "marriage",
+        "emotions",
+        "drinking",
+        "smoking",
+        "fire",
+        "violence",
+        "talking",
+        "animal-sounds",
+        "sexuality",
+        "sex",
+        "pets",
+        # ── Other specific domains ────────────────────────────────────
+        "journalism",
+        "heraldry",
+        "numismatics",
+        "philately",
+        "cartography",
+        "typography",
+        "espionage",
+        "tourism",
+        "cryptocurrency",
+        "alchemy",
+        "cryptography",
+        "copyright",
+        "units-of-measure",
+        "weather",
+    }
+)
+
+# Mappings for tags where auto-normalize (lower + replace spaces with hyphens)
+# doesn't produce the right canonical form.
+THEMATIC_TAG_RENAMES: dict[str, str] = {
+    # Parenthetical cleanup
+    "Football (soccer)": "football",
+    "Football (American)": "football",
+    # Pluralization
+    "Foods": "food",
+    "Meats": "meat",
+    "Wines": "wine",
+    # Multi-word → hyphenated (where auto-normalize gives wrong result)
+    "Animal sounds": "animal-sounds",
+    "Body parts": "body-parts",
+    "Animal body parts": "body-parts",
+    "Board games": "board-games",
+    "Card games": "card-games",
+    "Ball games": "ball-games",
+    "Dice games": "dice",
+    "Video games": "video-games",
+    "Criminal law": "criminal-law",
+    "Horse racing": "horse-racing",
+    "Martial arts": "martial-arts",
+    "Science fiction": "science-fiction",
+    "Units of measure": "units-of-measure",
+    "Musical instruments": "musical-instruments",
+    "Cakes and pastries": "pastries",
+    "Cookware and bakeware": "cookware",
+    "Underwater diving": "diving",
+    "underwater-diving": "diving",
+    "Veterinary medicine": "veterinary",
+    "Organic chemistry": "organic-chemistry",
+    "Inorganic chemistry": "inorganic-chemistry",
+    "Organic compounds": "organic-chemistry",
+    "Inorganic compounds": "inorganic-chemistry",
+    "Social sciences": "sociology",
+    "Electrical engineering": "electronics",
+    "Mechanical engineering": "construction",
+    "Computer science": "computing",
+    "Computer hardware": "computing",
+    "Computer security": "computing",
+    "Computer graphics": "computing",
+    "Rail transportation": "railways",
+    "Road transport": "automotive",
+    "Alcoholic beverages": "beverages",
+    "Distilled beverages": "beverages",
+    "Food and drink": "food",
+    "Heads of state": "politics",
+    "Greek mythology": "mythology",
+    "Roman mythology": "mythology",
+    "Norse mythology": "mythology",
+}
+
+
+def normalize_thematic_tag(raw: str) -> str | None:
+    """Normalize a raw thematic tag to its canonical form, or None if excluded.
+
+    1. Check THEMATIC_TAG_RENAMES for explicit mapping
+    2. Otherwise auto-normalize: lowercase + replace spaces with hyphens
+    3. If result is in THEMATIC_TAG_WHITELIST, return it; otherwise None
+
+    Args:
+        raw: Raw tag string from definition_tags table
+
+    Returns:
+        Canonical lowercase-hyphenated tag name, or None if tag is excluded
+    """
+    if raw in THEMATIC_TAG_RENAMES:
+        canonical = THEMATIC_TAG_RENAMES[raw]
+    else:
+        canonical = raw.lower().replace(" ", "-")
+
+    if canonical in THEMATIC_TAG_WHITELIST:
+        return canonical
+    return None

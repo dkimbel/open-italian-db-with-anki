@@ -15,13 +15,17 @@ from italian_db.articles import get_definite
 from italian_db.db.schema import (
     adjective_forms,
     adjective_metadata,
+    cefr_levels,
+    definition_tags,
     definitions,
     frequencies,
     lemma_relationships,
     lemmas,
     noun_forms,
     noun_metadata,
+    nvdb_tiers,
     verb_forms,
+    verb_irregularity,
     verb_metadata,
 )
 from italian_db.derivation import derive_participle_forms
@@ -1695,6 +1699,83 @@ def _extract_etymology(entry: dict[str, Any]) -> tuple[int | None, str | None]:
     return etym_num, etym_text
 
 
+def _extract_thematic_tags(
+    sense: dict[str, Any],
+    sense_index: int,
+    total_senses: int,
+) -> list[tuple[str, str, str | None]]:
+    """Extract thematic categories and topics from a sense.
+
+    Returns list of (tag_name, source, kind) tuples.
+
+    Categories come from sense["categories"] with langcode="it".
+    Non-thematic categories (language-internal, error pages) are filtered out.
+    Categories with source="w+disamb" have a _dis field for disambiguation:
+    the scores are space-separated ints, one per sense in the entry. A category
+    is assigned to this sense only if its score is the max or >= 50.
+    If _dis length != total_senses, the category is skipped (defensive).
+
+    Topics come from sense["topics"] as plain strings with no disambiguation.
+    """
+    results: list[tuple[str, str, str | None]] = []
+
+    # --- Categories ---
+    categories: list[str | dict[str, Any]] = sense.get("categories", [])
+    for cat in categories:
+        if not isinstance(cat, dict):
+            continue
+        if cat.get("langcode") != "it":
+            continue
+
+        name: str = cat.get("name", "")
+        if not name:
+            continue
+
+        # Filter non-thematic categories
+        if name.startswith("Italian "):
+            continue
+        if name.startswith("Pages "):
+            continue
+        if "incorrect language header" in name:
+            continue
+        if "redundant" in name:
+            continue
+
+        source_val: str = cat.get("source", "")
+        kind: str | None = cat.get("kind")  # 'other', 'place', etc.
+
+        if source_val == "w+disamb":
+            # Disambiguation required: only assign if this sense scores highest
+            dis_str: str = cat.get("_dis", "")
+            if not dis_str:
+                continue
+            try:
+                scores = [int(x) for x in dis_str.split()]
+            except (ValueError, TypeError):
+                continue
+            if len(scores) != total_senses:
+                # _dis spans a different scope (e.g., cross-entry) — skip defensively
+                continue
+            my_score = scores[sense_index]
+            max_score = max(scores)
+            if my_score < max_score and my_score < 50:
+                continue
+        elif source_val != "w":
+            # Unknown source type — skip
+            continue
+
+        results.append((name, "wiktextract:category", kind))
+
+    # --- Topics ---
+    results.extend(
+        (topic, "wiktextract:topic", None)
+        for topic in sense.get("topics", [])
+        if isinstance(topic, str) and topic
+    )
+
+    return results
+
+
 def _extract_gender(entry: dict[str, Any]) -> str | None:
     """Extract grammatical gender for nouns.
 
@@ -2140,8 +2221,8 @@ def _iter_forms(
 
 def _iter_definitions_with_derivation(
     entry: dict[str, Any],
-) -> Iterator[tuple[str, list[str] | None, str | None, DerivationType | None]]:
-    """Yield (gloss, filtered_tags, derived_from_word, derivation_type) for each definition.
+) -> Iterator[tuple[str, list[str] | None, str | None, DerivationType | None, dict[str, Any], int]]:
+    """Yield (gloss, filtered_tags, derived_from_word, derivation_type, sense, sense_index).
 
     Unlike _iter_definitions, this function yields ALL senses including form_of senses,
     and includes derivation information for senses that derive from another lemma.
@@ -2152,11 +2233,12 @@ def _iter_definitions_with_derivation(
     - "dog paddle" (no form_of → derived_from_word=None, derivation_type=None)
 
     The derived_from_word is resolved to a lemma_id during post-processing.
+    The sense dict and sense_index are included for thematic tag extraction.
 
     Yields:
-        (gloss, filtered_tags, derived_from_word, derivation_type) tuples
+        (gloss, filtered_tags, derived_from_word, derivation_type, sense, sense_index) tuples
     """
-    for sense in entry.get("senses", []):
+    for sense_index, sense in enumerate(entry.get("senses", [])):
         glosses = sense.get("glosses", [])
         if not glosses:
             continue
@@ -2212,14 +2294,14 @@ def _iter_definitions_with_derivation(
             # lemma_relationships. This duplication is intentional during the transition
             # period and may be cleaned up in a future phase.
 
-        yield gloss, tags, derived_from_word, derivation_type
+        yield gloss, tags, derived_from_word, derivation_type, sense, sense_index
 
 
 def _clear_existing_data(conn: Connection, pos_filter: POS) -> int:
     """Clear all existing data for the given POS.
 
-    Deletes in FK-safe order: POS form tables → definitions → frequencies
-    → verb_metadata → lemmas.
+    Deletes in FK-safe order: POS form tables → definition_tags → definitions
+    → frequencies → metadata → lemmas.
     Returns the number of lemmas cleared.
     """
     # Count existing lemmas for this POS (for return value)
@@ -2242,20 +2324,34 @@ def _clear_existing_data(conn: Connection, pos_filter: POS) -> int:
     if pos_form_table is not None:
         conn.execute(pos_form_table.delete().where(pos_form_table.c.lemma_id.in_(lemma_subq)))
 
-    # 2. definitions (references lemmas)
+    # 2. definition_tags (references definitions, which reference lemmas)
+    defn_subq = select(definitions.c.id).where(definitions.c.lemma_id.in_(lemma_subq))
+    conn.execute(definition_tags.delete().where(definition_tags.c.definition_id.in_(defn_subq)))
+    # 3. definitions (references lemmas)
     conn.execute(definitions.delete().where(definitions.c.lemma_id.in_(lemma_subq)))
-    # 3. frequencies (references lemmas)
+    # 4. frequencies (references lemmas)
     conn.execute(frequencies.delete().where(frequencies.c.lemma_id.in_(lemma_subq)))
-    # 4. POS-specific metadata tables
+    # 5. lemma_relationships (references lemmas via source or target)
+    conn.execute(
+        lemma_relationships.delete().where(
+            lemma_relationships.c.source_lemma_id.in_(lemma_subq)
+            | lemma_relationships.c.target_lemma_id.in_(lemma_subq)
+        )
+    )
+    # 6. classification tables (cefr_levels, nvdb_tiers, verb_irregularity)
+    conn.execute(cefr_levels.delete().where(cefr_levels.c.lemma_id.in_(lemma_subq)))
+    conn.execute(nvdb_tiers.delete().where(nvdb_tiers.c.lemma_id.in_(lemma_subq)))
+    # 7. POS-specific metadata tables
     if pos_filter == POS.VERB:
         conn.execute(verb_metadata.delete().where(verb_metadata.c.lemma_id.in_(lemma_subq)))
+        conn.execute(verb_irregularity.delete().where(verb_irregularity.c.lemma_id.in_(lemma_subq)))
     elif pos_filter == POS.NOUN:
         conn.execute(noun_metadata.delete().where(noun_metadata.c.lemma_id.in_(lemma_subq)))
     elif pos_filter == POS.ADJECTIVE:
         conn.execute(
             adjective_metadata.delete().where(adjective_metadata.c.lemma_id.in_(lemma_subq))
         )
-    # 5. lemmas (direct filter, no subquery needed)
+    # 8. lemmas (direct filter, no subquery needed)
     conn.execute(lemmas.delete().where(lemmas.c.pos == pos_filter))
 
     return count
@@ -2625,6 +2721,12 @@ def import_wiktextract(
     definition_derivation_links: list[
         tuple[int, str, str, str | None]
     ] = []  # (lemma_id, gloss, derived_from_word, derivation_type)
+
+    # Collect thematic tag data for post-processing
+    # Tags are resolved to definition IDs after flush_batches() inserts definitions
+    definition_tag_links: list[
+        tuple[int, str, str, str, str | None]
+    ] = []  # (lemma_id, gloss, tag_name, source, kind)
 
     # Get POS-specific table and row builder
     pos_form_table = POS_FORM_TABLES.get(pos_filter)
@@ -3396,7 +3498,9 @@ def import_wiktextract(
             if pos_filter == POS.NOUN and word in DEFINITION_FORM_LINKAGE:
                 # This lemma has meaning-dependent plurals - link definitions to forms
                 linkage = DEFINITION_FORM_LINKAGE[word]
-                for sense in entry.get("senses", []):
+                all_senses = entry.get("senses", [])
+                total_senses = len(all_senses)
+                for sense_index, sense in enumerate(all_senses):
                     # Skip form-of entries
                     if "form_of" in sense:
                         continue
@@ -3412,6 +3516,14 @@ def import_wiktextract(
                         def_tags = filtered if filtered else None
                     else:
                         def_tags = None
+
+                    # Extract thematic tags for this sense
+                    for tag_name, tag_source, tag_kind in _extract_thematic_tags(
+                        sense, sense_index, total_senses
+                    ):
+                        definition_tag_links.append(
+                            (lemma_id, gloss, tag_name, tag_source, tag_kind)
+                        )
 
                     # Determine which form(s) this definition matches
                     matched_forms = [
@@ -3448,11 +3560,14 @@ def import_wiktextract(
             else:
                 # Standard case - no form_meaning_hint
                 # Use _iter_definitions_with_derivation to get ALL senses including derivations
+                total_senses = len(entry.get("senses", []))
                 for (
                     gloss,
                     def_tags,
                     derived_from_word,
                     derivation_type,
+                    sense,
+                    sense_index,
                 ) in _iter_definitions_with_derivation(entry):
                     definition_batch.append(
                         {
@@ -3474,6 +3589,13 @@ def import_wiktextract(
                                 derived_from_word,
                                 derivation_type.value if derivation_type else None,
                             )
+                        )
+                    # Extract thematic tags for this sense
+                    for tag_name, tag_source, tag_kind in _extract_thematic_tags(
+                        sense, sense_index, total_senses
+                    ):
+                        definition_tag_links.append(
+                            (lemma_id, gloss, tag_name, tag_source, tag_kind)
                         )
 
     # Final flush
@@ -3497,6 +3619,13 @@ def import_wiktextract(
         stats["definition_derivations_found"] = len(definition_derivation_links)
         stats["definition_derivations_linked"] = derivation_stats["linked"]
         stats["definition_derivations_target_not_found"] = derivation_stats["target_not_found"]
+
+    # Link thematic tags to definitions (applies to all POS types)
+    if definition_tag_links:
+        tag_stats = link_definition_tags(conn, definition_tag_links)
+        stats["definition_tags_inserted"] = tag_stats["inserted"]
+        stats["definition_tags_not_found"] = tag_stats["definition_not_found"]
+        stats["definition_tags_duplicates"] = tag_stats["duplicates_skipped"]
 
     if pos_filter == POS.ADJECTIVE:
         degree_stats = link_comparative_superlative(conn, degree_links)
@@ -4073,6 +4202,66 @@ def link_definition_derivations(
                 gloss[:50],
             )
             stats["target_not_found"] += 1
+
+    return stats
+
+
+def link_definition_tags(
+    conn: Connection,
+    tag_links: list[tuple[int, str, str, str, str | None]],
+) -> dict[str, int]:
+    """Insert definition_tags rows, resolving (lemma_id, gloss) → definition_id.
+
+    Args:
+        conn: SQLAlchemy connection
+        tag_links: List of (lemma_id, gloss, tag_name, source, kind) tuples
+            collected during import.
+
+    Returns:
+        Statistics dict with counts for inserted, definition_not_found, duplicates_skipped.
+    """
+    stats = {"inserted": 0, "definition_not_found": 0, "duplicates_skipped": 0}
+
+    if not tag_links:
+        return stats
+
+    # Build lookup: (lemma_id, gloss) → list of definition IDs
+    # A single (lemma_id, gloss) can map to multiple definition rows when
+    # form_meaning_hint creates duplicates (e.g., braccio).
+    defn_lookup: dict[tuple[int, str], list[int]] = {}
+    for row in conn.execute(select(definitions.c.id, definitions.c.lemma_id, definitions.c.gloss)):
+        key = (row.lemma_id, row.gloss)
+        defn_lookup.setdefault(key, []).append(row.id)
+
+    # Deduplicate by (definition_id, tag, source) to avoid PK violations
+    seen: set[tuple[int, str, str]] = set()
+    batch: list[dict[str, Any]] = []
+
+    for lemma_id, gloss, tag_name, source, kind in tag_links:
+        defn_ids = defn_lookup.get((lemma_id, gloss))
+        if not defn_ids:
+            stats["definition_not_found"] += 1
+            continue
+
+        for defn_id in defn_ids:
+            dedup_key = (defn_id, tag_name, source)
+            if dedup_key in seen:
+                stats["duplicates_skipped"] += 1
+                continue
+            seen.add(dedup_key)
+            batch.append(
+                {
+                    "definition_id": defn_id,
+                    "tag": tag_name,
+                    "source": source,
+                    "kind": kind,
+                }
+            )
+
+    # Batch insert
+    if batch:
+        conn.execute(insert(definition_tags), batch)
+        stats["inserted"] = len(batch)
 
     return stats
 
